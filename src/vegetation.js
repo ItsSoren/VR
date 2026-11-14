@@ -11,6 +11,7 @@ const COLLISION_CELL = 12;
 const QUALITY = {
   high: { density: 13.2, grassRange: 90, nearStart: 27, nearEnd: 48, propRange: 230 },
   medium: { density: 5.2, grassRange: 76, nearStart: 22, nearEnd: 39, propRange: 200 },
+  hyper: { density: .45, grassRange: 18, nearStart: 4, nearEnd: 8, propRange: 72 },
   vr: { density: 1.25, grassRange: 34, nearStart: 9, nearEnd: 17, propRange: 125 },
   low: { density: 2.1, grassRange: 55, nearStart: 15, nearEnd: 29, propRange: 165 },
 };

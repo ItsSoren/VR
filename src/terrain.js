@@ -285,8 +285,9 @@ function distanceToNode(node, x, z) {
 
 /** Progressive quadtree terrain with parent-grid geomorphing and downward seam skirts. */
 export class Terrain {
-  constructor(scene, world, { immersive = false } = {}) {
+  constructor(scene, world, { immersive = false, hyper = false } = {}) {
     this.immersive = immersive;
+    this.hyper = hyper;
     this.scene = scene;
     this.world = world;
     this.rootGroup = new THREE.Group();
@@ -308,7 +309,7 @@ export class Terrain {
   }
 
   makeMesh(node) {
-    const GRID = this.immersive ? 16 : TERRAIN_GRID;
+    const GRID = this.hyper ? 8 : this.immersive ? 16 : TERRAIN_GRID;
     const { x, z, size } = node,
       step = size / GRID,
       side = GRID + 1;
@@ -479,10 +480,10 @@ export class Terrain {
         this.immersive ? `#include <color_fragment>
           vec3 n=normalize(cross(dFdx(vTerrainWorld),dFdy(vTerrainWorld)));
           float facet=abs(dot(n,normalize(vec3(.46,.83,.32))));
-          float patch=soilHash(floor(vTerrainWorld.xz*.34));
+          float tintPatch=soilHash(floor(vTerrainWorld.xz*.34));
           float detail=1.-smoothstep(.065,.26,length(fwidth(vTerrainWorld.xz)));
           float grain=soilHash(floor(vTerrainWorld.xz*12.));
-          diffuseColor.rgb*=.88+facet*.15+patch*.095+(grain-.5)*.075*detail;
+          diffuseColor.rgb*=.88+facet*.15+tintPatch*.095+(grain-.5)*.075*detail;
         ` :
         `#include <color_fragment>
         float d=distance(cameraPosition,vTerrainWorld);
@@ -564,7 +565,7 @@ export class Terrain {
       }
       const distance = distanceToNode(node, px, pz);
       const splitDistance = node.size * (this.immersive ? (node.split ? 1.13 : 1.02) : (node.split ? 1.45 : 1.35));
-      const wantsSplit = node.size > MIN_SIZE && distance < splitDistance;
+      const wantsSplit = node.size > (this.hyper ? MIN_SIZE * 2 : MIN_SIZE) && distance < splitDistance;
       if (wantsSplit) {
         if (!node.children) node.children = [];
         while (
@@ -603,7 +604,7 @@ export class Terrain {
       node.mesh.userData.morph.value = smooth(node.size * 1.45, node.size * 2.1, distance);
       chunks++;
       triangles += node.mesh.geometry.index.count / 3;
-      const step = node.size / (this.immersive ? 16 : TERRAIN_GRID);
+      const step = node.size / (this.hyper ? 8 : this.immersive ? 16 : TERRAIN_GRID);
       lodLevels[step] = (lodLevels[step] || 0) + 1;
     };
     visit(this.root);
@@ -630,7 +631,7 @@ export class Terrain {
 
   invalidate(bounds) {
     const mark = (node) => {
-      const padding = (node.size / (this.immersive ? 16 : TERRAIN_GRID)) * 4;
+      const padding = (node.size / (this.hyper ? 8 : this.immersive ? 16 : TERRAIN_GRID)) * 4;
       if (
         node.x > bounds.maxX + padding ||
         node.x + node.size < bounds.x - padding ||

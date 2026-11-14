@@ -4,12 +4,28 @@ import * as T from 'three';
 export function setupVR(renderer, scene, camera, { player, floor, solid, start }) {
   const rig = new T.Group();
   const view = new T.PerspectiveCamera(68, 1, .07, 7000);
-  rig.add(view);
+  const eyeOffset=new T.Group();
+  eyeOffset.add(view);
+  rig.add(eyeOffset);
   scene.add(rig);
   const gloves = new T.MeshLambertMaterial({ color:0x705840, flatShading:true });
   const hands = ['left','right'].map(side => {
-    const mesh = new T.Mesh(new T.IcosahedronGeometry(1,1),gloves);
-    mesh.scale.set(.09,.105,.13);
+    const mesh = new T.Group();
+    const sign=side==='left'?-1:1;
+    const palm=new T.Mesh(new T.BoxGeometry(.087,.047,.094),gloves);
+    palm.position.z=-.032;
+    mesh.add(palm);
+    for(let finger=0;finger<4;finger++) {
+      const length=[.043,.052,.049,.036][finger];
+      const digit=new T.Mesh(new T.BoxGeometry(.018,.024,length),gloves);
+      digit.position.set(sign*(-.033+finger*.022),-.006,-.073-length*.34);
+      digit.rotation.x=-.35;
+      mesh.add(digit);
+    }
+    const thumb=new T.Mesh(new T.BoxGeometry(.026,.029,.051),gloves);
+    thumb.position.set(sign*.048,-.013,-.033);
+    thumb.rotation.y=-sign*.57;
+    mesh.add(thumb);
     mesh.visible=false;
     scene.add(mesh);
     return {side,mesh,anchor:new T.Vector3(),local:new T.Vector3(),touch:false};
@@ -19,12 +35,16 @@ export function setupVR(renderer, scene, camera, { player, floor, solid, start }
   button.title='Pousse sur le sol ou un obstacle avec les mains. Joystick droit : rotation par crans de 45°.';
   button.style.cssText='position:fixed;right:18px;bottom:18px;z-index:10000;padding:12px 16px;background:#ead6a2;color:#253129;border:0;border-radius:6px;font:bold 15px system-ui';
   button.hidden=true;
-  document.body.append(button);
+  const options=document.createElement('label');
+  options.style.cssText='position:fixed;right:18px;bottom:72px;z-index:10000;background:#253129;color:#fff3d3;padding:10px;font:14px system-ui;display:none';
+  options.innerHTML='VR <select aria-label="Qualité VR"><option value="hyper">Hyper Low</option><option value="normal">Qualité</option></select> · Pixels <select aria-label="Résolution VR"><option value="1">Normal</option><option value="2" selected>×2</option><option value="3">×3</option></select>';
+  const [profile,pixel]=options.querySelectorAll('select');
+  document.body.append(button,options);
   renderer.xr.enabled=true;
   renderer.xr.setReferenceSpaceType('local-floor');
   renderer.xr.setFramebufferScaleFactor(.72);
-  navigator.xr?.isSessionSupported('immersive-vr').then(ok=>button.hidden=!ok).catch(()=>{});
-  let owner, yaw=0, latch=false;
+  navigator.xr?.isSessionSupported('immersive-vr').then(ok=>{button.hidden=!ok; options.style.display=ok?'block':'none';}).catch(()=>{});
+  let owner, yaw=0, latch=false, eyeDrop=0;
   const axis=new T.Vector3(0,1,0);
   const head=new T.Vector3(), rotated=new T.Vector3(), worldHead=new T.Vector3(), movement=new T.Vector3(), velocity=new T.Vector3(), shift=new T.Vector3(), candidate=new T.Vector3();
   function transform(point,out) {
@@ -34,7 +54,9 @@ export function setupVR(renderer, scene, camera, { player, floor, solid, start }
     let session;
     try {
       session=await navigator.xr.requestSession('immersive-vr',{requiredFeatures:['local-floor']});
+      renderer.xr.setFramebufferScaleFactor((profile.value==='hyper'?.76:.88)/Math.sqrt(Number(pixel.value)));
       await renderer.xr.setSession(session);
+      options.style.display='none';
       renderer.xr.setFoveation(.7);
       button.hidden=true;
       start();
@@ -50,15 +72,19 @@ export function setupVR(renderer, scene, camera, { player, floor, solid, start }
     player().velocity.set(0,0,0);
     player().syncCamera();
     button.hidden=false;
+    options.style.display='block';
   });
   return {
     view,
+    get hyper(){return profile.value==='hyper';},
     step(frame,dt) {
       const space=renderer.xr.getReferenceSpace();
       const pose=frame && space && frame.getViewerPose(space);
       if(!pose) return false;
       const p=pose.transform.position;
-      head.set(p.x,p.y,p.z);
+      if(!owner) eyeDrop=T.MathUtils.clamp(p.y*.5,.35,1.05);
+      eyeOffset.position.y=-eyeDrop;
+      head.set(p.x,p.y-eyeDrop,p.z);
       const current=player();
       if(owner!==current) {
         owner=current;
@@ -89,11 +115,11 @@ export function setupVR(renderer, scene, camera, { player, floor, solid, start }
         hand.mesh.visible=Boolean(grip);
         if(!grip) {hand.touch=false;continue;}
         const g=grip.transform.position;
-        hand.local.set(g.x,g.y,g.z);
+        hand.local.set(g.x,g.y-eyeDrop,g.z);
         shift.subVectors(hand.local,head).clampLength(0,1.35);
         hand.local.copy(head).add(shift);
         transform(hand.local,candidate);
-        const surface=floor(candidate.x,candidate.z)+.085;
+        const surface=floor(candidate.x,candidate.z)+.045;
         const againstWall=solid(candidate);
         if(hand.touch && (candidate.distanceTo(hand.anchor)>.52 || (candidate.y>surface+.17&&!againstWall&&hand.anchor.y<surface+.12))) hand.touch=false;
         if(!hand.touch && (candidate.y<=surface || againstWall)) {

@@ -736,7 +736,7 @@ function updateTime() {
   hemi.groundColor.set('#263142').lerp(new THREE.Color('#465637'), darkness);
   renderer.toneMappingExposure = 1.08;
   outdoorFog.color.fromArray(env.fog).lerp(new THREE.Color('#738697'), w.fog * 0.4);
-  outdoorFog.density = renderer.xr.isPresenting ? Math.max(.0048,env.fogDensity + w.fog * .004) : env.fogDensity + w.fog * .004;
+  outdoorFog.density = renderer.xr.isPresenting ? Math.max(vr.hyper?.009:.0048,env.fogDensity + w.fog * .004) : env.fogDensity + w.fog * .004;
   if (weather.flash) outdoorFog.color.lerp(new THREE.Color('#d5e5ff'), weather.flash * 0.5);
   for (const m of vegetation?.grassMaterials || []) {
     m.uniforms.uDayLight.value = darkness;
@@ -2385,13 +2385,13 @@ function frame(now, xrFrame) {
   if(immersive !== vrPerformance) {
     vrPerformance=immersive;
     renderer.shadowMap.enabled=!immersive && quality!=='low';
-    vegetation.setQuality(immersive?'vr':quality);
-    vegetation.streamBudget=immersive?180:1200;
+    vegetation.setQuality(immersive?(vr.hyper?'hyper':'vr'):quality);
+    vegetation.streamBudget=immersive?(vr.hyper?80:180):1200;
     terrain.dispose();
-    terrain=new Terrain(scene,world,{immersive});
+    terrain=new Terrain(scene,world,{immersive,hyper:immersive&&vr.hyper});
     if(inCave) terrain.rootGroup.visible=false;
     if(immersive) outdoorFog.density=.0048;
-    vr.view.far=480;
+    vr.view.far=vr.hyper?230:480;
     vr.view.updateProjectionMatrix();
     landscape.waterMaterial.uniforms.uHasReflection.value=0;
   }
@@ -2689,7 +2689,7 @@ function frame(now, xrFrame) {
     cloudMaterialsScan = elapsed;
   }
   if(immersive) {
-    if(updateScenery) atmosphere.particles.update(camera,elapsed,skyMaterial.uniforms.uDay.value,inCave,playing);
+    if(updateScenery) atmosphere.particles.update(camera,elapsed,skyMaterial.uniforms.uDay.value,inCave,playing&&!vr.hyper);
     renderer.render(scene,vr.view);
   } else {
     cloudShadows.update(camera,elapsed,skyMaterial,inCave);
