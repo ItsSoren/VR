@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="fr">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VALLON VR</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#789895;color:#fff8db;font:16px system-ui}
+canvas{display:block;width:100vw;height:100vh;touch-action:none}
+aside{position:fixed;top:1rem;left:1rem;max-width:min(26rem,calc(100vw - 2rem));padding:1rem 1.2rem;background:#22372eeb;border:1px solid #b1a87b;border-radius:.6rem}
+h1{margin:0;font:700 1.9rem Georgia}p{margin:.5rem 0}button{font:inherit;font-weight:700;background:#ecd18b;color:#283026;border:0;border-radius:.3rem;padding:.65rem 1rem}button:disabled{opacity:.55}
+</style>
+<canvas aria-label="Paysage de Vallon"></canvas>
+<aside>
+<h1>VALLON VR</h1>
+<p>Retrouve les trois balises dorées dans la prairie.</p>
+<p id="score" aria-live="polite">0 / 3 balises</p>
+<button id="vr" disabled>Entrer en VR</button>
+<p id="info">Sur PC : flèches ou ZQSD. Glisse sur le paysage pour regarder.</p>
+</aside>
+<script src="./game.js"></script>
+</html>
