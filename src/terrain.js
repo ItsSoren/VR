@@ -244,7 +244,7 @@ export function soilTint(s, out = new THREE.Color()) {
   return out;
 }
 
-const GRID = 32;
+const TERRAIN_GRID = 32;
 const ROOT_SIZE = 4096;
 const MIN_SIZE = 32;
 const tempColor = new THREE.Color();
@@ -285,15 +285,16 @@ function distanceToNode(node, x, z) {
 
 /** Progressive quadtree terrain with parent-grid geomorphing and downward seam skirts. */
 export class Terrain {
-  constructor(scene, world) {
+  constructor(scene, world, { immersive = false } = {}) {
+    this.immersive = immersive;
     this.scene = scene;
     this.world = world;
     this.rootGroup = new THREE.Group();
     this.rootGroup.name = 'Terrain · progressive geomorph LOD';
     scene.add(this.rootGroup);
     this.frame = 0;
-    this.maxBuildsPerFrame = 3;
-    this.buildBudgetMs = 5;
+    this.maxBuildsPerFrame = immersive ? 1 : 3;
+    this.buildBudgetMs = immersive ? 1.2 : 5;
     this.stats = { chunks: 1, triangles: 0, queued: 0, buildMs: 0, lodLevels: {} };
     this.root = this.makeNode(-ROOT_SIZE / 2, -ROOT_SIZE / 2, ROOT_SIZE);
     this.disposed = false;
@@ -307,6 +308,7 @@ export class Terrain {
   }
 
   makeMesh(node) {
+    const GRID = this.immersive ? 16 : TERRAIN_GRID;
     const { x, z, size } = node,
       step = size / GRID,
       side = GRID + 1;
@@ -446,11 +448,9 @@ export class Terrain {
     geometry.setIndex(indices);
     geometry.computeBoundingSphere();
     const morph = { value: 0 };
-    const material = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 1,
-      metalness: 0,
-    });
+    const material = this.immersive
+      ? new THREE.MeshLambertMaterial({ vertexColors: true })
+      : new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 });
     material.onBeforeCompile = (shader) => {
       shader.uniforms.terrainMorph = morph;
       shader.vertexShader =
@@ -476,6 +476,14 @@ export class Terrain {
       ` + (shader.fragmentShader || '');
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <color_fragment>',
+        this.immersive ? `#include <color_fragment>
+          vec3 n=normalize(cross(dFdx(vTerrainWorld),dFdy(vTerrainWorld)));
+          float facet=abs(dot(n,normalize(vec3(.46,.83,.32))));
+          float patch=soilHash(floor(vTerrainWorld.xz*.34));
+          float detail=1.-smoothstep(.065,.26,length(fwidth(vTerrainWorld.xz)));
+          float grain=soilHash(floor(vTerrainWorld.xz*12.));
+          diffuseColor.rgb*=.88+facet*.15+patch*.095+(grain-.5)*.075*detail;
+        ` :
         `#include <color_fragment>
         float d=distance(cameraPosition,vTerrainWorld);
         float footprint=max(length(dFdx(vTerrainWorld.xz)),length(dFdy(vTerrainWorld.xz)));
@@ -494,7 +502,7 @@ export class Terrain {
       `
       );
     };
-    material.customProgramCacheKey = () => 'vallon-terrain-natural-v4';
+    material.customProgramCacheKey = () => this.immersive ? 'vallon-terrain-vr-facets-v1' : 'vallon-terrain-natural-v4';
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(x, 0, z);
     mesh.receiveShadow = true;
@@ -555,7 +563,7 @@ export class Terrain {
         refresh(node);
       }
       const distance = distanceToNode(node, px, pz);
-      const splitDistance = node.size * (node.split ? 1.45 : 1.35);
+      const splitDistance = node.size * (this.immersive ? (node.split ? 1.13 : 1.02) : (node.split ? 1.45 : 1.35));
       const wantsSplit = node.size > MIN_SIZE && distance < splitDistance;
       if (wantsSplit) {
         if (!node.children) node.children = [];
@@ -595,7 +603,7 @@ export class Terrain {
       node.mesh.userData.morph.value = smooth(node.size * 1.45, node.size * 2.1, distance);
       chunks++;
       triangles += node.mesh.geometry.index.count / 3;
-      const step = node.size / GRID;
+      const step = node.size / (this.immersive ? 16 : TERRAIN_GRID);
       lodLevels[step] = (lodLevels[step] || 0) + 1;
     };
     visit(this.root);
@@ -622,7 +630,7 @@ export class Terrain {
 
   invalidate(bounds) {
     const mark = (node) => {
-      const padding = (node.size / GRID) * 4;
+      const padding = (node.size / (this.immersive ? 16 : TERRAIN_GRID)) * 4;
       if (
         node.x > bounds.maxX + padding ||
         node.x + node.size < bounds.x - padding ||

@@ -736,7 +736,7 @@ function updateTime() {
   hemi.groundColor.set('#263142').lerp(new THREE.Color('#465637'), darkness);
   renderer.toneMappingExposure = 1.08;
   outdoorFog.color.fromArray(env.fog).lerp(new THREE.Color('#738697'), w.fog * 0.4);
-  outdoorFog.density = env.fogDensity + w.fog * 0.004;
+  outdoorFog.density = renderer.xr.isPresenting ? Math.max(.0048,env.fogDensity + w.fog * .004) : env.fogDensity + w.fog * .004;
   if (weather.flash) outdoorFog.color.lerp(new THREE.Color('#d5e5ff'), weather.flash * 0.5);
   for (const m of vegetation?.grassMaterials || []) {
     m.uniforms.uDayLight.value = darkness;
@@ -2374,12 +2374,30 @@ const vr = setupVR(renderer, scene, camera, {
     }),
   start: () => { if(document.pointerLockElement) document.exitPointerLock(); ready=true; play(); },
 });
+let vrPerformance = false;
+let vrSceneryClock = 0;
 function frame(now, xrFrame) {
   const immersive=renderer.xr.isPresenting;
   const wallDt = (now - last) / 1000,
     dt = THREE.MathUtils.clamp(wallDt,0,0.045);
   last = now;
   if (document.hidden && !immersive) return;
+  if(immersive !== vrPerformance) {
+    vrPerformance=immersive;
+    renderer.shadowMap.enabled=!immersive && quality!=='low';
+    vegetation.setQuality(immersive?'vr':quality);
+    vegetation.streamBudget=immersive?180:1200;
+    terrain.dispose();
+    terrain=new Terrain(scene,world,{immersive});
+    if(inCave) terrain.rootGroup.visible=false;
+    if(immersive) outdoorFog.density=.0048;
+    vr.view.far=480;
+    vr.view.updateProjectionMatrix();
+    landscape.waterMaterial.uniforms.uHasReflection.value=0;
+  }
+  vrSceneryClock+=dt;
+  const updateScenery=!immersive || vrSceneryClock >= .048;
+  if(updateScenery) vrSceneryClock=0;
   if (playing) elapsed += dt;
   weather.update(dt, playing);
   player.motionScale = motionScale;
@@ -2478,7 +2496,7 @@ function frame(now, xrFrame) {
   if (inCave) caves.update(camera, elapsed);
   else {
     terrain.update(camera, dt);
-    vegetation.update(camera, elapsed, dt);
+    if(updateScenery) vegetation.update(camera, elapsed, immersive ? .048 : dt);
     landscape.update(camera, elapsed, skyMaterial.uniforms.uSun.value);
   }
   toolView.setPickTier(pickTier);
@@ -2662,7 +2680,7 @@ function frame(now, xrFrame) {
       .colliders(player.position.x, player.position.z, 0.3)
       .some((b) => b.y > player.position.y + player.eyeHeight && b.y < player.position.y + 8)
   );
-  if (elapsed - cloudMaterialsScan > 0.5 || cloudMaterialsScan < 0) {
+  if (!immersive && (elapsed - cloudMaterialsScan > 0.5 || cloudMaterialsScan < 0)) {
     scene.traverse((object) => {
       const materials = Array.isArray(object.material) ? object.material : [object.material];
       for (const material of materials) cloudShadows.install(material);
@@ -2671,7 +2689,7 @@ function frame(now, xrFrame) {
     cloudMaterialsScan = elapsed;
   }
   if(immersive) {
-    atmosphere.particles.update(camera,elapsed,skyMaterial.uniforms.uDay.value,inCave,playing);
+    if(updateScenery) atmosphere.particles.update(camera,elapsed,skyMaterial.uniforms.uDay.value,inCave,playing);
     renderer.render(scene,vr.view);
   } else {
     cloudShadows.update(camera,elapsed,skyMaterial,inCave);

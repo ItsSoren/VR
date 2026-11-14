@@ -22,7 +22,7 @@ export function setupVR(renderer, scene, camera, { player, floor, solid, start }
   document.body.append(button);
   renderer.xr.enabled=true;
   renderer.xr.setReferenceSpaceType('local-floor');
-  renderer.xr.setFramebufferScaleFactor(.8);
+  renderer.xr.setFramebufferScaleFactor(.72);
   navigator.xr?.isSessionSupported('immersive-vr').then(ok=>button.hidden=!ok).catch(()=>{});
   let owner, yaw=0, latch=false;
   const axis=new T.Vector3(0,1,0);
