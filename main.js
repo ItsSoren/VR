@@ -1,4 +1,6 @@
 import * as T from 'three';
+import { landscape } from './landscape-vr.js';
+import { survival } from './survival.js';
 import { createWorld, biomeTint } from './terrain.js';
 
 const canvas = document.querySelector('canvas');
@@ -13,7 +15,7 @@ renderer.xr.setFramebufferScaleFactor(.9);
 
 const scene = new T.Scene();
 scene.background = new T.Color('#91c9e8');
-scene.fog = new T.FogExp2('#b5d5e1', .011);
+scene.fog = new T.Fog('#b5d5e1', 45, 300);
 scene.add(new T.HemisphereLight('#e5f5ff', '#8d835b', 2.1));
 const sun = new T.DirectionalLight('#fff0d4', 1.65);
 sun.position.set(-20, 38, 12);
@@ -33,9 +35,9 @@ scene.add(rig);
 rig.position.set(center.x, world.height(center.x, center.z), center.z);
 camera.position.y = 1.66;
 
-const size = 256;
+const size = 1056;
 const half = size / 2;
-const segments = 160;
+const segments = 320;
 const terrain = new T.PlaneGeometry(size, size, segments, segments).rotateX(-Math.PI / 2);
 terrain.translate(center.x, 0, center.z);
 const positions = terrain.attributes.position;
@@ -43,17 +45,27 @@ const colors = new Float32Array(positions.count * 3);
 const tint = new T.Color();
 for (let i = 0; i < positions.count; i++) {
   const x = positions.getX(i), z = positions.getZ(i);
-  positions.setY(i, world.height(x, z));
+  let height=world.height(x,z);
+  for(const [dx,dz,rx,rz] of [[48,-30,21,15],[-51,26,16,12]]) {
+    const distance=Math.hypot((x-center.x-dx)/rx,(z-center.z-dz)/rz);
+    if(distance<1.25) {
+      const basin=world.height(center.x+dx,center.z+dz)-2.4+2.8*Math.min(1.3,distance)**3;
+      height=T.MathUtils.lerp(basin,height,T.MathUtils.smoothstep(distance,.8,1.25));
+    }
+  }
+  positions.setY(i,height);
   biomeTint(world.sample(x, z), .5 + .45 * Math.sin(x * .11) * Math.cos(z * .09), tint);
   tint.toArray(colors, i * 3);
 }
 terrain.setAttribute('color', new T.BufferAttribute(colors, 3));
 terrain.computeVertexNormals();
-scene.add(new T.Mesh(terrain, new T.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
+const terrainMesh = new T.Mesh(terrain, new T.MeshLambertMaterial({ vertexColors:true }));
+scene.add(terrainMesh);
 
 function ground(x, z) {
   const step = size / segments;
   const gx = (x - center.x + half) / step, gz = (z - center.z + half) / step;
+  if(gx<0 || gz<0 || gx>=segments || gz>=segments) return world.height(x,z);
   const i = Math.floor(gx), j = Math.floor(gz), u = gx - i, v = gz - j;
   const row = segments + 1, a = i + j * row;
   const h00 = positions.getY(a), h10 = positions.getY(a + 1);
@@ -78,7 +90,7 @@ const grassMaterial = new T.MeshLambertMaterial({ side: T.DoubleSide });
 const marker = new T.Object3D();
 for (let iz = -4; iz < 4; iz++) {
   for (let ix = -4; ix < 4; ix++) {
-    const patch = new T.InstancedMesh(grass, grassMaterial, 115);
+    const patch = new T.InstancedMesh(grass, grassMaterial, 300);
     for (let i = 0; i < patch.count; i++) {
       const x = center.x + (ix + random()) * 24;
       const z = center.z + (iz + random()) * 24;
@@ -97,12 +109,13 @@ for (let iz = -4; iz < 4; iz++) {
 
 const trunkMaterial = new T.MeshLambertMaterial({ color: '#746044' });
 const canopyMaterial = new T.MeshLambertMaterial({ flatShading: true });
-const trunk = new T.InstancedMesh(new T.CylinderGeometry(.15, .26, 1, 5), trunkMaterial, 52);
-const canopy = new T.InstancedMesh(new T.IcosahedronGeometry(1, 0), canopyMaterial, 104);
+const trunk = new T.InstancedMesh(new T.CylinderGeometry(.15, .26, 1, 5), trunkMaterial, 220);
+const canopy = new T.InstancedMesh(new T.IcosahedronGeometry(1, 0), canopyMaterial, 440);
 for (let i = 0; i < trunk.count; i++) {
   const angle = random() * Math.PI * 2, radius = 29 + random() * 65;
   const x = center.x + Math.cos(angle) * radius, z = center.z + Math.sin(angle) * radius;
-  const y = ground(x, z), height = 2.1 + random() * 2.4;
+  const underwater=Math.hypot((x-center.x-48)/21,(z-center.z+30)/15)<1 || Math.hypot((x-center.x+51)/16,(z-center.z-26)/12)<1;
+  const y=underwater?-110:ground(x,z), height=2.6+random()*5;
   marker.position.set(x, y + height / 2, z);
   marker.rotation.y = angle;
   marker.scale.set(1, height, 1);
@@ -110,7 +123,8 @@ for (let i = 0; i < trunk.count; i++) {
   trunk.setMatrixAt(i, marker.matrix);
   for (let j = 0; j < 2; j++) {
     marker.position.set(x + j * .35, y + height + j * .72, z);
-    marker.scale.set(height * .48, height * .55, height * .49);
+    marker.rotation.set(random()*.25,angle+j,random()*.28);
+    marker.scale.set(height*(.34+random()*.23),height*(.33+random()*.28),height*(.35+random()*.18));
     marker.updateMatrix();
     canopy.setMatrixAt(i * 2 + j, marker.matrix);
     canopy.setColorAt(i * 2 + j, tint.setHSL(.24 + random() * .07, .35, .23 + random() * .11));
@@ -178,7 +192,7 @@ function updateAvatar(pose, frame, space, travel, dt) {
   avatar.position.set(head.x,0,head.z);
   avatar.rotation.y = Math.atan2(-heading.x,-heading.z);
   rig.updateMatrixWorld(true);
-  const scale = T.MathUtils.clamp(head.y / 1.66,.55,1.35);
+  const scale = T.MathUtils.clamp(head.y / 1.66,.55,1.35); details.position.y=1.19*scale; strap.position.y=1.14*scale;
   chest.position.y = 1.18 * scale;
   chest.scale.y = scale;
   belt.position.y = .91 * scale;
@@ -220,6 +234,19 @@ function updateAvatar(pose, frame, space, travel, dt) {
   }
 }
 
+const details=mesh(new T.BoxGeometry(.15,.12,.06),leather);
+details.position.set(.12,1.19,-.057);
+const strap=mesh(new T.BoxGeometry(.048,.43,.038),leather);
+strap.rotation.z=.43;
+strap.position.set(.045,1.14,-.056);
+const settings={distance:300,quality:'high',pixel:1};
+const updateLandscape=landscape({scene,ground,center,random,sun,camera,renderer});
+const mechanics=survival({scene,rig,camera,renderer,ground,terrain:terrainMesh,center,trunk,canopy,limbs,settings});
+for(const id of ['distance','quality','pixel']) {
+  document.getElementById(id).addEventListener('input',e=>{
+    settings[id]=id==='quality'?e.target.value:Number(e.target.value);
+  });
+}
 const keys = new Set();
 addEventListener('keydown', event => {
   const key = event.key.toLowerCase();
@@ -253,7 +280,7 @@ resize();
 if (navigator.xr) {
   navigator.xr.isSessionSupported('immersive-vr').then(supported => {
     button.disabled = !supported;
-    if (supported) info.textContent = 'Joystick gauche : avancer et se décaler. Tourne la tête pour choisir ta direction.';
+    if (supported) info.textContent = 'Joystick gauche : déplacement. Gâchette droite : agir. Grip : remblayer. A : objet suivant. B : atelier.';
   }).catch(() => {});
 }
 button.addEventListener('click', async () => {
@@ -261,6 +288,7 @@ button.addEventListener('click', async () => {
   let session;
   try {
     session = await navigator.xr.requestSession('immersive-vr',{ requiredFeatures:['local-floor'] });
+    renderer.xr.setFramebufferScaleFactor((settings.quality==='low'?.72:.9)/Math.sqrt(settings.pixel));
     await renderer.xr.setSession(session);
     renderer.xr.setFoveation(.65);
   } catch (error) {
@@ -280,7 +308,7 @@ renderer.xr.addEventListener('sessionend', () => {
 
 let lastTime = 0;
 renderer.setAnimationLoop((time,frame) => {
-  const dt = Math.min(.045,(time - lastTime) / 1000);
+  const dt = T.MathUtils.clamp((time-lastTime)/1000,0,.045);
   lastTime = time;
   const session = renderer.xr.getSession();
   const space = renderer.xr.getReferenceSpace();
@@ -310,11 +338,13 @@ renderer.setAnimationLoop((time,frame) => {
   if (direction.lengthSq() > .02) heading.copy(direction.normalize());
   right.set(-heading.z,0,heading.x);
   const magnitude = Math.hypot(x,z);
-  const travel = magnitude > .18 ? 1.65 * dt * Math.min(1,(magnitude-.18)/.82) : 0;
+  const travel = !mechanics.frozen && magnitude > .18 ? 1.65 * dt * Math.min(1,(magnitude-.18)/.82) : 0;
+  const previousX=rig.position.x, previousZ=rig.position.z;
   if (travel) {
     rig.position.addScaledVector(right,x * travel / magnitude);
     rig.position.addScaledVector(heading,z * travel / magnitude);
   }
+  if(travel && mechanics.blocked(rig.position.x+viewer.x,rig.position.y,rig.position.z+viewer.z)) { rig.position.x=previousX; rig.position.z=previousZ; }
   const px = T.MathUtils.clamp(rig.position.x + viewer.x,center.x-96,center.x+96);
   const pz = T.MathUtils.clamp(rig.position.z + viewer.z,center.z-96,center.z+96);
   rig.position.x = px - viewer.x;
@@ -331,5 +361,20 @@ renderer.setAnimationLoop((time,frame) => {
       score.textContent = found === 3 ? 'Les trois balises ont été retrouvées.' : found + ' / 3 balises';
     }
   }
+  mechanics.update(dt,frame,space,session,px,pz);
+  const far=settings.distance+100;
+  if(camera.far!==far) {
+    camera.far=far;
+    camera.updateProjectionMatrix();
+  }
+  updateLandscape(dt,px,pz,settings);
+  if(!session) {
+    const ratio=Math.min(devicePixelRatio,settings.quality==='low'?1:1.5)/settings.pixel;
+    if(renderer.getPixelRatio()!==ratio) renderer.setPixelRatio(ratio);
+    canvas.style.imageRendering=settings.pixel>1?'pixelated':'auto';
+  }
   renderer.render(scene,camera);
 });
+
+
+
