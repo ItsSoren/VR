@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#18251f" />
+    <title>VALLON — Les terres tranquilles</title>
+    <style>
+      /*__STYLE__*/
+    </style>
+  </head>
+  <body>
+    <canvas
+      id="world"
+      aria-label="Monde de Vallon, jeu de découverte et construction"
+      tabindex="0"
+    ></canvas>
+    <div id="veil"></div>
+    <div id="damage-flash" aria-hidden="true"></div>
+    <div id="achievement-notice" role="status" aria-live="polite">
+      <span>SUCCÈS DÉBLOQUÉ</span><strong></strong><small></small>
+    </div>
+    <header class="hud">
+      <div class="brand">
+        <svg viewBox="0 0 44 32" fill="none" aria-hidden="true">
+          <path d="M2 28 16 5l8 13 5-9 13 19H2Z" stroke="currentColor" stroke-width="1.4" />
+          <path d="m10 28 9-14 9 14M28 22l3-5 7 11" stroke="currentColor" stroke-width="1.1" />
+        </svg>
+        <div><strong>VALLON</strong><span>LES TERRES TRANQUILLES</span></div>
+      </div>
+      <div class="top-right">
+        <div class="weather">
+          <i></i><span id="weather-label">Ciel clair</span><span class="separator">/</span
+          ><span id="biome">Prairie sauvage</span><span class="separator">/</span
+          ><span id="hour">17:20</span>
+        </div>
+        <button id="menu-btn" aria-label="Ouvrir le menu">Menu <kbd>Échap</kbd></button>
+      </div>
+    </header>
+    <div id="compass">
+      <span>O</span><b id="heading">N</b><span>E</span
+      ><small>· &nbsp; · &nbsp; · &nbsp; ◆ &nbsp; · &nbsp; · &nbsp; ·</small>
+    </div>
+    <div id="crosshair" aria-hidden="true"><i></i><i></i></div>
+    <div id="target-label"></div>
+    <div id="mining-meter" hidden><i></i></div>
+    <section id="welcome" class="panel">
+      <div class="eyebrow"><span></span> UN MONDE À HABITER</div>
+      <h1>Prenez<br />la clé des champs.</h1>
+      <p>
+        Récoltez, ouvrez votre atelier et bâtissez un refuge.<br />Apprivoisez la faune et affrontez
+        les gardiens des grottes.
+      </p>
+      <button id="play" class="primary" disabled>Préparation du paysage… <span>↗</span></button>
+      <div class="destination-buttons">
+        <button id="panorama-open">Le belvédère du lac <kbd>P</kbd></button
+        ><button id="caves-open">
+          Rejoindre l’entrée des grottes <kbd data-key="cave">G</kbd>
+        </button>
+      </div>
+      <div class="intro-controls">
+        <span><kbd>ZQSD</kbd> / <kbd>WASD</kbd> Explorer</span
+        ><span><kbd>Clic droit glissé</kbd> Regarder</span>
+      </div>
+      <div class="destination-buttons">
+        <button id="catalog-menu">Catalogue de construction <kbd data-key="catalog">B</kbd></button
+        ><button id="journal-menu">Votre carnet <kbd data-key="journal">N</kbd></button>
+      </div>
+      <div class="menu-tools">
+        <button id="settings-open">Réglages</button><span>·</span
+        ><button id="new-world">Nouveau paysage</button><span>·</span
+        ><button id="help-open">Commandes</button><span>·</span
+        ><button id="debug-open">Debug / vol <kbd>F3</kbd></button>
+      </div>
+      <div class="destination-buttons">
+        <button id="achievements-menu">
+          Succès, bestiaire et équipement <kbd data-key="achievements">L</kbd>
+        </button>
+      </div>
+      <div class="seed-note">
+        PAYSAGE <span id="seed-label">01427</span><span class="seed-dot">·</span> EXPLORATION LIBRE
+      </div>
+    </section>
+    <div id="playing-ui" hidden>
+      <section id="adventure-hud" aria-label="Santé et combat">
+        <div id="health-bar">
+          <span>SANTÉ <b id="health-value">100 / 100</b></span>
+          <div><i id="health-fill"></i></div>
+        </div>
+        <div id="energy-bar">
+          <span>ENDURANCE <b id="energy-value">100</b></span>
+          <div><i id="energy-fill"></i></div>
+        </div>
+        <div class="combat-controls">
+          <button id="combat-toggle">
+            <kbd data-key="combat">T</kbd> <span id="weapon-label">Outils</span></button
+          ><span class="combat-only"><kbd data-key="guard">O</kbd> Garde</span
+          ><button id="dodge-button" class="combat-only">
+            <kbd data-key="dodge">I</kbd> Esquive · <span id="dodge-ready">Prête</span></button
+          ><button id="achievements-open"><kbd data-key="achievements">L</kbd> Carnet</button>
+        </div>
+        <small
+          >Rations <b id="meal-count">0</b> · <kbd data-key="interact">V</kbd> Nourrir /
+          interagir</small
+        >
+        <div id="terrain-quick" role="group" aria-label="Modifier le terrain">
+          <button data-quick-action="dig">Creuser</button
+          ><button data-quick-action="raise">Remblayer</button
+          ><button data-quick-action="smooth">Lisser</button
+          ><span>E agir · F ajouter de la terre</span>
+        </div>
+      </section>
+      <aside id="journey">
+        <div class="eyebrow">VOTRE ESCAPADE</div>
+        <strong id="objective">Préparez l’expédition</strong
+        ><span id="objective-detail">Améliorez votre pioche et explorez les grottes.</span>
+        <div id="journey-progress"><i></i></div>
+        <button id="journal-open">Voir le carnet <kbd data-key="journal">N</kbd></button>
+      </aside>
+      <aside id="expedition" aria-live="polite"></aside>
+      <div id="interaction">
+        Clic bref <b>récolter</b><span>·</span>Clic droit <b>construire</b>
+      </div>
+      <div id="construction-strip">
+        <button id="catalog-open">Construire <kbd data-key="catalog">B</kbd></button
+        ><span><b id="build-label"></b><small id="build-cost"></small></span
+        ><span class="rotate-hint"><kbd data-key="rotate">X</kbd> Pivoter</span
+        ><button id="cancel-blueprint" hidden>Annuler le plan</button>
+      </div>
+      <div id="hotbar" role="group" aria-label="Outils et matériaux — touches 1 à 6, ou molette">
+        <button data-slot="0" class="selected" aria-label="1 — Main">
+          <kbd>1</kbd
+          ><svg class="tool-icon" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+            <path
+              d="M10 27 5 17q-1-3 2-3l4 4V7q0-4 3-4v13-12q3-2 4 1v11-9q3-2 4 1v9-6q3-2 4 1v10q-1 7-5 7H14Z"
+              stroke="currentColor"
+              stroke-width="1.5"
+              stroke-linejoin="round"
+            /></svg
+          ><span>Main</span>
+        </button>
+        <button data-slot="1" aria-label="2 — Pelle">
+          <kbd>2</kbd
+          ><svg class="tool-icon" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+            <path
+              d="m9 26 12-15M18 5l7-2 4 5-5 7-6-4Z"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linejoin="round"
+            />
+            <path d="m5 25 6 4 3-4" stroke="currentColor" stroke-width="2" /></svg
+          ><span>Pelle</span>
+        </button>
+        <button data-slot="2" aria-label="3 — Pioche">
+          <kbd>3</kbd
+          ><svg class="tool-icon" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+            <path
+              d="m6 29 14-18M7 7q15-7 23 12L19 12Z"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linejoin="round"
+            /></svg
+          ><span>Pioche</span>
+        </button>
+        <button data-slot="3" aria-label="4 — Bois">
+          <kbd>4</kbd>
+          <div class="cube wood"></div>
+          <span>Bois</span><b id="wood-count">12</b>
+        </button>
+        <button data-slot="4" aria-label="5 — Pierre">
+          <kbd>5</kbd>
+          <div class="cube stone"></div>
+          <span>Pierre</span><b id="stone-count">8</b>
+        </button>
+        <button data-slot="5" aria-label="6 — Terre">
+          <kbd>6</kbd>
+          <div class="cube clay"></div>
+          <span>Terre</span><b id="clay-count">16</b>
+        </button>
+        <button id="torch-equip" aria-label="7 — Torche">
+          <kbd>7</kbd><img class="item-icon" alt="" /><span>Torche</span><b id="torch-count">0</b>
+        </button>
+      </div>
+      <div class="bottom-left">
+        <span id="position-label">0 m</span><span id="save-label">Sauvegarde locale</span
+        ><span id="energy-label">ÉNERGIE 100 / 100</span>
+      </div>
+      <button id="pack-toggle" aria-label="Ouvrir le sac et les outils">
+        Inventaire <kbd>Tab</kbd>
+      </button>
+      <div class="bottom-right">
+        <kbd>Espace</kbd> Sauter <span>·</span> <kbd>Maj</kbd> Courir <span>·</span>
+        <kbd>H</kbd> Aide
+      </div>
+    </div>
+    <section id="field-kit" class="dialog pack-dialog" hidden>
+      <div class="eyebrow">VOTRE SAC</div>
+      <h2>Inventaire &amp; fabrication</h2>
+      <div id="inventory-workspace"></div>
+      <details class="terrain-settings">
+        <summary>Réglages du terrain</summary>
+        <section id="toolbox" aria-label="Travail du terrain">
+          <div class="action-row">
+            <button data-action="dig" class="selected">Creuser</button
+            ><button data-action="raise">Remblayer</button
+            ><button data-action="smooth">Lisser</button><kbd data-key="mode">R</kbd>
+          </div>
+          <div class="tool-info">
+            <span id="tool-status"></span
+            ><button id="brush-smaller" aria-label="Réduire la brosse">−</button
+            ><button id="brush-larger" aria-label="Agrandir la brosse">+</button
+            ><button id="undo-sculpt">Annuler <kbd data-key="undo">U</kbd></button>
+          </div>
+        </section>
+      </details>
+      <section id="mining-kit">
+        <div class="berry-bag"><i aria-hidden="true"></i> Baies <b id="berry-count">0</b></div>
+        <button id="upgrade-pick"></button><span id="ore-bag"></span
+        ><small
+          ><kbd data-key="cave">G</kbd> Grottes / surface ·
+          <kbd data-key="upgrade">C</kbd> Améliorer la pioche</small
+        >
+      </section>
+      <p>
+        <kbd data-key="cave">G</kbd> Grottes · <kbd data-key="upgrade">C</kbd> Pioche ·
+        <kbd data-key="mode">R</kbd> Terrain
+      </p>
+      <button class="primary close-dialog">Retour au paysage <span>↗</span></button>
+    </section>
+    <aside id="pixel-preview" hidden aria-label="Aperçu du filtre pixel">
+      <div class="pixel-preview-title">
+        <strong>Filtre pixel · F6</strong
+        ><button id="pixel-close" aria-label="Fermer l’aperçu">×</button>
+      </div>
+      <label
+        >Taille <output id="pixel-live-label">Sans filtre</output
+        ><input id="pixel-live" type="range" min="0" max="8" step="1" value="0"
+      /></label>
+      <div class="pixel-presets">
+        <button data-pixel="0">Off</button><button data-pixel="2">Fin</button
+        ><button data-pixel="4">Pixel</button><button data-pixel="6">Rétro</button>
+      </div>
+    </aside>
+    <section id="settings" class="dialog" hidden>
+      <div class="eyebrow">À VOTRE RYTHME</div>
+      <h2>Votre paysage.</h2>
+      <label
+        >Qualité du paysage<select id="quality">
+          <option value="high">Haute — herbe généreuse</option>
+          <option value="medium">Équilibrée</option>
+          <option value="low">Légère</option>
+        </select></label
+      ><label
+        >Filtre pixel <output id="pixel-size-label">Sans filtre</output>
+        <input id="pixel-size" type="range" min="0" max="8" step="1" value="0" /> </label
+      ><button id="pixel-test">Tester en jeu <kbd>F6</kbd></button
+      ><label
+        >Sensibilité de la souris
+        <input id="sensitivity" type="range" min="0.35" max="2" step="0.05" value="1" /></label
+      ><label
+        >Heure du jour <span id="time-label">17:20</span
+        ><input id="time" type="range" min="0" max="23.9" step="0.1" value="17.3" /></label
+      ><label class="check"
+        ><input id="day-cycle" type="checkbox" checked /> Cycle jour / nuit progressif</label
+      ><label
+        >Durée d’une journée <span id="day-duration-label">72 min</span
+        ><input id="day-duration" type="range" min="30" max="120" step="6" value="72"
+      /></label>
+      <label
+        >Ambiance météo<select id="weather-select">
+          <option value="auto">Événements automatiques</option>
+          <option value="clear">Ciel clair</option>
+          <option value="overcast">Ciel couvert</option>
+          <option value="rain">Pluie</option>
+          <option value="storm">Orage</option>
+          <option value="mist">Brume</option>
+        </select></label
+      >
+      <label
+        >Mouvements de caméra
+        <input id="camera-motion" type="range" min="0" max="1" step="0.05" value="0.65"
+      /></label>
+      <fieldset>
+        <legend>Votre monde</legend>
+        <label>Seed <input id="world-seed" type="text" inputmode="numeric" maxlength="10" /></label
+        ><button id="random-seed">Seed aléatoire</button
+        ><label class="check"
+          ><input id="random-refresh" type="checkbox" /> Nouveau monde à chaque rechargement</label
+        >
+        <p class="bag-hint">
+          Nouveau paysage applique la seed. Les anciennes parties restent conservées par seed.
+        </p>
+      </fieldset>
+      <button id="capture-mouse">Activer la capture souris</button>
+      <label class="check"
+        ><input id="peaceful" type="checkbox" /> Rencontres paisibles · les créatures n’attaquent
+        pas</label
+      ><label class="check"
+        ><input id="show-stats" type="checkbox" /> Afficher les performances</label
+      >
+      <fieldset class="bindings">
+        <legend>Vos touches</legend>
+        <div id="key-bindings"></div>
+        <p id="binding-status" role="status"></p>
+        <button id="reset-bindings">Réinitialiser les touches</button>
+      </fieldset>
+      <button class="primary close-dialog">Retour au paysage <span>↗</span></button>
+    </section>
+    <section id="help" class="dialog" hidden>
+      <div class="eyebrow">LE CARNET DU PROMENEUR</div>
+      <h2>Faites comme chez vous.</h2>
+      <dl>
+        <dt>Tab</dt>
+        <dd>Sac, ressources et réglages des outils</dd>
+        <dt>ZQSD / WASD</dt>
+        <dd>Se déplacer</dd>
+        <dt>Clic droit glissé / flèches</dt>
+        <dd>Regarder autour de soi ; clic gauche glissé fonctionne aussi</dd>
+        <dt>Maj / Espace</dt>
+        <dd>Courir / sauter</dd>
+        <dt>Clic gauche / <span data-key="primary">E</span> maintenu</dt>
+        <dd>Casser, miner ou travailler le sol</dd>
+        <dt>Clic droit bref / <span data-key="build">F</span></dt>
+        <dd>Poser le matériau sélectionné (le bois au départ)</dd>
+        <dt>1 · 2 · 3</dt>
+        <dd>Main, pelle, pioche</dd>
+        <dt>4 · 5 · 6</dt>
+        <dd>Vos palettes de construction ; bois, pierre et terre au départ</dd>
+        <dt><span data-key="catalog">B</span> / <span data-key="rotate">X</span></dt>
+        <dd>Catalogue / pivoter la pièce</dd>
+        <dt><span data-key="interact">V</span> / <span data-key="journal">N</span></dt>
+        <dd>Utiliser établi, forge, phare ou porte / carnet</dd>
+        <dt><span data-key="combat">T</span> / <span data-key="guard">O</span> maintenu</dt>
+        <dd>Sortir l’épée / garder ; parade parfaite dans les 0,28 premières secondes</dd>
+        <dt><span data-key="dodge">I</span> / <span data-key="achievements">L</span></dt>
+        <dd>
+          Esquiver dans la direction du déplacement (à droite au repos) / succès et équipement
+        </dd>
+        <dt>Molette</dt>
+        <dd>Parcourir les six cases</dd>
+        <dt><span data-key="mode">R</span> / boutons d’action</dt>
+        <dd>Creuser, remblayer, lisser</dd>
+        <dt>Maj + molette / − · +</dt>
+        <dd>Réduire / agrandir la brosse</dd>
+        <dt><span data-key="undo">U</span> / Ctrl + Z</dt>
+        <dd>Annuler le dernier coup de terrain</dd>
+        <dt><span data-key="cave">G</span> / <span data-key="upgrade">C</span></dt>
+        <dd>Grottes / améliorer la pioche</dd>
+        <dt>Échap / H / P / Début</dt>
+        <dd>Menu / aide / belvédère / retour au départ</dd>
+      </dl>
+      <p>
+        Cassez un buisson à fruits rouges ou bleus pour récupérer 3 à 6 baies. Terre, herbe et sable
+        : niveau 1, pelle rapide. Pierre et premiers minerais : pioche niveau 2. Roche profonde et
+        cristaux : niveau 3. Diamants : niveau 4. Améliorez la pioche avec 6 pierres + 4 bois, puis
+        8 fers + 4 bois. La barre sous le viseur indique la progression du minage. Les réglages
+        permettent de changer les touches d’action. Utilisez un établi pour débloquer la charpente
+        et une forge pour le verre, les briques et les métaux. Suivez les cinq étapes du carnet pour
+        gagner des ressources et des recettes. V mange une baie quand vous ne visez pas une pièce ;
+        elle rend 8 points de santé et 25 points d’énergie. Le refuge accélère la récupération. Le
+        catalogue permet de modifier une pièce visée en réglant seulement la différence de recette.
+        V nourrit aussi un animal visé à moins de 3 m. Trois repas espacés de 30 s apprivoisent un
+        animal. Les moutons donnent 2 laines toutes les 3 minutes. Les ennemis annoncent leurs
+        attaques par un cercle au sol ; frappez pendant leur récupération. La garde ne protège que
+        devant vous et coûte 8 énergie. L’esquive coûte 18 énergie et récupère en 1,6 s. Fabriquez
+        armes, protection et rations dans L. Les deux premiers niveaux d’épée frappent à 12 et 20
+        dégâts ; le cristal frappe à 28. La défaite ramène au refuge avec vos matériaux. Les
+        lanternes et phares actifs éloignent les loups. Santé, faune, équipement, succès et
+        progression sont sauvegardés.
+      </p>
+      <button class="primary close-dialog">C’est parti <span>↗</span></button>
+    </section>
+
+    <section
+      id="construction"
+      class="dialog construction-dialog"
+      role="dialog"
+      aria-label="Catalogue de construction"
+      hidden
+    >
+      <div class="catalog-heading">
+        <div>
+          <div class="eyebrow">L’ATELIER DU VALLON</div>
+          <h2>Donnez forme à vos idées.</h2>
+        </div>
+        <button class="close-dialog catalog-close" aria-label="Fermer le catalogue">×</button>
+      </div>
+      <div class="catalog-layout">
+        <div class="catalog-preview">
+          <canvas
+            id="piece-preview"
+            width="260"
+            height="180"
+            aria-label="Aperçu de la pièce"
+          ></canvas
+          ><strong id="piece-name"></strong>
+          <p id="piece-cost"></p>
+          <p id="piece-lock"></p>
+          <small id="favorite-label"></small>
+          <div class="piece-transform">
+            <button id="rotate-piece">Pivoter ↻</button><button id="mirror-piece">Inverser</button
+            ><span id="rotation-label"></span>
+          </div>
+          <label
+            >Taille
+            <select id="build-size">
+              <option value="0.5">Demi-format</option>
+              <option value="1">Standard</option>
+              <option value="2">Double format</option>
+            </select></label
+          >
+          <div class="edit-card">
+            <small id="edit-name"></small
+            ><button id="copy-piece">Copier le style de la cible</button
+            ><button id="apply-piece">Appliquer à la cible</button>
+          </div>
+        </div>
+        <div class="catalog-options">
+          <h3>La forme</h3>
+          <div id="shape-list" class="choice-grid"></div>
+          <h3>Le matériau</h3>
+          <div id="surface-list" class="choice-grid materials-grid"></div>
+          <h3>La finition</h3>
+          <div id="finish-list" class="choice-grid finish-grid"></div>
+          <h3>La couleur</h3>
+          <div id="tint-list" class="tint-grid"></div>
+        </div>
+      </div>
+      <div class="blueprint-row">
+        <span>Plans prêts à poser</span><button id="blueprint-cabin">Chalet</button
+        ><button id="blueprint-terrace">Terrasse</button
+        ><button id="blueprint-workshop">Atelier couvert</button
+        ><small>Coût total et aperçu affichés dans le paysage.</small>
+      </div>
+      <p id="build-resources"></p>
+      <label class="check"
+        ><input id="creative-build" type="checkbox" /> Construction libre — récompense des cinq
+        chapitres</label
+      ><button class="primary close-dialog">Placer dans le paysage <span>↗</span></button>
+    </section>
+    <section
+      id="journal"
+      class="dialog journal-dialog"
+      role="dialog"
+      aria-label="Carnet de progression"
+      hidden
+    >
+      <div class="catalog-heading">
+        <div class="eyebrow">VOTRE HISTOIRE · <span id="chapter-number"></span></div>
+        <button class="close-dialog catalog-close" aria-label="Fermer le carnet">×</button>
+      </div>
+      <h2 id="chapter-title"></h2>
+      <p id="chapter-detail"></p>
+      <ul id="chapter-checks"></ul>
+      <p id="chapter-reward"></p>
+      <div class="journal-summary">
+        <p id="journal-resources"></p>
+        <p id="journal-energy"></p>
+        <button id="eat-berries">Manger une baie · +25 énergie</button
+        ><button id="home-return">Revenir au refuge</button
+        ><button id="achievements-journal">Succès, bestiaire et équipement</button>
+      </div>
+      <p>
+        Établi → charpente et mobilier. Forge → briques, verre et métaux. Les minerais des grottes
+        ouvrent la voie aux lumières de cristal et aux finitions rares. Les récoltes comptent une
+        fois ; démonter vos propres pièces rend leur recette.
+      </p>
+      <button class="primary close-dialog">Continuer l’aventure <span>↗</span></button>
+    </section>
+    <section
+      id="achievements"
+      class="dialog adventure-dialog"
+      role="dialog"
+      aria-label="Succès, bestiaire et équipement"
+      hidden
+    >
+      <div class="catalog-heading">
+        <div>
+          <div class="eyebrow">LES RENCONTRES DU VALLON</div>
+          <h2>Une aventure à raconter.</h2>
+        </div>
+        <button class="close-dialog catalog-close" aria-label="Fermer le carnet d’aventure">
+          ×
+        </button>
+      </div>
+      <nav class="adventure-tabs" aria-label="Carnet d’aventure">
+        <button data-adventure-tab="achievements" class="selected">Succès</button
+        ><button data-adventure-tab="bestiary">Bestiaire</button
+        ><button data-adventure-tab="equipment">Équipement</button>
+      </nav>
+      <div data-adventure-pane="achievements">
+        <p id="achievement-count"></p>
+        <ul id="achievement-list"></ul>
+      </div>
+      <div data-adventure-pane="bestiary" hidden>
+        <p>
+          Une espèce est marquée comme observée après une rencontre visible à moins de 18 mètres.
+        </p>
+        <div id="bestiary-list"></div>
+      </div>
+      <div data-adventure-pane="equipment" hidden>
+        <p id="equipment-state"></p>
+        <p id="adventure-resources"></p>
+        <div class="equipment-buttons">
+          <button id="craft-sword"></button><button id="craft-armor"></button
+          ><button id="craft-meal"></button
+          ><button id="eat-meal">Manger une ration · +35 santé, +40 énergie</button>
+        </div>
+        <p>
+          Épée de bois fournie : 12 dégâts. Fer : 20 dégâts. Cristal : 28 dégâts. La veste réduit
+          les dégâts de 20 %, l’armure de fer de 35 %. L’établi permet la veste ; une forge allumée
+          permet les lames, le fer et la cuisson. Une baie nourrit un animal ou vous rend 8 santé et
+          25 énergie. La laine s’obtient sans tuer.
+        </p>
+      </div>
+      <button class="primary close-dialog">Reprendre l’aventure <span>↗</span></button>
+    </section>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <pre id="stats" hidden></pre>
+    <div id="error" hidden>
+      <h2>Le paysage n’a pas pu s’ouvrir.</h2>
+      <p id="error-text"></p>
+      <button onclick="location.reload()">Réessayer</button>
+    </div>
+    <script>
+      window.addEventListener('error', function (e) {
+        if (e.message) {
+          document.getElementById('error').hidden = false;
+          document.getElementById('error-text').textContent = e.message;
+        }
+      });
+    </script>
+    <script>
+      /*__GAME__*/
+    </script>
+  </body>
+</html>

@@ -1,0 +1,15 @@
+export const ITEMS = {
+  wood: ['Bois', '#aa8257', 'Construction, établi et manches d’outils.'],
+  stone: ['Pierre', '#9ba6a1', 'Construction, forge et amélioration de la pioche.'],
+  clay: ['Terre', '#af7959', 'Remblai, briques et construction.'],
+  berries: ['Baies', '#c34f60', 'Nourriture et apprivoisement. +8 santé, +25 endurance.'],
+  wool: ['Laine', '#e4dfca', 'Protection. Nourrissez les moutons pour en récolter.'],
+  meat: ['Viande', '#a96856', 'À cuire dans une forge pour préparer des rations.'],
+  meal: ['Ration', '#c19b55', 'Repas préparé. +35 santé, +40 endurance.'],
+  coal: ['Charbon', '#48505a', 'Combustible pour la forge et les recettes.'],
+  copper: ['Cuivre', '#c18452', 'Métaux, lanternes et phare.'],
+  iron: ['Fer', '#b9c9d2', 'Pioche, épée et armure.'],
+  crystal: ['Cristal', '#af91df', 'Équipement avancé et phare.'],
+  diamond: ['Diamant', '#91d9d0', 'Construction précieuse.'],
+  torch: ['Torche', '#ffb646', 'Éclaire la main et les grottes. 7 équiper, F poser, E récupérer.'],
+};
