@@ -29,7 +29,7 @@ const camera=new T.PerspectiveCamera(70,1,.065,210);
 rig.add(eye);eye.add(camera);scene.add(rig);
 const arena=buildArena(scene,renderer);
 const settings={
-  grip:6,slide:3,gravity:5,jump:5,weight:5,size:5,arms:5,bounce:4,throw:5,quality:7,auto:true,resolution:7,texturePower:7,
+  grip:6,slide:3,gravity:5,jump:5,weight:5,size:5,arms:5,bounce:4,throw:5,quality:7,auto:true,resolution:7,texturePower:7,focus:false,focusStrength:5,focusSize:5,
   movement:true,collisions:true,objects:true,body:true,hands:true,textures:true,reflections:true,shadows:true,bloom:true,
 };
 const defaults={...settings};
@@ -94,6 +94,7 @@ function resetPlayer(){
 resetObjects();
 function applyVisual(){
   arena.visual(liveLevel,settings.shadows,settings.reflections,settings.bloom,settings.textures,2**(settings.texturePower-1));
+  arena.focus(settings.focus,settings.focusStrength,settings.focusSize);
   renderer.xr.setFoveation(T.MathUtils.clamp(1.16-liveLevel*.105,.12,1));
   if(!renderer.xr.isPresenting) resize();
   hudDirty=true;
@@ -121,6 +122,7 @@ const sections=[
     ['Corps du singe','body'],['Mains','hands'],
   ]],
 ];
+sections.push(['Focus',[['Activer le focus','focus'],['Intensité','focusStrength'],['Taille de la zone nette','focusSize']]]);
 const title=document.querySelector('#section'), desktop=document.querySelector('#settings');
 const readings=document.querySelector('#readings');
 function change(key,step){
@@ -184,7 +186,7 @@ function drawPanel(){
     c.textAlign='center';c.fillText(label,x+w/2,y+h/2+7);c.textAlign='left';
     hitAreas.push({x,y,w,h,action});
   }
-  sections.forEach(([name],i)=>item(25+i*200,61,190,44,name,()=>page=i,page===i?'#68705a':'#334b58'));
+  sections.forEach(([name],i)=>item(25+i*150,61,140,44,name,()=>page=i,page===i?'#68705a':'#334b58'));
   sections[page][1].forEach(([name,key],i)=>{
     const y=119+i*44;
     c.fillStyle='#e9e5ce';c.font='22px system-ui';c.fillText(name,30,y+26);
@@ -465,6 +467,7 @@ renderer.setAnimationLoop((time,frame)=>{
   }
   renderer.render(scene,camera);
 });
+
 
 
 

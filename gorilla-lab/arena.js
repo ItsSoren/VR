@@ -67,6 +67,22 @@ export function buildArena(scene,renderer) {
   const originals=tiles.map(m=>m.map.image);
   let textureSize=512;
   const alt=tiles.map(m=>new T.MeshLambertMaterial({map:m.map,flatShading:true}));
+  const focusAmount={value:0}, focusRadius={value:.24};
+  for(const material of [...tiles,...alt]) {
+    material.onBeforeCompile=shader=>{
+      shader.uniforms.uFocusAmount=focusAmount;
+      shader.uniforms.uFocusRadius=focusRadius;
+      shader.fragmentShader='uniform float uFocusAmount; uniform float uFocusRadius;\n'+shader.fragmentShader;
+      shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',`
+        #ifdef USE_MAP
+          float eccentricity=length(vViewPosition.xy)/max(.01,vViewPosition.z);
+          float fade=smoothstep(uFocusRadius,uFocusRadius+.42,eccentricity);
+          diffuseColor *= texture2D(map,vMapUv,fade*uFocusAmount);
+        #endif
+      `);
+    };
+    material.customProgramCacheKey=()=> 'gorilla-lab-focus-v1';
+  }
   const boxes=[], props=[];
   function box(name,x,y,z,w,h,d,type=0,angle=0,friction=1,gravity=1) {
     const mesh=new T.Mesh(new T.BoxGeometry(w,h,d),tiles[type]);
@@ -137,7 +153,10 @@ export function buildArena(scene,renderer) {
     dome.visible=level>=2;
     scene.background=new T.Color('#83c7ed');
   }
-  return {boxes,probe,display,visual,shadow};
+  return {boxes,probe,display,visual,shadow,focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
 }
+
+
+
 
 
