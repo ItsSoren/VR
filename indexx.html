@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Plaine VR</title>
+<script src="https://aframe.io/releases/1.8.0/aframe.min.js"></script>
+<style>
+body { margin:0; background:#89cefa; font:16px system-ui,sans-serif }
+aside { position:fixed; z-index:2; top:1rem; left:1rem; max-width:22rem; padding:1rem; background:#102a25ed; color:white; border-radius:.65rem; }
+aside strong { display:block; margin-bottom:.4rem; font-size:1.25rem }
+aside p { margin:.35rem 0 }
+body.immersive aside { display:none }
+</style>
+<script>
+AFRAME.registerComponent('stick-walk', {
+  init() {
+    this.forward = new THREE.Vector3();
+    this.right = new THREE.Vector3();
+    this.lastHeading = new THREE.Vector3(0,0,-1);
+  },
+  tick(time, delta) {
+    const scene = this.el.sceneEl;
+    const session = scene.renderer?.xr.getSession();
+    if (!session || !scene.camera) return;
+    const sticks = [];
+    for (const source of session.inputSources) {
+      const pad = source.gamepad;
+      if (!pad || pad.mapping !== 'xr-standard' || pad.axes.length < 4 || !pad.buttons[3]) continue;
+      sticks.push(source);
+    }
+    const source = sticks.find(input => input.handedness === 'left') || sticks[0];
+    if (!source) return;
+    const x = source.gamepad.axes[2];
+    const y = source.gamepad.axes[3];
+    const magnitude = Math.hypot(x,y);
+    const deadzone = .18;
+    if (magnitude <= deadzone) return;
+    scene.camera.getWorldDirection(this.forward);
+    this.forward.y = 0;
+    if (this.forward.lengthSq() > .01) this.lastHeading.copy(this.forward.normalize());
+    this.right.set(-this.lastHeading.z,0,this.lastHeading.x);
+    const distance = 1.55 * Math.min(delta,50) / 1000 *
+      Math.min(1,(magnitude-deadzone)/(1-deadzone)) / magnitude;
+    const position = this.el.object3D.position;
+    position.addScaledVector(this.right,x*distance);
+    position.addScaledVector(this.lastHeading,-y*distance);
+    position.x = THREE.MathUtils.clamp(position.x,-105,105);
+    position.z = THREE.MathUtils.clamp(position.z,-105,105);
+  }
+});
+
+AFRAME.registerComponent('meadow', {
+  init() {
+    let seed = 2084;
+    const random = () => {
+      seed = (Math.imul(seed,1664525)+1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+    const grass = new THREE.BufferGeometry();
+    grass.setAttribute('position', new THREE.Float32BufferAttribute([
+      -.1,0,0, .09,0,0, -.03,.32,.02,
+      -.03,0,0, .12,0,.03, .23,.22,.11,
+      0,0,-.10, 0,0,.09, .02,.40,-.07
+    ],3));
+    grass.computeVertexNormals();
+    const material = new THREE.MeshLambertMaterial({color:0xffffff,side:THREE.DoubleSide});
+    const patches = new THREE.InstancedMesh(grass,material,9500);
+    const tuft = new THREE.Object3D();
+    const color = new THREE.Color();
+    for (let i=0; i<patches.count; i++) {
+      const extent = i < 3200 ? 28 : 110;
+      tuft.position.set((random()*2-1)*extent,0,(random()*2-1)*extent);
+      tuft.rotation.y = random()*Math.PI*2;
+      tuft.scale.setScalar(.45+random()*.9);
+      tuft.updateMatrix();
+      patches.setMatrixAt(i,tuft.matrix);
+      color.setHSL(.22+random()*.11,.43+random()*.17,.28+random()*.2);
+      patches.setColorAt(i,color);
+    }
+    patches.computeBoundingSphere();
+    this.el.setObject3D('mesh',patches);
+    this.mesh = patches;
+  },
+  remove() {
+    this.el.removeObject3D('mesh');
+    this.mesh.geometry.dispose();
+    this.mesh.material.dispose();
+    this.mesh.dispose();
+  }
+});
+</script>
+</head>
+<body>
+<aside>
+  <strong>Plaine VR</strong>
+  <p>Dans le casque, sélectionne le bouton VR puis avance avec le joystick gauche. Regarde dans la direction où tu veux avancer.</p>
+  <p>Sur PC, clique dans la scène pour regarder à la souris et utilise les flèches pour bouger.</p>
+  <p id="status" role="status"></p>
+</aside>
+<a-scene webxr="referenceSpaceType: local-floor; requiredFeatures: local-floor"
+         xr-mode-ui="enabled: true; enterVREnabled: true; enterAREnabled: false"
+         fog="type: exponential; color: #c6e8f2; density: 0.012"
+         renderer="antialias: true">
+  <a-sky color="#85cafa"></a-sky>
+  <a-light type="ambient" color="#e1f3ff" intensity=".75"></a-light>
+  <a-light type="directional" color="#fff2cd" intensity="1.05" position="-8 12 -5"></a-light>
+  <a-plane rotation="-90 0 0" width="520" height="520" material="color: #789848; roughness: 1"></a-plane>
+  <a-entity meadow></a-entity>
+  <a-entity position="-10 0 -12">
+    <a-dodecahedron radius="1.15" position="0 .58 0" scale="1 .7 .8" color="#8a9082"></a-dodecahedron>
+    <a-dodecahedron radius=".56" position="1.45 .35 .5" color="#a1a497"></a-dodecahedron>
+  </a-entity>
+  <a-entity stick-walk>
+    <a-entity camera look-controls="pointerLockEnabled: true" wasd-controls="acceleration: 13" position="0 1.65 0"></a-entity>
+  </a-entity>
+</a-scene>
+<script>
+const scene = document.querySelector('a-scene');
+const camera = scene.querySelector('[camera]');
+scene.addEventListener('enter-vr', () => {
+  document.body.classList.add('immersive');
+  camera.setAttribute('wasd-controls','enabled',false);
+  camera.object3D.position.set(0,0,0);
+});
+scene.addEventListener('exit-vr', () => {
+  document.body.classList.remove('immersive');
+  camera.object3D.position.set(0,1.65,0);
+  camera.setAttribute('wasd-controls','enabled',true);
+});
+const status = document.getElementById('status');
+if (navigator.xr) {
+  navigator.xr.isSessionSupported('immersive-vr').then(supported => {
+    if (!supported) status.textContent = 'Mode VR indisponible dans ce navigateur ou sans casque connecté.';
+  }).catch(() => { status.textContent = 'Impossible de détecter le mode VR.'; });
+} else {
+  status.textContent = 'Pour la VR, ouvre la page en HTTPS dans un navigateur compatible WebXR.';
+}
+</script>
+</body>
+</html>
