@@ -3,7 +3,20 @@ import * as T from 'three';
 import { buildArena } from './arena.js';
 import { solve,handContact,solveObjects } from './physics.js';
 
-const renderer=new T.WebGLRenderer({canvas:document.querySelector('#game'),antialias:true,powerPreference:'high-performance'});
+let gameCanvas=document.getElementById('game');
+if(!(gameCanvas instanceof HTMLCanvasElement)) {
+  gameCanvas=document.createElement('canvas');
+  gameCanvas.id='game';
+  gameCanvas.setAttribute('aria-label','Arène Gorilla Lab');
+  document.body.prepend(gameCanvas);
+}
+let renderer;
+try {
+  renderer=new T.WebGLRenderer({canvas:gameCanvas,antialias:true,powerPreference:'high-performance'});
+} catch (error) {
+  document.getElementById('status').textContent='WebGL 2 indisponible : '+error.message;
+  throw error;
+}
 renderer.xr.enabled=true;
 renderer.xr.setReferenceSpaceType('local-floor');
 renderer.shadowMap.type=T.PCFShadowMap;
@@ -16,7 +29,7 @@ const camera=new T.PerspectiveCamera(70,1,.065,210);
 rig.add(eye);eye.add(camera);scene.add(rig);
 const arena=buildArena(scene,renderer);
 const settings={
-  grip:6,slide:3,gravity:5,jump:5,weight:5,size:5,arms:5,bounce:4,throw:5,quality:7,auto:true,resolution:7,
+  grip:6,slide:3,gravity:5,jump:5,weight:5,size:5,arms:5,bounce:4,throw:5,quality:7,auto:true,resolution:7,texturePower:7,
   movement:true,collisions:true,objects:true,body:true,hands:true,textures:true,reflections:true,shadows:true,bloom:true,
 };
 const defaults={...settings};
@@ -80,7 +93,7 @@ function resetPlayer(){
 }
 resetObjects();
 function applyVisual(){
-  arena.visual(liveLevel,settings.shadows,settings.reflections,settings.bloom,settings.textures);
+  arena.visual(liveLevel,settings.shadows,settings.reflections,settings.bloom,settings.textures,2**(settings.texturePower-1));
   renderer.xr.setFoveation(T.MathUtils.clamp(1.16-liveLevel*.105,.12,1));
   if(!renderer.xr.isPresenting) resize();
   hudDirty=true;
@@ -104,7 +117,7 @@ const sections=[
   ]],
   ['Rendu',[
     ['Qualité automatique','auto'],['Qualité manuelle','quality'],['Résolution XR¹','resolution'],
-    ['Textures','textures'],['Reflets','reflections'],['Ombres','shadows'],['Bloom du soleil','bloom'],
+    ['Textures','textures'],['Taille textures','texturePower'],['Reflets','reflections'],['Ombres','shadows'],['Bloom du soleil','bloom'],
     ['Corps du singe','body'],['Mains','hands'],
   ]],
 ];
@@ -130,6 +143,7 @@ function button(text,action){
   const b=document.createElement('button');b.textContent=text;
   b.onclick=()=>{action();desktopMenu();hudDirty=true;};return b;
 }
+function settingValue(key){return key==="texturePower"?[2**(settings[key]-1),2**(settings[key]-1)].join("×"):settings[key];}
 function desktopMenu(){
   title.textContent=sections[page][0];
   desktop.replaceChildren();
@@ -138,7 +152,7 @@ function desktopMenu(){
     const controls=document.createElement('span');
     if(typeof key==='function') controls.append(button('↺',key));
     else if(typeof settings[key]==='boolean') controls.append(button(settings[key]?'Actif':'Coupé',()=>change(key,1)));
-    else controls.append(button('−',()=>change(key,-1)),document.createTextNode(' '+settings[key]+' '),button('+',()=>change(key,1)));
+    else controls.append(button('−',()=>change(key,-1)),document.createTextNode(' '+settingValue(key)+' '),button('+',()=>change(key,1)));
     row.append(controls);desktop.append(row);
   }
 }
@@ -178,7 +192,7 @@ function drawPanel(){
     else if(typeof settings[key]==='boolean') item(438,y,174,36,settings[key]?'Actif':'Coupé',()=>change(key,1));
     else {
       item(438,y,46,36,'−',()=>change(key,-1));
-      c.textAlign='center';c.fillText(String(settings[key]),525,y+26);c.textAlign='left';
+      c.textAlign='center';c.fillText(String(settingValue(key)),525,y+26);c.textAlign='left';
       item(566,y,46,36,'+',()=>change(key,1));
     }
   });
@@ -451,5 +465,7 @@ renderer.setAnimationLoop((time,frame)=>{
   }
   renderer.render(scene,camera);
 });
+
+
 
 

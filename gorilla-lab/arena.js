@@ -8,12 +8,12 @@ function canvasTexture(w,h,paint) {
   return map;
 }
 export function buildArena(scene,renderer) {
-  const sky=canvasTexture(1024,512,(ctx,w,h)=>{
-    const gradient=ctx.createLinearGradient(0,40,0,h*.57);
+  const sky=canvasTexture(512,256,(ctx,w,h)=>{
+    const gradient=ctx.createLinearGradient(0,20,0,h*.57);
     gradient.addColorStop(0,'#2376bf');gradient.addColorStop(.65,'#72bff1');gradient.addColorStop(1,'#f4e5c8');
     ctx.fillStyle=gradient;ctx.fillRect(0,0,w,h);
     for(let i=0;i<58;i++){
-      const x=(i*173.833)%w,y=147+(i*23.45)%96;
+      const x=(i*173.833)%w,y=73+(i*23.45)%48;
       ctx.fillStyle='rgba(255,254,235,'+(.014+(i%6)*.014)+')';
       for(const dx of [-w,0,w]){
         ctx.beginPath();ctx.ellipse(x+dx,y,14+(i%8)*7,3+(i%4)*2,0,0,Math.PI*2);ctx.fill();
@@ -45,7 +45,8 @@ export function buildArena(scene,renderer) {
   sun.shadow.normalBias=.025;
   scene.add(ambient,sun);
   const tiles=['#a9a586','#7099a6','#a58572','#9a936e'].map((color,index)=>{
-    const tex=canvasTexture(128,128,(ctx,w)=>{
+    const tex=canvasTexture(512,512,(ctx,w)=>{
+      ctx.scale(w/128,w/128);w=128;
       ctx.fillStyle=color;ctx.fillRect(0,0,w,w);
       let seed=index+19;
       function rng(){seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;}
@@ -63,6 +64,8 @@ export function buildArena(scene,renderer) {
     tex.wrapS=tex.wrapT=T.RepeatWrapping;tex.repeat.set(index===1?2:4,index===1?2:4);
     return new T.MeshStandardMaterial({map:tex,roughness:[.87,.20,.72,.95][index],metalness:index===1?.28:0,flatShading:true});
   });
+  const originals=tiles.map(m=>m.map.image);
+  let textureSize=512;
   const alt=tiles.map(m=>new T.MeshLambertMaterial({map:m.map,flatShading:true}));
   const boxes=[], props=[];
   function box(name,x,y,z,w,h,d,type=0,angle=0,friction=1,gravity=1) {
@@ -104,11 +107,21 @@ export function buildArena(scene,renderer) {
   const shadowGeo=new T.CircleGeometry(1,12).rotateX(-Math.PI/2);
   const shadowMaterial=new T.MeshBasicMaterial({color:0x564b38,transparent:true,opacity:.13,depthWrite:false});
   function shadow(r) {const mesh=new T.Mesh(shadowGeo,shadowMaterial);mesh.scale.setScalar(r);scene.add(mesh);return mesh;}
-  function visual(level,shadows,reflections,bloom,textures) {
+  function visual(level,shadows,reflections,bloom,textures,size) {
     const expensive=level>=7&&shadows;
     renderer.shadowMap.enabled=expensive;
     sun.castShadow=expensive;
     halo.visible=bloom;
+    if(size!==textureSize){
+      textureSize=size;
+      tiles.forEach((m,i)=>{
+        const tex=m.userData.texture??m.map;
+        const image=document.createElement('canvas');
+        image.width=image.height=size;
+        image.getContext('2d').drawImage(originals[i],0,0,size,size);
+        tex.image=image;tex.needsUpdate=true;
+      });
+    }
     const standard=level>=4;
     for(const b of boxes) b.mesh.material=standard?tiles[b.type]:alt[b.type];
     tiles.forEach((m,i)=>{for(const material of [m,alt[i]]) {
@@ -126,4 +139,5 @@ export function buildArena(scene,renderer) {
   }
   return {boxes,probe,display,visual,shadow};
 }
+
 
