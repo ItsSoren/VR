@@ -215,6 +215,38 @@ function shapeContact(body,box,outNormal,outPoint) {
   }
   return depth;
 }
+const palmHull=colliderFor(new T.OctahedronGeometry(1,0).scale(.055,.033,.075));
+const palmBody={mesh:{position:new T.Vector3(),quaternion:new T.Quaternion()},shape:palmHull,radius:palmHull.radius,precise:true};
+const palmPoint=new T.Vector3();
+export function palmContact(from,to,rotation,boxes,out,hitNormal){
+  const steps=Math.min(48,Math.max(1,Math.ceil(from.distanceTo(to)/.021)));
+  const r=palmHull.radius;
+  sweepCandidates.length=0;
+  for(const box of boxes){
+    const b=boundsFor(box);
+    if(b&&(Math.max(from.x,to.x)+r<b.minX||Math.min(from.x,to.x)-r>b.maxX
+      ||Math.max(from.y,to.y)+r<b.minY||Math.min(from.y,to.y)-r>b.maxY
+      ||Math.max(from.z,to.z)+r<b.minZ||Math.min(from.z,to.z)-r>b.maxZ))continue;
+    sweepCandidates.push(box);
+  }
+  palmBody.mesh.quaternion.copy(rotation);
+  const center=palmBody.mesh.position;
+  for(let i=1;i<=steps;i++){
+    center.lerpVectors(from,to,i/steps);
+    for(const box of sweepCandidates){
+      const object=box.objectBody;
+      if(object&&(object.owner||center.distanceToSquared(object.mesh.position)>(r+object.radius)**2))continue;
+      const depth=object?sat(palmBody,object,normal):shapeContact(palmBody,box,normal,palmPoint);
+      if(depth>0){
+        out.copy(center).addScaledVector(normal,depth+.0005);
+        hitNormal.copy(normal);
+        return box;
+      }
+    }
+  }
+  return null;
+}
+
 export function placeObject(body,boxes){
   for(let pass=0;pass<2;pass++) for(const box of boxes){
     if(!nearBox(body.mesh.position,body.radius,box))continue;

@@ -46,6 +46,26 @@ export function buildArena(scene,renderer) {
   sun.shadow.normalBias=.025;
   scene.add(ambient,sun);
 
+  const moods=[
+    {sky:'#ffffff',fog:'#a6d4ea',fill:'#daeaff',ground:'#88724c',hemi:2.25,sun:'#fff0d0',power:3,xyz:[-14,25,-16],glow:1},
+    {sky:'#e39b85',fog:'#ec986e',fill:'#d8b6dc',ground:'#b37762',hemi:1.15,sun:'#ff9c51',power:3.25,xyz:[-25,7,-18],glow:.93},
+    {sky:'#26386c',fog:'#202f55',fill:'#9ab8ff',ground:'#5b5065',hemi:.55,sun:'#b2caff',power:.75,xyz:[22,20,-18],glow:.42},
+  ];
+  let mood=0;
+  function setTimeOfDay(index){
+    mood=moods[index]?index:0;
+    const light=moods[mood];
+    ambient.color.set(light.fill);ambient.groundColor.set(light.ground);ambient.intensity=light.hemi;
+    sun.color.set(light.sun);sun.intensity=light.power;sun.position.set(...light.xyz);
+    halo.position.copy(sun.position).normalize().multiplyScalar(94);
+    halo.material.color.set(light.sun);halo.material.opacity=light.glow;
+    dome.material.color.set(light.sky);
+    scene.fog.color.set(light.fog);
+    scene.background.set(light.fog);
+    scene.environmentIntensity=baseReflection*[1,.56,.22][mood];
+  }
+  let baseReflection=0;
+  scene.background=new T.Color(moods[0].fog);
   const palette=[
     ['Ardoise','#555e6a','#b8c8d2',.77,0,1],
     ['Nacre','#537586','#f5e9de',.22,.34,1],
@@ -301,13 +321,13 @@ export function buildArena(scene,renderer) {
       material.color.set(textures?'#ffffff':palette[i][1]);
       material.needsUpdate=true;
     }});
-    scene.environmentIntensity=reflections?(level>=4?.8:.22):0;
+    baseReflection=reflections?(level>=4?.8:.22):0;
     chrome.metalness=reflections?.95:.1;
     chrome.roughness=reflections?.13:.46;
     dome.visible=level>=2;
-    scene.background=new T.Color('#83c7ed');
+    setTimeOfDay(mood);
   }
-  return {boxes,probe,display,visual,shadow,get hillSeed(){return hillSeed;},setHillSeed,bakeLightmap,mapMaterial:(i,level)=>level>=4?tiles[i]:alt[i],builtObjects:[...boxes.map(b=>b.mesh).filter(m=>m?.isObject3D),hill,probe,...props],materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
+  return {boxes,probe,display,visual,shadow,setTimeOfDay,get hillSeed(){return hillSeed;},setHillSeed,bakeLightmap,mapMaterial:(i,level)=>level>=4?tiles[i]:alt[i],builtObjects:[...boxes.map(b=>b.mesh).filter(m=>m?.isObject3D),hill,probe,...props],materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
 }
 
 

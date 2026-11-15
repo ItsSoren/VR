@@ -7,7 +7,7 @@ import { makePiece, mapMaterials, surfacePresets, storageKey } from './map-forma
 import { createVrEffects, addRayProbe } from './vr-effects.js';
 import { addLabFixtures } from './fixtures.js';
 import { buildArena } from './arena.js';
-import { solve,handContact,solveObjects,colliderFor,distanceToObject,placeObject,boxCollider,playerObjectContact } from './physics.js';
+import { solve,palmContact,solveObjects,colliderFor,distanceToObject,placeObject,boxCollider,playerObjectContact } from './physics.js';
 
 let gameCanvas=document.getElementById('game');
 if(!(gameCanvas instanceof HTMLCanvasElement)) {
@@ -37,7 +37,7 @@ const arena=buildArena(scene,renderer);
 const vrEffects=createVrEffects(renderer);
 const updateRayProbe=addRayProbe(arena.probe);
 const settings={
-  grip:6,slide:3,gravity:5,jump:5,weight:5,size:5,arms:5,contrast:5,saturation:5,exposure:5,warmth:5,bounce:4,throw:5,preciseHitboxes:false,quality:7,auto:true,resolution:7,texturePower:7,preset:2,lightmap:true,post:true,rayTrace:false,mapEdit:false,mapMode:1,mapShape:1,mapMaterial:1,mapSurface:1,mapTurn:1,toolMode:1,toolActive:false,focus:false,focusStrength:5,focusSize:5,
+  timeOfDay:1,grip:6,slide:3,gravity:5,jump:5,weight:5,size:5,arms:5,contrast:5,saturation:5,exposure:5,warmth:5,bounce:4,throw:5,preciseHitboxes:false,quality:7,auto:true,resolution:7,texturePower:7,preset:2,lightmap:true,post:true,rayTrace:false,mapEdit:false,mapMode:1,mapShape:1,mapMaterial:1,mapSurface:1,mapTurn:1,toolMode:1,toolActive:false,focus:false,focusStrength:5,focusSize:5,
   movement:true,collisions:true,objects:true,body:true,hands:true,textures:true,reflections:true,shadows:true,bloom:true,
 };
 const defaults={...settings};
@@ -46,7 +46,8 @@ rig.position.copy(boot);
 const velocity=new T.Vector3();
 const soft=new T.Vector3(), delta=new T.Vector3(), worldHead=new T.Vector3(), rotated=new T.Vector3(), head=new T.Vector3();
 const point=new T.Vector3(), prior=new T.Vector3(), candidate=new T.Vector3(), scratch=new T.Vector3();
-const priorPlayer=new T.Vector3(), appliedMove=new T.Vector3(), pushMemory=new T.Vector3();
+const priorPlayer=new T.Vector3(), appliedMove=new T.Vector3(), pushMemory=new T.Vector3(), planarMemory=new T.Vector3();
+const palmOffset=new T.Vector3(),palmFrom=new T.Vector3(),palmTo=new T.Vector3();
 const launchVelocity=new T.Vector3(), trackingDelta=new T.Vector3(), handSample=new T.Vector3();
 const handTwist=new T.Quaternion(), handAxis=new T.Vector3(0,0,1);
 let launchLock=0, peakPush=0, launchCount=0, lastLaunch=null;
@@ -178,7 +179,8 @@ const objectSpecs=[
   material:new T.MeshStandardMaterial({color,roughness:.44,metalness:.1,flatShading:true}),
   lowShape:sphere?null:boxCollider(geo.computeBoundingBox()??geo.boundingBox.getSize(new T.Vector3()).multiplyScalar(.5)),
 }));
-const objects=[];
+const objects=[],noBodies=[];
+let nextNetId=1;
 const gripRotation=new T.Quaternion(), inverseGrip=new T.Quaternion();
 const spawnPoint=new T.Vector3(),spawnDirection=new T.Vector3();
 function spawnObject(index,origin){
@@ -195,7 +197,7 @@ function spawnObject(index,origin){
   const mesh=new T.Mesh(spec.geo,spec.material);
   mesh.castShadow=true;mesh.receiveShadow=true;mesh.position.copy(origin);scene.add(mesh);
   const selectedShape=settings.preciseHitboxes?spec.shape:(spec.lowShape??spec.shape);
-  const body={mesh,spec,beforePhysics:mesh.position.clone(),blocksPlayer:index===4||index===5,precise:settings.preciseHitboxes,type:spec.name,shape:selectedShape,radius:selectedShape.radius,mass:spec.mass,start:mesh.position.clone(),
+  const body={mesh,spec,netId:nextNetId++,netType:index,beforePhysics:mesh.position.clone(),blocksPlayer:index===4||index===5,precise:settings.preciseHitboxes,type:spec.name,shape:selectedShape,radius:selectedShape.radius,mass:spec.mass,start:mesh.position.clone(),
     owner:null,velocity:new T.Vector3(),angular:new T.Vector3(),offset:new T.Vector3(),
     relativeRotation:new T.Quaternion(),shadow:arena.shadow(spec.shape.radius)};
   body.frozen=false;body.toolHold=false;body.paint=0;body.materialStyle=-1;
@@ -229,7 +231,7 @@ function resetObjects(){
   }
 }
 function resetPlayer(){
-  rig.position.copy(boot);yaw=T.MathUtils.degToRad(maps.yaw);pitch=0;rig.rotation.y=yaw;velocity.set(0,0,0);pushMemory.set(0,0,0);launchLock=0;releaseTimer=0;wasBraced=false;snap=false;
+  rig.position.copy(boot);yaw=T.MathUtils.degToRad(maps.yaw);pitch=0;rig.rotation.y=yaw;velocity.set(0,0,0);pushMemory.set(0,0,0);planarMemory.set(0,0,0);launchLock=0;releaseTimer=0;wasBraced=false;snap=false;
   for(const hand of hands){hand.valid=false;hand.surface=null;release(hand,false);}
 }
 resetObjects();
@@ -237,6 +239,7 @@ function applyVisual(){
   const full=settings.auto&&liveLevel===10;
   const effectiveTexture=settings.texturePower;
   arena.visual(liveLevel,full||settings.shadows,full||settings.reflections,full||settings.bloom,full||settings.textures,2**(effectiveTexture-1),full||settings.lightmap);
+  arena.setTimeOfDay(spectator.remoteLight??settings.timeOfDay-1);
   arena.focus(settings.focus,settings.focusStrength,settings.focusSize);
   renderer.toneMappingExposure=.58+settings.exposure*.114;
   photoContrast.value=.55+settings.contrast*.09;
@@ -286,16 +289,41 @@ const sections=[
   ]],
 ];
 sections.push(['Focus',[['Activer le focus','focus'],['Intensité','focusStrength'],['Taille de la zone nette','focusSize']]]);
-sections.push(['Photo',[['Exposition','exposure'],['Contraste','contrast'],['Saturation','saturation'],['Chaleur','warmth'],['Résolution XR¹','resolution'],['Corps du singe','body'],['Mains','hands']]]);
+sections.push(['Photo',[['Ambiance','timeOfDay'],['Exposition','exposure'],['Contraste','contrast'],['Saturation','saturation'],['Chaleur','warmth'],['Résolution XR¹','resolution'],['Corps du singe','body'],['Mains','hands']]]);
 let reportSnapshot=null, rawFrameMs=[], frameSampleIndex=0, diagAt=0, lastVR=null, reportHadVR=false, contactFrames=0, trackedFrames=0, renderStats={};
+const lightSlots=Array.from({length:3},()=>{
+  const light=new T.PointLight('#ffffff',0,6,2);
+  light.visible=false;scene.add(light);
+  return {light,mesh:null,distance:Infinity};
+});
+const lightView=new T.Vector3();
+function addPropLight(mesh){
+  if(!mesh.visible||mesh.material.emissiveIntensity<1||mesh.material.emissive.getHex()===0)return;
+  const distance=mesh.position.distanceToSquared(lightView);
+  if(distance>144)return;
+  let farthest=lightSlots[0];
+  for(const slot of lightSlots)if(slot.distance>farthest.distance)farthest=slot;
+  if(distance<farthest.distance){farthest.mesh=mesh;farthest.distance=distance;}
+}
+function updatePropLights(spectating){
+  if(spectating)camera.getWorldPosition(lightView);else lightView.copy(worldHead);
+  for(const slot of lightSlots){slot.mesh=null;slot.distance=Infinity;}
+  if(spectating)spectator.forEachReplica(addPropLight);
+  else if(settings.objects)for(const body of objects)if(body.materialStyle===3)addPropLight(body.mesh);
+  for(const {light,mesh} of lightSlots){
+    light.visible=Boolean(mesh);
+    light.intensity=mesh?25:0;
+    if(mesh){light.position.copy(mesh.position);light.color.copy(mesh.material.emissive);}
+  }
+}
 function captureReport(){
   const sorted=rawFrameMs.slice().sort((a,b)=>a-b);
   const percentile=p=>sorted.length?Number(sorted[Math.min(sorted.length-1,Math.floor((sorted.length-1)*p))].toFixed(2)):null;
   reportSnapshot={
-    game:'Gorilla Lab',version:'r22',time:new Date().toISOString(),
+    game:'Gorilla Lab',version:'r23',time:new Date().toISOString(),
     mode:reportHadVR?'VR':'PC',settings:{...settings},qualityActive:liveLevel,
     performance:{fps,frames:sorted.length,frameMs:{median:percentile(.5),p95:percentile(.95),max:percentile(1)}},
-    xr:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},targetScore:fixtures.score(),locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
+    xr:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},cloud:{role:spectator.role,connected:spectator.connected,replicas:spectator.replicaCount},targetScore:fixtures.score(),locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
   };
   document.querySelector('#download-report').disabled=false;
   hudDirty=true;
@@ -320,6 +348,10 @@ sections.push(['Carte',[
 const title=document.querySelector('#section'), desktop=document.querySelector('#settings');
 const readings=document.querySelector('#readings');
 function change(key,step){
+  if(key==='timeOfDay'){
+    settings.timeOfDay=(settings.timeOfDay-1+step+3)%3+1;
+    applyVisual();return;
+  }
   if(key==='mapMode'||key==='mapShape'||key==='mapMaterial'||key==='mapSurface'||key==='mapTurn'){
     const max={mapMode:4,mapShape:4,mapMaterial:mapMaterials.length,mapSurface:4,mapTurn:8}[key];
     settings[key]=(settings[key]-1+step+max)%max+1;hudDirty=true;return;
@@ -367,7 +399,7 @@ function button(text,action){
   b.onclick=()=>{action();desktopMenu();hudDirty=true;};return b;
 }
 function toggleLabel(key){return key==='preciseHitboxes'?(settings[key]?'High':'Low'):(settings[key]?'Actif':'Coupé');}
-function settingValue(key){if(key==='mapMode')return mapToolNames[settings.mapMode-1]; if(key==='mapShape')return mapShapeNames[settings.mapShape-1]; if(key==='mapSurface')return mapSurfaceNames[settings.mapSurface-1]; if(key==='mapMaterial')return mapMaterials[settings.mapMaterial-1]; if(key==='mapTurn')return (settings.mapTurn-1)*45+'°'; if(key==='toolMode')return toolModes[settings.toolMode-1]; if(key==='preset')return Object.keys(visualPresets)[settings.preset-1]; return key==="texturePower"?[2**(settings[key]-1),2**(settings[key]-1)].join("×"):settings[key];}
+function settingValue(key){if(key==='timeOfDay')return ['Jour','Coucher de soleil','Nuit'][settings.timeOfDay-1]; if(key==='mapMode')return mapToolNames[settings.mapMode-1]; if(key==='mapShape')return mapShapeNames[settings.mapShape-1]; if(key==='mapSurface')return mapSurfaceNames[settings.mapSurface-1]; if(key==='mapMaterial')return mapMaterials[settings.mapMaterial-1]; if(key==='mapTurn')return (settings.mapTurn-1)*45+'°'; if(key==='toolMode')return toolModes[settings.toolMode-1]; if(key==='preset')return Object.keys(visualPresets)[settings.preset-1]; return key==="texturePower"?[2**(settings[key]-1),2**(settings[key]-1)].join("×"):settings[key];}
 function desktopMenu(){
   title.textContent=sections[page][0];
   desktop.replaceChildren();
@@ -449,7 +481,20 @@ const mapSurfaceNames=['Normale','Glace','Caoutchouc','Lune'];
 const maps=connectMaps({scene,arena,boot,onReset:angle=>{clearObjects();resetPlayer();yaw=T.MathUtils.degToRad(angle);},onVisual:applyVisual,
   getLevel:()=>liveLevel,defaultObjects:[...arena.builtObjects,...scene.children.filter(n=>!beforeFixtures.has(n)),mirrorBacking],
 });
-const spectator=addSpectator({scene,currentMap:()=>maps.signature||'arena-'+arena.hillSeed,seedArena:seed=>arena.setHillSeed(seed)});
+const spectator=addSpectator({scene,currentMap:()=>maps.signature||'arena-'+arena.hillSeed,
+  seedArena:seed=>arena.setHillSeed(seed),
+  makeReplica:type=>{
+    const spec=objectSpecs[type];
+    if(!spec)return null;
+    const material=spec.material.clone();
+    grade(material);
+    const mesh=new T.Mesh(spec.geo,material);
+    mesh.castShadow=mesh.receiveShadow=true;
+    return mesh;
+  },
+  applyLight:mode=>arena.setTimeOfDay(mode??settings.timeOfDay-1),
+  applyCoconuts:mask=>fixtures.coconuts.forEach((coco,i)=>{coco.visible=Boolean((mask??31)&1<<i);}),
+});
 function mapPiece(){
   const dims=[
     {name:'Bloc',w:1.25,h:.55,d:1.25},{name:'Rampe',w:1.75,h:.32,d:2.3,pitch:18},
@@ -800,7 +845,10 @@ function trackHands(frame,space,dt){
         h.anchor.copy(h.objectAnchor).applyQuaternion(bracedObject.mesh.quaternion).add(bracedObject.mesh.position);
         h.last.copy(h.anchor);
       }
-      h.surface=handContact(h.last,h.target,.080,handBoxes,h.contactPoint,normal);
+      palmOffset.set(0,0,-.036).applyQuaternion(h.mesh.quaternion);
+      palmFrom.copy(h.last).add(palmOffset);palmTo.copy(h.target).add(palmOffset);
+      h.surface=palmContact(palmFrom,palmTo,h.mesh.quaternion,handBoxes,h.contactPoint,normal);
+      if(h.surface)h.contactPoint.sub(palmOffset);
       if(h.surface&&releaseTimer>0&&velocity.dot(normal)>.18&&h.physicalSpeed.dot(normal)>-.30)h.surface=null;
       const sweptSurface=h.surface;
       if(priorSurface&&handBoxes.includes(priorSurface)&&!priorSurface.objectBody?.owner){
@@ -827,12 +875,12 @@ function trackHands(frame,space,dt){
         const inward=-h.physicalSpeed.dot(normal);
         // A sharp push can launch while the hand still overlaps the contact surface.
         const lateral=Math.sqrt(Math.max(0,h.physicalSpeed.lengthSq()-inward*inward));
-        const pushThreshold=normal.y>.4?Math.max(.74,lateral*.90):Math.max(.95,lateral*.55);
+        const pushThreshold=normal.y>.4?Math.max(.67,lateral*.58):Math.max(.87,lateral*.50);
         h.pressAge=inward>pushThreshold?h.pressAge+dt:0;
         if((h.pressAge>.012||inward>pushThreshold*1.75)&&inward>pushThreshold&&inward>peakPush){
           peakPush=inward;
           const power=(.69+.115*settings.jump)/(.66+.068*settings.weight);
-          const tangential=h.surface.friction<.1?.18:.70;
+          const tangential=h.surface.friction<.1?.18:.90;
           launchVelocity.copy(h.physicalSpeed).addScaledVector(normal,inward)
             .multiplyScalar(-power*tangential)
             .addScaledVector(normal,(inward+.28)*power)
@@ -909,6 +957,12 @@ function character(frame,space,pose,dt){
   const launched=inVR&&contacts>0&&peakPush>0;
   if(launched){
     velocity.copy(launchVelocity);
+    scratch.set(velocity.x,0,velocity.z);
+    if(scratch.lengthSq()<planarMemory.lengthSq()&&scratch.dot(planarMemory)>=0){
+      scratch.lerp(planarMemory,.72);
+      velocity.x=scratch.x;velocity.z=scratch.z;
+    }
+    planarMemory.set(0,0,0);
     pushMemory.set(0,0,0);wasBraced=false;contacts=0;
     launchLock=.10;
     releaseTimer=.12;
@@ -919,7 +973,13 @@ function character(frame,space,pose,dt){
     delta.multiplyScalar(1/contacts).clampLength(0,dt*10);
     velocity.set(0,0,0);
   }else{
-    if(inVR && wasBraced){velocity.copy(pushMemory);pushMemory.set(0,0,0);}
+    if(inVR && wasBraced){
+      velocity.copy(pushMemory);
+      if(velocity.x*velocity.x+velocity.z*velocity.z<planarMemory.lengthSq()&&velocity.x*planarMemory.x+velocity.z*planarMemory.z>=0){
+        velocity.x=planarMemory.x;velocity.z=planarMemory.z;
+      }
+      pushMemory.set(0,0,0);
+    }
     velocity.y-=gravity*dt;
     if(!inVR){
       const x=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('KeyQ')||keys.has('ArrowLeft'));
@@ -953,6 +1013,11 @@ function character(frame,space,pose,dt){
   if(contacts){
     const response=(.57+settings.jump*.12)/(.65+settings.weight*.07);
     pushMemory.lerp(scratch.copy(appliedMove).multiplyScalar(response/Math.max(.006,dt)).clampLength(0,11),1-Math.exp(-dt*25));
+  }
+  planarMemory.multiplyScalar(Math.exp(-dt*13));
+  if(contacts){
+    scratch.set(appliedMove.x,0,appliedMove.z).multiplyScalar(1/Math.max(.006,dt)).clampLength(0,8);
+    if(scratch.lengthSq()>.0625)planarMemory.lerp(scratch,1-Math.exp(-dt*42));
   }
   wasBraced=contacts>0;
   rig.rotation.y=yaw;
@@ -1038,20 +1103,20 @@ renderer.setAnimationLoop((time,frame)=>{
     monkey.visible=false;
     for(const h of hands){h.mesh.visible=h.upper.visible=h.lower.visible=h.joint.visible=false;}
   }else character(frame,space,pose,dt);
-  spectator.update({inVR,time,dt,position:worldHead,yaw:!inVR&&spectator.role==='pc'?yaw:bodyYaw,pitch,camera,rig,keys});
+  const spectating=!inVR&&spectator.role==='pc';
   for(const object of objects){
-    object.mesh.visible=settings.objects;
+    object.mesh.visible=settings.objects&&!spectating;
     if(object.mesh.position.y<-8 || Math.abs(object.mesh.position.x)>28 || object.mesh.position.z < -57 || object.mesh.position.z>13){
       if(!object.owner){object.mesh.position.copy(object.start);object.velocity.set(0,0,0);object.angular.set(0,0,0);}
     }
-    object.shadow.visible=settings.shadows&&liveLevel<7&&settings.objects&&object.mesh.position.y<2;
+    object.shadow.visible=!spectating&&settings.shadows&&liveLevel<7&&settings.objects&&object.mesh.position.y<2;
     const hills=arena.boxes.find(b=>b.heightfield);
     const {x,z}=object.mesh.position;
     const shadowY=hills&&x>=hills.xMin&&x<=hills.xMax&&z>=hills.zMin&&z<=hills.zMax?hills.height(x,z):0;
     object.shadow.position.set(x,shadowY+.006,z);
   }
   for(const object of objects)object.beforePhysics.copy(object.mesh.position);
-  solveObjects(objects,arena.boxes,dt,9.81*settings.gravity/5,.12+settings.bounce*.064,surfaceAt);
+  if(!spectating)solveObjects(objects,arena.boxes,dt,9.81*settings.gravity/5,.12+settings.bounce*.064,surfaceAt);
   if(!maps.active)fixtures.updateTarget(objects);
   if(inVR&&!menu)for(const hand of hands)touchFixture(hand);
   arena.probe.rotation.y+=dt*.29;
@@ -1061,7 +1126,7 @@ renderer.setAnimationLoop((time,frame)=>{
   else if(inVR&&mapLook)aimMap(frame,space,mapLook);
   else if(inVR&&toolLook)aimTool(frame,space,toolLook);
   else if(inVR&&fixtureAim)aimFixture(frame,space,fixtureAim.source,fixtureAim.click);
-  else if(!inVR){
+  else if(!inVR&&!spectating){
     camera.getWorldPosition(raySource);camera.getWorldDirection(forward);
     if(keys.delete('KeyG'))change('toolActive',1);
     if(keys.delete('KeyT'))change('toolMode',1);
@@ -1089,6 +1154,12 @@ renderer.setAnimationLoop((time,frame)=>{
     desktopToolHold.mesh.position.copy(toolPosition).addScaledVector(toolDirection,desktopToolHold.toolDistance);
     placeObject(desktopToolHold,arena.boxes);
   }
+  const avatar=inVR&&spectator.role==='vr'?{head:avatarHead.quaternion,hands:hands.map(h=>h.valid?h.mesh:null),
+    height:head.y,armSpan:armSegmentLength()*2,light:settings.timeOfDay-1,
+    coconuts:fixtures.coconuts.reduce((mask,coco,i)=>mask|(Number(coco.visible)<<i),0)}:null;
+  spectator.update({inVR,time,dt,position:worldHead,yaw:spectating?yaw:bodyYaw,pitch,camera,rig,keys,avatar,
+    bodies:settings.objects?objects:noBodies});
+  updatePropLights(spectating);
   updateMirror(time,pose);
   const fullAuto=settings.auto&&liveLevel===10;
   const useVrPost=inVR&&(fullAuto||settings.post&&(!settings.auto||liveLevel>=7));

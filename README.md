@@ -1,5 +1,5 @@
 # Gorilla Lab
-Ouvrir index.html pour l'aperçu PC. Publier en HTTPS pour entrer en WebXR depuis le casque. Le site est statique. Placer index.html et game-lab-r22.js ensemble à la racine d'un dépôt GitHub Pages.
+Ouvrir index.html pour l'aperçu PC. Publier en HTTPS pour entrer en WebXR depuis le casque. Le site est statique. Placer index.html et game-lab-r23.js ensemble à la racine d'un dépôt GitHub Pages.
 ## Dans le casque
 - S'appuyer sur le sol ou un mur et pousser en bougeant les manettes.
 - Stick droit : tourner par crans de 45 degrés. B/Y ou clic du stick gauche : panneau. Gâchette : sélectionner dans le panneau.
@@ -8,7 +8,7 @@ Ouvrir index.html pour l'aperçu PC. Publier en HTTPS pour entrer en WebXR depui
 - Réglages par défaut réinitialise l'onglet ouvert. Les objets et la locomotion ont aussi leur propre bouton de retour.
 - Auto monte ou baisse la qualité selon les FPS. La résolution de session se règle séparément et prend effet en rouvrant le mode VR.
 ## Sources
-Le fichier game.js contient Three.js. Pour reconstruire : npm install --no-save three@0.180.0 esbuild@0.25.10 puis npx esbuild main.js --bundle --format=iife --target=es2022 --minify --outfile=game-lab-r22.js.
+Le fichier game.js contient Three.js. Pour reconstruire : npm install --no-save three@0.180.0 esbuild@0.25.10 puis npx esbuild main.js --bundle --format=iife --target=es2022 --minify --outfile=game-lab-r23.js.
 
 
 ## Bornes et cocotier
@@ -42,5 +42,7 @@ Dans Rendu, Post FX VR et Bloom activent le traitement stéréo. Ray tracing VR 
 
 ## Spectateur TurboWarp
 Ouvrir Salon TurboWarp et utiliser le même code sur les deux appareils. Sur le casque, choisir Joueur VR puis Entrer en VR. Sur PC choisir Spectateur PC, puis utiliser les flèches pour voler, Espace pour monter, Maj pour descendre, Ctrl pour accélérer et C pour passer entre caméra libre, vue de face et troisième personne. Le casque voit une petite sphère en vol.
-Positions, orientation et identifiant aléatoire de session sont envoyés au relais, plafonnés à dix paquets par seconde par client. Le code identifie le salon, sans contrôle d'accès. Pour une map personnalisée, les deux appareils doivent importer le même fichier. Les objets, actions et mains ne sont pas synchronisés.
+Positions, orientation et identifiant aléatoire de session sont envoyés au relais, plafonnés à dix paquets par seconde par client. Le code identifie le salon, sans contrôle d'accès. Pour une map personnalisée, les deux appareils doivent importer le même fichier. Le casque envoie la tête et les deux mains. Le PC reconstruit le torse et les bras. Les objets sont simulés sur le casque et leur état est envoyé au plus cinq fois par seconde. Le PC lisse leur mouvement et converge vers la position finale au centimètre près. Les saisies, lancers, suppressions et changements de matière des objets sont visibles côté spectateur.
+
+Dans Photo > Ambiance, choisissez Jour, Coucher de soleil ou Nuit. Les objets lumineux proches éclairent les surfaces voisines.
 
