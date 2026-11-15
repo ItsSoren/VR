@@ -43,7 +43,7 @@ const priorPlayer=new T.Vector3(), appliedMove=new T.Vector3(), pushMemory=new T
 const launchVelocity=new T.Vector3(), trackingDelta=new T.Vector3();
 let launchLock=0, peakPush=0, launchCount=0, lastLaunch=null;
 const up=new T.Vector3(0,1,0), spin=new T.Quaternion(), normal=new T.Vector3();
-let yaw=0,pitch=0, drop=0, standingHeight=NaN, snap=false, frameTime=0,fps=0,windowFrames=0,windowElapsed=0,qualityTimer=0,lowCount=0,highCount=0,liveLevel=7,refreshRate=72;
+let yaw=0,bodyYaw=0,pitch=0, drop=0, standingHeight=NaN, snap=false, frameTime=0,fps=0,windowFrames=0,windowElapsed=0,qualityTimer=0,lowCount=0,highCount=0,liveLevel=7,refreshRate=72;
 let menu=false,panelHand='left',page=0,hudDirty=true,lastDraw=0;
 let blocked=[],activeBoxes=arena.boxes,wasBraced=false;
 const geometry=new T.IcosahedronGeometry(1,0);
@@ -74,8 +74,8 @@ const upperGeometry=armGeometry([[0,-.5],[.090,-.5],[.103,-.34],[.088,-.06],[.07
 const lowerGeometry=armGeometry([[0,-.5],[.066,-.5],[.073,-.28],[.059,.04],[.048,.29],[.039,.5],[0,.5]]);
 const jointGeometry=new T.IcosahedronGeometry(.063,1);
 const armAxis=new T.Vector3(), elbowBend=new T.Vector3(), armSpan=new T.Vector3();
-const shoulderOffset=new T.Vector3(), viewNormal=new T.Vector3(), panelUp=new T.Vector3(), panelRight=new T.Vector3();
-const panelBasis=new T.Matrix4();
+const shoulderOffset=new T.Vector3(), headForward=new T.Vector3();
+const headRotation=new T.Quaternion(), panelFacing=new T.Vector3();
 function tube(mesh,a,b){
   armAxis.subVectors(b,a);
   mesh.position.copy(a).addScaledVector(armAxis,.5);
@@ -87,12 +87,12 @@ function arms(){
     h.upper.visible=h.lower.visible=h.joint.visible=settings.body&&h.valid;
     if(!h.valid)continue;
     const sign=h.side==='left'?-1:1;
-    shoulderOffset.set(sign*.255,.72,.12).multiplyScalar(monkey.scale.x).applyAxisAngle(up,yaw);
+    shoulderOffset.set(sign*.255,.72,.12).multiplyScalar(monkey.scale.x).applyAxisAngle(up,bodyYaw);
     h.shoulder.copy(monkey.position).add(shoulderOffset);
     armSpan.subVectors(h.mesh.position,h.shoulder);
     const reach=armSpan.length(),length=.24+settings.arms*.036;
     armAxis.copy(armSpan).normalize();
-    elbowBend.set(sign*.42,-1,.24).applyAxisAngle(up,yaw);
+    elbowBend.set(sign*.42,-1,.24).applyAxisAngle(up,bodyYaw);
     elbowBend.addScaledVector(armAxis,-elbowBend.dot(armAxis)).normalize();
     h.elbow.copy(h.shoulder).addScaledVector(armSpan,.48);
     h.elbow.addScaledVector(elbowBend,Math.sqrt(Math.max(.008,length*length-reach*reach*.25))*.79);
@@ -228,7 +228,7 @@ function captureReport(){
   const sorted=rawFrameMs.slice().sort((a,b)=>a-b);
   const percentile=p=>sorted.length?Number(sorted[Math.min(sorted.length-1,Math.floor((sorted.length-1)*p))].toFixed(2)):null;
   reportSnapshot={
-    game:'Gorilla Lab',version:'r11',time:new Date().toISOString(),
+    game:'Gorilla Lab',version:'r12',time:new Date().toISOString(),
     mode:reportHadVR?'VR':'PC',settings:{...settings},qualityActive:liveLevel,
     performance:{fps,frames:sorted.length,frameMs:{median:percentile(.5),p95:percentile(.95),max:percentile(1)}},
     xr:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,objects:{total:objects.length,held:objects.filter(o=>o.owner).length},locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
@@ -304,7 +304,7 @@ function display(w,h,width,height,parent){
   const mesh=new T.Mesh(new T.PlaneGeometry(width,height),new T.MeshBasicMaterial({map:texture,transparent:true,depthWrite:false,toneMapped:false}));
   parent.add(mesh);mesh.renderOrder=5;return {ctx,texture,mesh,w,h};
 }
-const panel=display(640,652,.52,.53,scene);
+const panel=display(640,652,.84,.86,scene);
 panel.mesh.visible=false;
 const wrist=display(416,84,.32,.065,scene);
 wrist.mesh.visible=false;
@@ -385,29 +385,15 @@ function drawPanel(){
 }
 function setMenu(side){
   menu=!menu;
-  if(menu)panelHand=side;
+  if(menu){
+    panelHand=side;
+    panelFacing.set(0,0,-1).applyAxisAngle(up,bodyYaw);
+    panel.mesh.position.copy(worldHead).addScaledVector(panelFacing,1.25);
+    panel.mesh.position.y+=.08;
+    panel.mesh.lookAt(worldHead);
+    panel.mesh.updateMatrixWorld(true);
+  }
   hudDirty=true;
-}
-function placePanel(){
-  const hand=hands.find(h=>h.side===panelHand);
-  if(!hand?.valid)return false;
-  panelUp.subVectors(hand.mesh.position,hand.elbow);
-  if(panelUp.lengthSq()<.002)panelUp.set(0,0,-1).applyAxisAngle(up,yaw);
-  panelUp.normalize();
-  panel.mesh.position.copy(hand.mesh.position);
-  panel.mesh.position.y+=.21;
-  viewNormal.subVectors(worldHead,panel.mesh.position);
-  viewNormal.addScaledVector(panelUp,-viewNormal.dot(panelUp));
-  if(viewNormal.lengthSq()<.002)viewNormal.set(0,1,0).addScaledVector(panelUp,-panelUp.y);
-  if(viewNormal.lengthSq()<.002)viewNormal.set(0,0,1);
-  viewNormal.normalize();
-  panelRight.crossVectors(panelUp,viewNormal).normalize();
-  panelUp.crossVectors(viewNormal,panelRight);
-  panel.mesh.position.addScaledVector(viewNormal,.095);
-  panel.mesh.quaternion.setFromRotationMatrix(panelBasis.makeBasis(panelRight,panelUp,viewNormal));
-  panel.mesh.rotateZ(Math.PI/2);
-  panel.mesh.updateMatrixWorld(true);
-  return true;
 }
 function aim(frame,space,input,trig){
   const pose=frame.getPose(input.targetRaySpace,space);
@@ -540,10 +526,12 @@ function trackHands(frame,space,dt){
       const sweptSurface=h.surface;
       if(priorSurface&&activeBoxes.includes(priorSurface)){
         scratch.subVectors(h.target,h.anchor);
-        if(scratch.dot(h.contactNormal)<.035 && scratch.lengthSq()<.49 && (!h.surface||h.surface===priorSurface)){ 
+        if(scratch.dot(h.contactNormal)<.070 && scratch.lengthSq()<.81){  
           h.surface=priorSurface;
-          if(!sweptSurface)h.contactPoint.copy(h.anchor);
+          if(sweptSurface!==priorSurface)h.contactPoint.copy(h.anchor);
           normal.copy(h.contactNormal);
+        }else if(scratch.dot(h.contactNormal)>=.070 && sweptSurface===priorSurface){
+          h.surface=null;
         }
       }
       if(h.surface){
@@ -557,7 +545,8 @@ function trackHands(frame,space,dt){
         correction(h,friction);
         const inward=-h.physicalSpeed.dot(normal);
         // A sharp push can launch while the hand still overlaps the contact surface.
-        const pushThreshold=normal.y>.4?.68:.94;
+        const lateral=Math.sqrt(Math.max(0,h.physicalSpeed.lengthSq()-inward*inward));
+        const pushThreshold=normal.y>.4?Math.max(.68,lateral*.90):Math.max(.94,lateral*.55);
         if(inward>pushThreshold&&inward>peakPush){
           peakPush=inward;
           const power=(.69+.115*settings.jump)/(.66+.068*settings.weight);
@@ -584,7 +573,7 @@ function trackHands(frame,space,dt){
 function correction(hand,friction){
   soft.subVectors(hand.anchor,hand.target);
   const v=Math.max(0,soft.dot(normal));
-  const adherence=hand.surface.friction<.1 ? Math.min(.35,friction*2) : T.MathUtils.clamp(.46+settings.grip*.108,0,1);
+  const adherence=hand.surface.friction<.1 ? Math.min(.35,friction*2) : T.MathUtils.clamp(.65+settings.grip*.065,0,1);
   soft.addScaledVector(normal,-soft.dot(normal)).multiplyScalar(adherence).addScaledVector(normal,v);
   delta.add(soft);
 }
@@ -612,6 +601,12 @@ function character(frame,space,pose,dt){
     eye.position.y=0;head.set(0,targetEye,0);camera.position.copy(head);camera.rotation.set(pitch,0,0,'YXZ');
   }
   worldHead.copy(head).applyAxisAngle(up,yaw).add(rig.position);
+  if(inVR){
+    const orientation=pose.transform.orientation;
+    headRotation.set(orientation.x,orientation.y,orientation.z,orientation.w);
+    headForward.set(0,0,-1).applyQuaternion(headRotation);
+    if(headForward.x**2+headForward.z**2>.018)bodyYaw=yaw+Math.atan2(-headForward.x,-headForward.z);
+  }else bodyYaw=yaw;
   const floor=surfaceAt(worldHead);
   const gravity=9.81*(settings.gravity/5)*(floor?.gravity??1);
   priorPlayer.copy(rig.position);
@@ -677,7 +672,7 @@ function character(frame,space,pose,dt){
   const bodyScale=Math.min(.72+settings.size*.05,Math.max(.3,(head.y-shoulderHeight)/.72));
   monkey.visible=settings.body;
   monkey.position.set(worldHead.x,worldHead.y-shoulderHeight-.72*bodyScale,worldHead.z);
-  monkey.rotation.y=yaw;monkey.scale.setScalar(bodyScale);
+  monkey.rotation.y=bodyYaw;monkey.scale.setScalar(bodyScale);
   arms();
   rig.updateMatrixWorld(true);
   camera.updateWorldMatrix(true,false);
@@ -748,7 +743,7 @@ renderer.setAnimationLoop((time,frame)=>{
   solveObjects(objects,arena.boxes,dt,9.81*settings.gravity/5,.12+settings.bounce*.064,surfaceAt);
   arena.probe.rotation.y+=dt*.29;
   updateFps(Math.min(.3,actual),inVR);
-  panel.mesh.visible=inVR&&menu&&placePanel();
+  panel.mesh.visible=inVR&&menu;
   if(panel.mesh.visible&&pendingAim) aim(frame,space,pendingAim.source,pendingAim.click);
   else if(inVR&&fixtureAim)aimFixture(frame,space,fixtureAim.source,fixtureAim.click);
   else if(!inVR){
@@ -780,6 +775,7 @@ renderer.setAnimationLoop((time,frame)=>{
     };
   }
 });
+
 
 
 
