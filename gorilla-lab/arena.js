@@ -119,20 +119,46 @@ export function buildArena(scene,renderer) {
   let textureSize=512;
   const alt=tiles.map(m=>new T.MeshLambertMaterial({map:m.map,flatShading:true,opacity:m.opacity,transparent:m.transparent,depthWrite:m.depthWrite}));
   const focusAmount={value:0}, focusRadius={value:.24};
+  const lightmap={value:null}, bakedStrength={value:0};
+  function bakeLightmap(){
+    lightmap.value=canvasTexture(512,512,(ctx,w)=>{
+      ctx.fillStyle='#ffffff';ctx.fillRect(0,0,w,w);
+      const sx=w/52,sz=w/64;
+      for(const b of boxes){
+        if(!b.position||!b.half||b.position.y+b.half.y<.22)continue;
+        const x=(b.position.x+26)*sx,z=(b.position.z+54)*sz;
+        const rx=Math.min(55,b.half.x*sx+5),rz=Math.min(72,b.half.z*sz+6);
+        ctx.save();
+        ctx.translate(x+b.half.y*sx*.20,z+b.half.y*sz*.24);ctx.scale(rx,rz);
+        const g=ctx.createRadialGradient(0,0,.15,0,0,1);
+        g.addColorStop(0,'rgba(22,37,65,.54)');g.addColorStop(.58,'rgba(36,54,76,.29)');g.addColorStop(1,'rgba(38,48,57,0)');
+        ctx.fillStyle=g;ctx.fillRect(-1,-1,2,2);ctx.restore();
+      }
+    });
+  }
   for(const material of [...tiles,...alt]) {
     material.onBeforeCompile=shader=>{
       shader.uniforms.uFocusAmount=focusAmount;
       shader.uniforms.uFocusRadius=focusRadius;
-      shader.fragmentShader='uniform float uFocusAmount; uniform float uFocusRadius;\n'+shader.fragmentShader;
+      shader.uniforms.uLabLightmap=lightmap;
+      shader.uniforms.uLabBakedStrength=bakedStrength;
+      shader.vertexShader='varying vec3 vLabPosition;\n'+shader.vertexShader;
+      shader.vertexShader=shader.vertexShader.replace('#include <worldpos_vertex>','#include <worldpos_vertex>\nvLabPosition=(modelMatrix*vec4(transformed,1.)).xyz;');
+      shader.fragmentShader='uniform float uFocusAmount; uniform float uFocusRadius; uniform sampler2D uLabLightmap; uniform float uLabBakedStrength; varying vec3 vLabPosition;\n'+shader.fragmentShader;
       shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',`
         #ifdef USE_MAP
           float eccentricity=length(vViewPosition.xy)/max(.01,vViewPosition.z);
           float fade=smoothstep(uFocusRadius,uFocusRadius+.42,eccentricity);
           diffuseColor *= texture2D(map,vMapUv,fade*uFocusAmount);
         #endif
+        if(uLabBakedStrength>.001){
+          vec2 bakedUV=vec2((vLabPosition.x+26.)/52.,1.-(vLabPosition.z+54.)/64.);
+          float floorWeight=1.-smoothstep(.03,2.8,max(vLabPosition.y,0.));
+          diffuseColor.rgb*=mix(vec3(1.),texture2D(uLabLightmap,bakedUV).rgb,uLabBakedStrength*floorWeight);
+        }
       `);
     };
-    material.customProgramCacheKey=()=> 'gorilla-lab-focus-v1';
+    material.customProgramCacheKey=()=> 'gorilla-lab-focus-lightmap-v2';
   }
   const boxes=[], props=[];
   function box(name,x,y,z,w,h,d,type=0,angle=0,friction=1,gravity=1) {
@@ -217,10 +243,13 @@ export function buildArena(scene,renderer) {
   const shadowGeo=new T.CircleGeometry(1,12).rotateX(-Math.PI/2);
   const shadowMaterial=new T.MeshBasicMaterial({color:0x564b38,transparent:true,opacity:.13,depthWrite:false});
   function shadow(r) {const mesh=new T.Mesh(shadowGeo,shadowMaterial);mesh.scale.setScalar(r);scene.add(mesh);return mesh;}
-  function visual(level,shadows,reflections,bloom,textures,size) {
+  function visual(level,shadows,reflections,bloom,textures,size,baked) {
     const expensive=level>=7&&shadows;
     renderer.shadowMap.enabled=expensive;
     sun.castShadow=expensive;
+    bakedStrength.value=baked?.66:0;
+    const shadowSize=level===10?2048:1024;
+    if(sun.shadow.mapSize.x!==shadowSize){sun.shadow.map?.dispose();sun.shadow.map=null;sun.shadow.mapSize.set(shadowSize,shadowSize);}
     halo.visible=bloom;
     if(size!==textureSize){
       textureSize=size;
@@ -228,7 +257,19 @@ export function buildArena(scene,renderer) {
         const tex=m.userData.texture??m.map;
         const image=document.createElement('canvas');
         image.width=image.height=size;
-        image.getContext('2d').drawImage(originals[i],0,0,size,size);
+        const ctx=image.getContext('2d');
+        ctx.drawImage(originals[i],0,0,size,size);
+        if(size>512){
+          let seed=i+188;
+          for(let p=0;p<size*13;p++){
+            seed=(Math.imul(seed,1664525)+1013904223)>>>0;
+            const x=seed%size;
+            seed=(Math.imul(seed,1664525)+1013904223)>>>0;
+            const y=seed%size;
+            ctx.fillStyle=(seed&256)?'rgba(255,249,225,.085)':'rgba(25,33,40,.08)';
+            ctx.fillRect(x,y,1+(seed>>>20)%3,1);
+          }
+        }
         const resized=new T.CanvasTexture(image);
         resized.colorSpace=tex.colorSpace;resized.wrapS=tex.wrapS;resized.wrapT=tex.wrapT;resized.repeat.copy(tex.repeat);
         for(const material of [m,alt[i]]){material.userData.texture=resized;material.map=resized;material.needsUpdate=true;}
@@ -251,7 +292,7 @@ export function buildArena(scene,renderer) {
     dome.visible=level>=2;
     scene.background=new T.Color('#83c7ed');
   }
-  return {boxes,probe,display,visual,shadow,hillSeed,materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
+  return {boxes,probe,display,visual,shadow,hillSeed,bakeLightmap,materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
 }
 
 

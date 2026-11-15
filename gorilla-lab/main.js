@@ -1,6 +1,10 @@
 
 import * as T from 'three';
 import { Reflector } from 'three/addons/objects/Reflector.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { addLabFixtures } from './fixtures.js';
 import { buildArena } from './arena.js';
 import { solve,handContact,solveObjects,colliderFor,distanceToObject,placeObject,boxCollider,playerObjectContact } from './physics.js';
@@ -30,8 +34,21 @@ const rig=new T.Group(), eye=new T.Group();
 const camera=new T.PerspectiveCamera(70,1,.065,210);
 rig.add(eye);eye.add(camera);scene.add(rig);
 const arena=buildArena(scene,renderer);
+let desktopEffects=null;
+function renderDesktopEffects(){
+  if(!desktopEffects){
+    const composer=new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene,camera));
+    composer.addPass(new UnrealBloomPass(new T.Vector2(innerWidth,innerHeight),.34,.42,.82));
+    composer.addPass(new OutputPass());
+    desktopEffects=composer;
+    desktopEffects.setPixelRatio(renderer.getPixelRatio());
+    desktopEffects.setSize(innerWidth,innerHeight);
+  }
+  desktopEffects.render();
+}
 const settings={
-  grip:6,slide:3,gravity:5,jump:5,weight:5,size:5,arms:5,contrast:5,saturation:5,exposure:5,warmth:5,bounce:4,throw:5,preciseHitboxes:false,quality:7,auto:true,resolution:7,texturePower:7,focus:false,focusStrength:5,focusSize:5,
+  grip:6,slide:3,gravity:5,jump:5,weight:5,size:5,arms:5,contrast:5,saturation:5,exposure:5,warmth:5,bounce:4,throw:5,preciseHitboxes:false,quality:7,auto:true,resolution:7,texturePower:7,preset:2,lightmap:true,post:true,toolMode:1,toolActive:false,focus:false,focusStrength:5,focusSize:5,
   movement:true,collisions:true,objects:true,body:true,hands:true,textures:true,reflections:true,shadows:true,bloom:true,
 };
 const defaults={...settings};
@@ -174,17 +191,19 @@ function spawnObject(index,origin){
   const mesh=new T.Mesh(spec.geo,spec.material);
   mesh.castShadow=true;mesh.receiveShadow=true;mesh.position.copy(origin);scene.add(mesh);
   const selectedShape=settings.preciseHitboxes?spec.shape:(spec.lowShape??spec.shape);
-  const body={mesh,spec,blocksPlayer:index===4||index===5,precise:settings.preciseHitboxes,type:spec.name,shape:selectedShape,radius:selectedShape.radius,mass:spec.mass,start:mesh.position.clone(),
+  const body={mesh,spec,beforePhysics:mesh.position.clone(),blocksPlayer:index===4||index===5,precise:settings.preciseHitboxes,type:spec.name,shape:selectedShape,radius:selectedShape.radius,mass:spec.mass,start:mesh.position.clone(),
     owner:null,velocity:new T.Vector3(),angular:new T.Vector3(),offset:new T.Vector3(),
     relativeRotation:new T.Quaternion(),shadow:arena.shadow(spec.shape.radius)};
+  body.frozen=false;body.toolHold=false;body.paint=0;body.materialStyle=-1;
   if(body.blocksPlayer)body.handCollider={objectBody:body,friction:.78,gravity:1};
   objects.push(body);placeObject(body,arena.boxes);
   return body;
 }
 function clearObjects(){
   for(const hand of hands){if(hand.held)release(hand,false);}
-  for(const body of objects)scene.remove(body.mesh,body.shadow);
+  for(const body of objects){scene.remove(body.mesh,body.shadow);if(body.customMaterial)body.mesh.material.dispose();}
   objects.length=0;
+  if(typeof desktopToolHold!=='undefined')desktopToolHold=null;
 }
 spawnObject(0,new T.Vector3(-.84,.32,1.15));
 spawnObject(1,new T.Vector3(0,.28,1.15));
@@ -195,14 +214,14 @@ spawnObject(5,new T.Vector3(2.45,.65,-.4));
 function release(hand,launch=true) {
   const object=hand.held;
   if(!object) return;
-  object.owner=null;hand.held=null;
+  object.owner=null;hand.held=null;object.toolHold=false;
   object.velocity.multiplyScalar(launch? .55+settings.throw*.12:0).clampLength(0,23);
   if(launch) object.angular.clampLength(0,24); else object.angular.set(0,0,0);
 }
 function resetObjects(){
   for(const hand of hands) release(hand,false);
   for(const object of objects){
-    object.mesh.position.copy(object.start);object.mesh.quaternion.identity();object.velocity.set(0,0,0);object.angular.set(0,0,0);
+    object.mesh.position.copy(object.start);object.mesh.quaternion.identity();object.velocity.set(0,0,0);object.angular.set(0,0,0);object.frozen=false;
   }
 }
 function resetPlayer(){
@@ -211,7 +230,9 @@ function resetPlayer(){
 }
 resetObjects();
 function applyVisual(){
-  arena.visual(liveLevel,settings.shadows,settings.reflections,settings.bloom,settings.textures,2**(settings.texturePower-1));
+  const full=settings.auto&&liveLevel===10;
+  const effectiveTexture=full?12:settings.texturePower;
+  arena.visual(liveLevel,full||settings.shadows,full||settings.reflections,full||settings.bloom,full||settings.textures,2**(effectiveTexture-1),full||settings.lightmap);
   arena.focus(settings.focus,settings.focusStrength,settings.focusSize);
   renderer.toneMappingExposure=.58+settings.exposure*.114;
   photoContrast.value=.55+settings.contrast*.09;
@@ -226,14 +247,16 @@ function resize(){
   if(renderer.xr.isPresenting) return;
   renderer.setPixelRatio(Math.min(devicePixelRatio,1.75)*(.53+liveLevel*.047));
   renderer.setSize(innerWidth,innerHeight,false);
+  if(desktopEffects){desktopEffects.setPixelRatio(renderer.getPixelRatio());desktopEffects.setSize(innerWidth,innerHeight);}
   camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
 }
 addEventListener('resize',resize);
 
+const toolModes=['Saisir','Figer','Supprimer','Dupliquer','Couleur','Matière +','Matière −'];
 const visualPresets={
   'Fluide':{quality:3,auto:false,texturePower:6,resolution:5,shadows:false,reflections:false,bloom:false,focus:true,focusStrength:6,focusSize:4},
   'Équilibré':{quality:7,auto:true,texturePower:8,resolution:7,shadows:true,reflections:true,bloom:true,focus:true,focusStrength:3,focusSize:6},
-  'Vitrine':{quality:10,auto:false,texturePower:10,resolution:10,shadows:true,reflections:true,bloom:true,focus:false},
+  'Vitrine':{quality:10,auto:false,texturePower:12,resolution:10,shadows:true,reflections:true,bloom:true,focus:false},
   'Benchmark':{quality:10,auto:false,texturePower:10,resolution:7,shadows:true,reflections:true,bloom:false,focus:false},
 };
 function usePreset(name){
@@ -253,22 +276,22 @@ const sections=[
     ['Objets actifs','objects'],['Hitboxes objets','preciseHitboxes'],['Rebond','bounce'],['Force du lancer','throw'],['Réinitialiser les objets',resetObjects],
   ]],
   ['Rendu',[
-    ['Qualité automatique','auto'],['Qualité manuelle','quality'],['Résolution XR¹','resolution'],
+    ['Préréglage','preset'],['Qualité automatique','auto'],['Qualité manuelle','quality'],
     ['Textures','textures'],['Taille textures','texturePower'],['Reflets','reflections'],['Ombres','shadows'],['Bloom du soleil','bloom'],
-    ['Corps du singe','body'],['Mains','hands'],
+    ['Lightmap','lightmap'],['Post FX PC','post'],
   ]],
 ];
 sections.push(['Focus',[['Activer le focus','focus'],['Intensité','focusStrength'],['Taille de la zone nette','focusSize']]]);
-sections.push(['Photo',[['Exposition','exposure'],['Contraste','contrast'],['Saturation','saturation'],['Chaleur','warmth'],...Object.keys(visualPresets).map(name=>['Préréglage : '+name,()=>usePreset(name)])]]);
+sections.push(['Photo',[['Exposition','exposure'],['Contraste','contrast'],['Saturation','saturation'],['Chaleur','warmth'],['Résolution XR¹','resolution'],['Corps du singe','body'],['Mains','hands']]]);
 let reportSnapshot=null, rawFrameMs=[], lastVR=null, reportHadVR=false, contactFrames=0, trackedFrames=0, renderStats={};
 function captureReport(){
   const sorted=rawFrameMs.slice().sort((a,b)=>a-b);
   const percentile=p=>sorted.length?Number(sorted[Math.min(sorted.length-1,Math.floor((sorted.length-1)*p))].toFixed(2)):null;
   reportSnapshot={
-    game:'Gorilla Lab',version:'r13',time:new Date().toISOString(),
+    game:'Gorilla Lab',version:'r14',time:new Date().toISOString(),
     mode:reportHadVR?'VR':'PC',settings:{...settings},qualityActive:liveLevel,
     performance:{fps,frames:sorted.length,frameMs:{median:percentile(.5),p95:percentile(.95),max:percentile(1)}},
-    xr:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,objects:{total:objects.length,held:objects.filter(o=>o.owner).length},locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
+    xr:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,objects:{total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},targetScore:fixtures.score(),locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
   };
   document.querySelector('#download-report').disabled=false;
   hudDirty=true;
@@ -283,17 +306,28 @@ function downloadReport(){
 document.querySelector('#download-report').onclick=downloadReport;
 document.querySelector('#capture-report').onclick=captureReport;
 sections[1][1].push(['Capturer un rapport',captureReport]);
-sections.push(['Spawn',[...objectSpecs.slice(0,6).map((spec,i)=>['Créer : '+spec.name,()=>spawnObject(i)]),['Tout retirer',clearObjects]]]);
+sections.push(['Spawn',[...objectSpecs.slice(0,6).map((spec,i)=>['Créer : '+spec.name,()=>spawnObject(i)]),['Tout retirer',clearObjects],['Tool Gun','toolActive'],['Action Tool Gun','toolMode']]]);
 const title=document.querySelector('#section'), desktop=document.querySelector('#settings');
 const readings=document.querySelector('#readings');
 function change(key,step){
+  if(key==='toolMode'){
+    settings.toolMode=(settings.toolMode-1+step+toolModes.length)%toolModes.length+1;
+    hudDirty=true;return;
+  }
+  if(key==='preset'){ 
+    const names=Object.keys(visualPresets);
+    settings.preset=(settings.preset-1+step+names.length)%names.length+1;
+    usePreset(names[settings.preset-1]);
+    return;
+  }
   if(typeof settings[key]==='boolean') settings[key]=!settings[key];
-  else settings[key]=T.MathUtils.clamp(settings[key]+step,1,10);
+  else settings[key]=T.MathUtils.clamp(settings[key]+step,1,key==='texturePower'?12:key==='toolMode'?7:10);
   if(key==='size'||key==='arms') for(const hand of hands) {hand.valid=false;hand.surface=null;}
   if(key==='quality'){settings.auto=false;liveLevel=settings.quality;}
   if(key==='auto'&&!settings.auto) liveLevel=settings.quality;
   if(key==='movement'||key==='collisions') for(const h of hands) h.surface=null;
   if(key==='objects'&&!settings.objects) resetObjects();
+  if(key==='toolActive'&&!settings.toolActive)for(const h of hands)if(h.held?.toolHold)release(h,false);
   if(key==='preciseHitboxes')syncHitboxes();
   applyVisual();
 }
@@ -318,7 +352,7 @@ function button(text,action){
   b.onclick=()=>{action();desktopMenu();hudDirty=true;};return b;
 }
 function toggleLabel(key){return key==='preciseHitboxes'?(settings[key]?'High':'Low'):(settings[key]?'Actif':'Coupé');}
-function settingValue(key){return key==="texturePower"?[2**(settings[key]-1),2**(settings[key]-1)].join("×"):settings[key];}
+function settingValue(key){if(key==='toolMode')return toolModes[settings.toolMode-1]; if(key==='preset')return Object.keys(visualPresets)[settings.preset-1]; return key==="texturePower"?[2**(settings[key]-1),2**(settings[key]-1)].join("×"):settings[key];}
 function desktopMenu(){
   title.textContent=sections[page][0];
   desktop.replaceChildren();
@@ -369,7 +403,7 @@ function updateMirror(now,pose){
   mirrorForward.set(0,0,-1).applyQuaternion(reflectionView.quaternion);
   toMirror.subVectors(mirrorFace.position,worldHead);
   const distance=toMirror.length();
-  mirrorFace.visible=settings.reflections&&distance<4&&toMirror.dot(mirrorNormal)<-.15&&
+  mirrorFace.visible=(settings.reflections||settings.auto&&liveLevel===10)&&distance<4&&toMirror.dot(mirrorNormal)<-.15&&
     toMirror.multiplyScalar(1/Math.max(.001,distance)).dot(mirrorForward)>.66;
   if(!mirrorFace.visible){lastMirrorRender=-Infinity;return;}
   if(now-lastMirrorRender<45)return;
@@ -378,8 +412,8 @@ function updateMirror(now,pose){
   renderReflection(renderer,scene,reflectionView);
 }
 const ray=new T.Raycaster(), raySource=new T.Vector3(), forward=new T.Vector3();
-const coconutPosition=new T.Vector3();
-let fixtureAim=null;
+const coconutPosition=new T.Vector3(), fixtureTouchPoint=new T.Vector3(), fixtureKeyPoint=new T.Vector3();
+let fixtureAim=null, toolLook=null;
 const fixtures=addLabFixtures(scene,arena.boxes,{
   spawn: index=>{if(!settings.objects)settings.objects=true;spawnObject(index);},
   clear: clearObjects,resetPlayer,resetObjects,
@@ -389,9 +423,21 @@ const fixtures=addLabFixtures(scene,arena.boxes,{
   textureSize:()=>settingValue('texturePower'),
   qualityNext:()=>{if(settings.quality>=10)settings.quality=0;change('quality',1);},
   resolutionNext:()=>{if(settings.resolution>=10)settings.resolution=0;change('resolution',1);},
-  textureNext:()=>{if(settings.texturePower>=10)settings.texturePower=0;change('texturePower',1);},
+  textureNext:()=>{if(settings.texturePower>=12)settings.texturePower=0;change('texturePower',1);},
   hitbox:()=>change('preciseHitboxes',1), movement:()=>change('movement',1),
 });
+function touchFixture(hand){
+  if(!hand.valid||hand.held||menu)return;
+  let touched=null;
+  for(const key of fixtures.targets){
+    key.getWorldPosition(fixtureKeyPoint);
+    if(hand.mesh.position.distanceToSquared(fixtureKeyPoint)>.11**2)continue;
+    key.worldToLocal(fixtureTouchPoint.copy(hand.mesh.position));
+    if(Math.abs(fixtureTouchPoint.x)<key.userData.touchWidth*.5+.025&&Math.abs(fixtureTouchPoint.y)<.095&&Math.abs(fixtureTouchPoint.z)<.046){touched=key;break;}
+  }
+  if(touched&&hand.lastFixture!==touched)touched.userData.action();
+  hand.lastFixture=touched;
+}
 function pluckCoconut(coco,impulse=null){
   coco.getWorldPosition(coconutPosition);
   coco.visible=false;
@@ -413,6 +459,91 @@ function fixtureRay(origin,direction,activate){
   else pluckCoconut(hit.object,direction);
   desktopMenu();
 }
+
+const toolDirection=new T.Vector3(),toolRotation=new T.Quaternion();
+const tool=new T.Group();
+const toolFrame=new T.Mesh(new T.BoxGeometry(.061,.052,.165),new T.MeshLambertMaterial({color:'#59777b'}));
+toolFrame.position.set(.045,.023,-.055);tool.add(toolFrame);
+const toolTip=new T.Mesh(new T.BoxGeometry(.052,.047,.032),new T.MeshBasicMaterial({color:'#87e7d9'}));
+toolTip.position.set(.045,.023,-.143);tool.add(toolTip);scene.add(tool);tool.visible=false;
+const toolColors=['#f47655','#73c8ff','#89ebad','#ffcd69','#c895ff','#fff6df','#242b36'];
+const toolStyles=['Mat','Brillant','Transparent','Lumineux'];
+const toolPosition=new T.Vector3();
+let desktopToolHold=null;
+function customMaterial(body){
+  if(!body.customMaterial){
+    body.mesh.material=body.mesh.material.clone();
+    body.customMaterial=true;
+    grade(body.mesh.material);
+  }
+  return body.mesh.material;
+}
+function paintStyle(body){
+  const material=customMaterial(body),style=body.materialStyle;
+  material.roughness=[.94,.12,.16,.40][style];
+  material.metalness=[0,.87,.12,0][style];
+  material.transparent=style===2;
+  material.depthWrite=style!==2;
+  material.opacity=style===2?.40:1;
+  material.emissive.copy(material.color);
+  material.emissiveIntensity=style===3?1.65:0;
+  material.needsUpdate=true;
+}
+function useToolRay(origin,direction,activate,hand){
+  if(!settings.objects)return;
+  ray.set(origin,direction);
+  ray.far=9;
+  const hit=ray.intersectObjects(objects.filter(o=>!o.owner&&o.mesh.visible).map(o=>o.mesh),false)[0];
+  ray.far=Infinity;
+  if(hit){cursor.visible=true;cursor.position.copy(hit.point).addScaledVector(direction,-.012);}
+  if(!activate)return;
+  const mode=settings.toolMode;
+  if(mode===1&&hand?.held?.toolHold){release(hand,true);return;}
+  if(mode===1&&desktopToolHold){desktopToolHold.owner=null;desktopToolHold=null;return;}
+  if(!hit)return;
+  const body=objects.find(o=>o.mesh===hit.object);
+  if(mode===1){
+    if(hand?.held)return;
+    body.frozen=false;
+    body.toolHold=true;body.toolDistance=T.MathUtils.clamp(hit.distance+body.radius*.35,1.1,5);
+    body.relativeRotation.multiplyQuaternions(toolRotation.copy(hand?.mesh.quaternion??camera.quaternion).invert(),body.mesh.quaternion);
+    body.velocity.set(0,0,0);body.angular.set(0,0,0);
+    if(hand){body.owner=hand;hand.held=body;}
+    else {body.owner=tool;desktopToolHold=body;}
+  }else if(mode===2){
+    body.frozen=!body.frozen;
+    body.velocity.set(0,0,0);body.angular.set(0,0,0);
+  }else if(mode===3){
+    scene.remove(body.mesh,body.shadow);
+    if(body.customMaterial)body.mesh.material.dispose();
+    objects.splice(objects.indexOf(body),1);
+  }else if(mode===4){
+    toolPosition.copy(body.mesh.position).addScaledVector(up,body.radius*2+.08);
+    const duplicate=spawnObject(objectSpecs.indexOf(body.spec),toolPosition);
+    duplicate.mesh.quaternion.copy(body.mesh.quaternion);
+    duplicate.paint=body.paint;duplicate.materialStyle=body.materialStyle;
+    if(body.customMaterial){duplicate.mesh.material=body.mesh.material.clone();duplicate.customMaterial=true;grade(duplicate.mesh.material);}
+    placeObject(duplicate,arena.boxes);
+  }else if(mode===5){
+    const material=customMaterial(body);
+    material.color.set(toolColors[body.paint++%toolColors.length]);
+    if(body.materialStyle===3)material.emissive.copy(material.color);
+  }else{
+    body.materialStyle=body.materialStyle<0?(mode===6?0:3):(body.materialStyle+(mode===6?1:3))%4;
+    paintStyle(body);
+  }
+  hudDirty=true;
+}
+function aimTool(frame,space,{source,hand,click}){
+  const pose=frame.getPose(source.targetRaySpace,space);
+  if(!pose)return;
+  const p=pose.transform.position,q=pose.transform.orientation;
+  raySource.set(p.x,p.y-drop,p.z).applyAxisAngle(up,yaw).add(rig.position);
+  spin.set(q.x,q.y,q.z,q.w);
+  forward.set(0,0,-1).applyQuaternion(spin).applyAxisAngle(up,yaw);
+  useToolRay(raySource,forward,click,hand);
+}
+
 function aimFixture(frame,space,input,activate){
   const pose=frame.getPose(input.targetRaySpace,space);
   if(!pose)return;
@@ -561,7 +692,7 @@ function trackHands(frame,space,dt){
     gripRotation.set(q.x,q.y,q.z,q.w).premultiply(spin.setFromAxisAngle(up,yaw));
     h.mesh.quaternion.copy(gripRotation);
     animateFingers(h,source.gamepad?.buttons??[],dt);
-    if(!menu&&grip&&!h.grip&&settings.objects){
+    if(!menu&&grip&&!h.grip&&settings.objects&&!h.held){
       let body=null, best=.15;
       const coco=fixtures.coconuts.find(m=>m.visible&&m.getWorldPosition(coconutPosition).distanceToSquared(h.target)<.26**2);
       if(coco)body=pluckCoconut(coco);
@@ -570,22 +701,28 @@ function trackHands(frame,space,dt){
         const distance=distanceToObject(h.target,o);
         if(!coco&&distance<best){best=distance;body=o;}
       }
-      if(body){
-        h.held=body;body.owner=h;
+      if(body&&!h.held){
+        h.held=body;body.owner=h;body.frozen=false;
         inverseGrip.copy(gripRotation).invert();
         body.offset.copy(body.mesh.position).sub(h.target).applyQuaternion(inverseGrip);
         body.relativeRotation.multiplyQuaternions(inverseGrip,body.mesh.quaternion);
         body.velocity.set(0,0,0);body.angular.set(0,0,0);
       }
     }
-    if(!grip&&h.grip)release(h,!menu);
+    if(!grip&&h.grip&&!h.held?.toolHold)release(h,!menu);
     h.grip=grip;
     if(h.held){
       const object=h.held;
       prior.copy(object.mesh.position);
       inverseGrip.copy(object.mesh.quaternion).invert();
       object.mesh.quaternion.multiplyQuaternions(gripRotation,object.relativeRotation);
-      object.mesh.position.copy(object.offset).applyQuaternion(gripRotation).add(h.target);
+      if(object.toolHold){
+        const rayPose=frame.getPose(source.targetRaySpace,space);
+        const a=rayPose?.transform.orientation;
+        if(a)toolDirection.set(0,0,-1).applyQuaternion(toolRotation.set(a.x,a.y,a.z,a.w)).applyAxisAngle(up,yaw);
+        else toolDirection.set(0,0,-1).applyQuaternion(gripRotation);
+        object.mesh.position.copy(h.target).addScaledVector(toolDirection,object.toolDistance);
+      }else object.mesh.position.copy(object.offset).applyQuaternion(gripRotation).add(h.target);
       placeObject(object,activeBoxes);
       object.velocity.lerp(scratch.subVectors(object.mesh.position,prior).multiplyScalar(1/Math.max(.006,dt)).clampLength(0,23),.52);
       inverseGrip.premultiply(object.mesh.quaternion).normalize();
@@ -642,8 +779,15 @@ function trackHands(frame,space,dt){
     const btn=Boolean(source.gamepad?.buttons[5]?.pressed||source.gamepad?.buttons[3]?.pressed&&h.side==='left');
     if(btn&&!h.menu)setMenu(h.side);
     h.menu=btn;
+    const toolButton=Boolean(source.gamepad?.buttons[4]?.pressed);
+    if(h.side==='right'&&toolButton&&!h.toolButton&&!menu)change('toolActive',1);
+    h.toolButton=toolButton;
+    const cycle=Boolean(source.gamepad?.buttons[3]?.pressed);
+    if(h.side==='right'&&cycle&&!h.toolCycle&&settings.toolActive&&!menu)change('toolMode',1);
+    h.toolCycle=cycle;
     const trigger=Boolean(source.gamepad?.buttons[0]?.pressed);
     if(menu&&h.side!==panelHand) pendingAim={source,click:trigger&&!h.trigger};
+    else if(!menu&&h.side==='right'&&settings.toolActive)toolLook={source,hand:h,click:trigger&&!h.trigger};
     else if(!menu&&(h.side==='right'||trigger&&!h.trigger))fixtureAim={source,click:trigger&&!h.trigger};
     h.trigger=trigger;
   }
@@ -764,14 +908,15 @@ function updateFps(dt,inVR){
   windowFrames=0;windowElapsed=0;hudDirty=true;
   readings.textContent=fps+' FPS · qualité '+liveLevel+'/10 · '+(settings.auto?'auto':'manuel');
   if(!settings.auto||qualityTimer<3)return;
-  const target=inVR?(renderer.xr.getSession()?.frameRate||refreshRate):60;
-  lowCount=fps<target*.88?lowCount+1:0;
-  highCount=fps>=target*.98?highCount+1:0;
-  const next=T.MathUtils.clamp(liveLevel+(lowCount>=2?-1:highCount>=4?1:0),1,10);
+  const target=60;
+  lowCount=fps<target-3?lowCount+1:0;
+  highCount=fps>=target-1?highCount+1:0;
+  const next=T.MathUtils.clamp(liveLevel+(lowCount>=2?-1:highCount>=2?(fps>=68?2:1):0),1,10);
   if(next!==liveLevel){
     liveLevel=next;qualityTimer=lowCount=highCount=0;applyVisual();
   }
 }
+arena.bakeLightmap();
 const photoContrast={value:1},photoSaturation={value:1},photoWarmth={value:0};
 const graded=new Set();
 function grade(material){ if(!material||graded.has(material))return;
@@ -805,7 +950,7 @@ renderer.setAnimationLoop((time,frame)=>{
   if(inVR&&!pose)return;
   cursor.visible=false;
   activeBoxes=settings.collisions?arena.boxes:blocked;
-  pendingAim=null;fixtureAim=null;
+  pendingAim=null;fixtureAim=null;toolLook=null;
   panel.mesh.visible=false;
   character(frame,space,pose,dt);
   for(const object of objects){
@@ -819,15 +964,22 @@ renderer.setAnimationLoop((time,frame)=>{
     const shadowY=x>=hills.xMin&&x<=hills.xMax&&z>=hills.zMin&&z<=hills.zMax?hills.height(x,z):0;
     object.shadow.position.set(x,shadowY+.006,z);
   }
+  for(const object of objects)object.beforePhysics.copy(object.mesh.position);
   solveObjects(objects,arena.boxes,dt,9.81*settings.gravity/5,.12+settings.bounce*.064,surfaceAt);
+  fixtures.updateTarget(objects);
+  if(inVR&&!menu)for(const hand of hands)touchFixture(hand);
   arena.probe.rotation.y+=dt*.29;
   updateFps(Math.min(.3,actual),inVR);
   panel.mesh.visible=inVR&&menu;
   if(panel.mesh.visible&&pendingAim) aim(frame,space,pendingAim.source,pendingAim.click);
+  else if(inVR&&toolLook)aimTool(frame,space,toolLook);
   else if(inVR&&fixtureAim)aimFixture(frame,space,fixtureAim.source,fixtureAim.click);
   else if(!inVR){
     camera.getWorldPosition(raySource);camera.getWorldDirection(forward);
-    fixtureRay(raySource,forward,keys.delete('KeyE'));
+    if(keys.delete('KeyG'))change('toolActive',1);
+    if(keys.delete('KeyT'))change('toolMode',1);
+    if(settings.toolActive)useToolRay(raySource,forward,keys.delete('KeyE'),null);
+    else fixtureRay(raySource,forward,keys.delete('KeyE'));
   }
   wrist.mesh.visible=inVR&&!menu&&hands[0].valid;
   if(wrist.mesh.visible){
@@ -839,10 +991,20 @@ renderer.setAnimationLoop((time,frame)=>{
     if(menu)drawPanel();
     const c=wrist.ctx;c.clearRect(0,0,416,84);c.fillStyle='#182632';c.fillRect(0,0,416,84);
     c.fillStyle='#fff0cf';c.font='bold 25px system-ui';c.fillText(fps+' FPS     Q '+liveLevel+'/10',17,32);
-    c.font='20px system-ui';c.fillText('B/Y : réglages   ·   Grip : saisir',17,66);wrist.texture.needsUpdate=true;
+    c.font='20px system-ui';c.fillText(settings.toolActive?'Tool Gun : '+toolModes[settings.toolMode-1]:'B/Y : réglages   ·   A : Tool Gun',17,66);wrist.texture.needsUpdate=true;
+  }
+  const rightHand=hands[1];
+  tool.visible=inVR&&settings.toolActive&&rightHand.valid;
+  if(tool.visible){tool.position.copy(rightHand.mesh.position);tool.quaternion.copy(rightHand.mesh.quaternion);}
+  if(!settings.toolActive&&desktopToolHold){desktopToolHold.owner=null;desktopToolHold=null;}
+  if(!inVR&&desktopToolHold){
+    camera.getWorldPosition(toolPosition);camera.getWorldDirection(toolDirection);
+    desktopToolHold.mesh.position.copy(toolPosition).addScaledVector(toolDirection,desktopToolHold.toolDistance);
+    placeObject(desktopToolHold,arena.boxes);
   }
   updateMirror(time,pose);
-  renderer.render(scene,camera);
+  if(!inVR&&liveLevel>=8&&(settings.post||(settings.auto&&liveLevel===10)))renderDesktopEffects();
+  else renderer.render(scene,camera);
   if(inVR||!reportHadVR) {
     rawFrameMs.push(actual*1000);
     if(rawFrameMs.length>720)rawFrameMs.splice(0,rawFrameMs.length-720);

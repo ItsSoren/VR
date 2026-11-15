@@ -73,32 +73,50 @@ export function addLabFixtures(scene,boxes,actions) {
     const base=new T.Mesh(new T.BoxGeometry(1.72,.91,.57),cabinet);
     base.position.set(x,.455,z);base.castShadow=base.receiveShadow=true;scene.add(base);
     addCollider(base,new T.Vector3(.86,.455,.285));
+
     const panel=new T.Group();
-    panel.position.set(x,.97,z+.03);panel.rotation.x=-.5;scene.add(panel);
-    const canvas=document.createElement('canvas');canvas.width=512;canvas.height=270;
+    panel.position.set(x,1.10,z+.40);panel.rotation.x=-.35;scene.add(panel);
+    const backing=new T.Mesh(new T.BoxGeometry(.64,.36,.055),new T.MeshLambertMaterial({color:'#182831'}));
+    panel.add(backing);
+    const canvas=document.createElement('canvas');canvas.width=512;canvas.height=96;
     const ctx=canvas.getContext('2d'),texture=new T.CanvasTexture(canvas);texture.colorSpace=T.SRGBColorSpace;
-    const badge=new T.Mesh(new T.PlaneGeometry(1.88,.99),new T.MeshBasicMaterial({map:texture}));
-    panel.add(badge);
-    const hit=new T.Mesh(new T.PlaneGeometry(1.88,.99),new T.MeshBasicMaterial({transparent:true,opacity:0,depthWrite:false}));
-    hit.position.z=.006;panel.add(hit);targets.push(hit);
+    const badge=new T.Mesh(new T.PlaneGeometry(.61,.095),new T.MeshBasicMaterial({map:texture}));
+    badge.position.set(0,.116,.030);panel.add(badge);
+    const keyWidth=.592/commands.length;
+    const keys=commands.map(([label,action],i)=>{
+      const key=new T.Mesh(new T.BoxGeometry(keyWidth-.012,.155,.040),new T.MeshLambertMaterial({color:'#478086'}));
+      key.position.set(-.296+keyWidth*(i+.5),-.045,.046);
+      panel.add(key);targets.push(key);
+      key.userData.touchWidth=keyWidth-.012;
+      const c=document.createElement('canvas');c.width=208;c.height=172;
+      const labelTexture=new T.CanvasTexture(c);labelTexture.colorSpace=T.SRGBColorSpace;
+      const legend=new T.Mesh(new T.PlaneGeometry(keyWidth-.017,.139),new T.MeshBasicMaterial({map:labelTexture}));
+      legend.position.z=.0205;key.add(legend);
+      let lastPress=-Infinity;
+      key.userData.action=()=>{
+        const now=performance.now();
+        if(now-lastPress<250)return;
+        lastPress=now;
+        action();redraw();key.position.z=.036;
+        setTimeout(()=>{key.position.z=.046;},115);
+      };
+      return {label,context:c.getContext('2d'),texture:labelTexture};
+    });
     function draw(){
-      ctx.fillStyle='#182831';ctx.fillRect(0,0,512,270);
-      ctx.fillStyle='#ffe1a0';ctx.font='bold 34px system-ui';ctx.fillText(name,22,45);
-      commands.forEach(([label],i)=>{
-        const w=468/commands.length,x=22+i*w;
-        ctx.fillStyle='#386269';ctx.fillRect(x+3,68,w-6,140);
-        ctx.fillStyle='#fff2d5';ctx.textAlign='center';ctx.font='bold 21px system-ui';
-        const words=(typeof label==='function'?label():label).split('|');
-        words.forEach((word,j)=>ctx.fillText(word,x+w/2,130+j*26,w-12));
-        ctx.textAlign='left';
-      });
-      ctx.fillStyle='#b8d4d3';ctx.font='19px system-ui';ctx.fillText('Gâchette / E',22,248);texture.needsUpdate=true;
+      ctx.fillStyle='#182831';ctx.fillRect(0,0,512,96);
+      ctx.fillStyle='#ffe1a0';ctx.font='bold 38px system-ui';ctx.fillText(name,17,62,478);
+      for(const key of keys){
+        const c=key.context;
+        c.fillStyle='#386269';c.fillRect(0,0,208,172);
+        c.fillStyle='#fff2d5';c.textAlign='center';c.font='bold 27px system-ui';
+        const words=(typeof key.label==='function'?key.label():key.label).split('|');
+        words.forEach((word,j)=>c.fillText(word,104,(words.length>1?68:97)+j*37,188));
+        key.texture.needsUpdate=true;
+      }
+      texture.needsUpdate=true;
     }
-    hit.userData.action=uv=>{
-      const x=uv.x*512,y=(1-uv.y)*270,index=Math.floor((x-22)/(468/commands.length));
-      if(y>=68&&y<=208&&index>=0&&index<commands.length){commands[index][1]();redraw();}
-    };
     labels.push(draw);
+
   }
   function redraw(){for(const draw of labels)draw();}
   station(-3,1.5,'BANQUE D’OBJETS',[
@@ -117,7 +135,42 @@ export function addLabFixtures(scene,boxes,actions) {
     ['Remettre|les cocos',actions.resetTree],['Vider|les objets',actions.clear],
   ]);
   redraw();
-  return {targets,coconuts,redraw};
+  const target=new T.Group();
+  target.position.set(16,1.52,-12);scene.add(target);
+  const bullseyePalette=['#e2ad5c','#ca664b','#f5e5bd'];
+  for(let i=0;i<3;i++){
+    const radius=[.90,.58,.27][i];
+    const ring=new T.Mesh(new T.CircleGeometry(radius,20),new T.MeshLambertMaterial({color:bullseyePalette[i],side:T.DoubleSide}));
+    ring.position.z=i*.012;target.add(ring);
+  }
+  const targetPost=new T.Mesh(new T.BoxGeometry(.14,1.5,.14),cabinet);
+  targetPost.position.set(16,.75,-12.11);scene.add(targetPost);
+  let score=0;
+  const scoreCanvas=document.createElement('canvas');scoreCanvas.width=256;scoreCanvas.height=64;
+  const scoreCtx=scoreCanvas.getContext('2d'),scoreTexture=new T.CanvasTexture(scoreCanvas);
+  scoreTexture.colorSpace=T.SRGBColorSpace;
+  const scoreSign=new T.Mesh(new T.PlaneGeometry(1.4,.35),new T.MeshBasicMaterial({map:scoreTexture,side:T.DoubleSide}));
+  scoreSign.position.set(16,2.64,-11.98);scene.add(scoreSign);
+  function drawScore(){
+    scoreCtx.fillStyle='#182831';scoreCtx.fillRect(0,0,256,64);
+    scoreCtx.textAlign='center';scoreCtx.font='bold 28px system-ui';scoreCtx.fillStyle='#fff0ce';
+    scoreCtx.fillText('CIBLE  ·  '+score,128,42);scoreTexture.needsUpdate=true;
+  }
+  function updateTarget(objects){
+    for(const item of objects){
+      if(!item.beforePhysics||item.owner||item.frozen||!item.mesh.visible)continue;
+      const a=item.beforePhysics,b=item.mesh.position;
+      if(a.z<=-12||b.z>-12||item.velocity.z>=-1)continue;
+      const t=(a.z+12)/(a.z-b.z);
+      const range=Math.hypot(T.MathUtils.lerp(a.x,b.x,t)-16,T.MathUtils.lerp(a.y,b.y,t)-1.52);
+      if(range<=.9+item.radius*.45){
+        score+=range<.27?3:range<.58?2:1;
+        drawScore();
+      }
+    }
+  }
+  drawScore();
+  return {targets,coconuts,redraw,updateTarget,score:()=>score};
 }
 
 

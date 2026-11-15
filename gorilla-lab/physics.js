@@ -245,7 +245,7 @@ export function solveObjects(objects,boxes,dt,gravity,rebound,surfaceAt) {
   const step=dt/count;
   for(let k=0;k<count;k++) {
     for(const body of objects) {
-      if(body.owner || !body.mesh.visible) continue;
+      if(body.owner || body.frozen || !body.mesh.visible) continue;
       body.velocity.y-=gravity*step*(surfaceAt(body.mesh.position)?.gravity??1);
       body.mesh.position.addScaledVector(body.velocity,step);
       const speed=body.angular.length();
@@ -257,7 +257,7 @@ export function solveObjects(objects,boxes,dt,gravity,rebound,surfaceAt) {
     for(let i=0;i<ordered.length;i++) for(let j=i+1;j<ordered.length;j++) {
       const a=ordered[i], b=ordered[j];
       if(b.mesh.position.x-a.mesh.position.x>a.radius+largest)break;
-      if(a.owner&&b.owner)continue;
+      if((a.owner||a.frozen)&&(b.owner||b.frozen))continue;
       correction.subVectors(b.mesh.position,a.mesh.position);
       const d=correction.length();
       if(d>=a.radius+b.radius||d<.0001)continue;
@@ -266,7 +266,7 @@ export function solveObjects(objects,boxes,dt,gravity,rebound,surfaceAt) {
       const overlap=precise?sat(a,b,normal):support(a,correction)+support(b,angular.copy(correction).negate())-d;
       if(precise)correction.copy(normal).negate();
       if(overlap<=0)continue;
-      const ia=a.owner?0:1/a.mass,ib=b.owner?0:1/b.mass,total=ia+ib;
+      const ia=a.owner||a.frozen?0:1/a.mass,ib=b.owner||b.frozen?0:1/b.mass,total=ia+ib;
       a.mesh.position.addScaledVector(correction,-overlap*ia/total);
       b.mesh.position.addScaledVector(correction,overlap*ib/total);
       const relative=tangent.subVectors(b.velocity,a.velocity).dot(correction);
@@ -310,4 +310,5 @@ export function playerObjectContact(position,radius,object,velocity){
   }
   return true;
 }
+
 
