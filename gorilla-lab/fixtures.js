@@ -1,6 +1,7 @@
 
 import * as T from 'three';
 import {boxCollider} from './physics.js';
+import {labObjectSpawns,labStations,labTarget,labTree} from './lab-layout.js';
 
 export function addLabFixtures(scene,boxes,actions) {
   const bark=new T.MeshLambertMaterial({color:0xffffff,vertexColors:true,flatShading:true});
@@ -14,7 +15,7 @@ export function addLabFixtures(scene,boxes,actions) {
     trunkColors.push(color.r,color.g,color.b);
   }
   trunkGeo.setAttribute('color',new T.Float32BufferAttribute(trunkColors,3));
-  const tree=new T.Group();tree.position.set(4.4,0,-9.2);
+  const tree=new T.Group();tree.position.set(labTree.x,0,labTree.z);
   tree.rotation.z=-.14;scene.add(tree);
   const trunk=new T.Mesh(trunkGeo,bark);
   trunk.position.y=1.575;trunk.castShadow=trunk.receiveShadow=true;tree.add(trunk);
@@ -69,7 +70,7 @@ export function addLabFixtures(scene,boxes,actions) {
   tree.updateMatrixWorld(true);
   const targets=[], labels=[];
   const cabinet=new T.MeshLambertMaterial({color:'#485d5d',flatShading:true});
-  function station(x,z,name,commands){
+  function station([x,z],name,commands){
     const base=new T.Mesh(new T.BoxGeometry(1.72,.91,.57),cabinet);
     base.position.set(x,.455,z);base.castShadow=base.receiveShadow=true;scene.add(base);
     addCollider(base,new T.Vector3(.86,.455,.285));
@@ -119,24 +120,25 @@ export function addLabFixtures(scene,boxes,actions) {
 
   }
   function redraw(){for(const draw of labels)draw();}
-  station(-3,1.5,'BANQUE D’OBJETS',[
-    ['Cube',()=>actions.spawn(0)],['Boule',()=>actions.spawn(1)],['Tétraèdre',()=>actions.spawn(2)],['Vider',actions.clear],
+  station(labStations.objects,'BANQUE D’OBJETS',[
+    ['Cube',()=>actions.spawn(0,labObjectSpawns[0])],['Boule',()=>actions.spawn(1,labObjectSpawns[0])],['Tétraèdre',()=>actions.spawn(2,labObjectSpawns[0])],['Vider',actions.clear],
   ]);
-  station(-5.1,1.5,'GROS OBJETS',[[ 'Rectangle',()=>actions.spawn(4) ],[ 'Sphère',()=>actions.spawn(5) ]]);
-  station(3.2,1.5,'RENDU',[
+  station(labStations.largeObjects,'GROS OBJETS',[[ 'Rectangle',()=>actions.spawn(4,labObjectSpawns[1]) ],[ 'Sphère',()=>actions.spawn(5,labObjectSpawns[1]) ]]);
+  station(labStations.rendering,'RENDU',[
     [()=>('Qualité|'+actions.quality()),actions.qualityNext],
     [()=>('Résolution XR|'+actions.resolution()),actions.resolutionNext],
     [()=>('Textures|'+actions.textureSize()),actions.textureNext],
   ]);
-  station(-4.5,-18.5,'PARCOURS',[
+  station(labStations.course,'PARCOURS',[
     ['Retour|départ',actions.resetPlayer],['Remettre|objets',actions.resetObjects],['Hitboxes|Low / High',actions.hitbox],['Appuis|On / Off',actions.movement],
   ]);
-  station(5.9,-8.0,'COCOTIER',[
+  station(labStations.coconuts,'COCOTIER',[
     ['Remettre|les cocos',actions.resetTree],['Vider|les objets',actions.clear],
   ]);
   redraw();
   const target=new T.Group();
-  target.position.set(16,1.52,-12);scene.add(target);
+  const {x:targetX,y:targetY,z:targetZ}=labTarget;
+  target.position.set(targetX,targetY,targetZ);scene.add(target);
   const bullseyePalette=['#e2ad5c','#ca664b','#f5e5bd'];
   for(let i=0;i<3;i++){
     const radius=[.90,.58,.27][i];
@@ -144,13 +146,13 @@ export function addLabFixtures(scene,boxes,actions) {
     ring.position.z=i*.012;target.add(ring);
   }
   const targetPost=new T.Mesh(new T.BoxGeometry(.14,1.5,.14),cabinet);
-  targetPost.position.set(16,.75,-12.11);scene.add(targetPost);
+  targetPost.position.set(0,.75-targetY,-.11);target.add(targetPost);
   let score=0;
   const scoreCanvas=document.createElement('canvas');scoreCanvas.width=256;scoreCanvas.height=64;
   const scoreCtx=scoreCanvas.getContext('2d'),scoreTexture=new T.CanvasTexture(scoreCanvas);
   scoreTexture.colorSpace=T.SRGBColorSpace;
   const scoreSign=new T.Mesh(new T.PlaneGeometry(1.4,.35),new T.MeshBasicMaterial({map:scoreTexture,side:T.DoubleSide}));
-  scoreSign.position.set(16,2.64,-11.98);scene.add(scoreSign);
+  scoreSign.position.set(0,2.64-targetY,.02);target.add(scoreSign);
   function drawScore(){
     scoreCtx.fillStyle='#182831';scoreCtx.fillRect(0,0,256,64);
     scoreCtx.textAlign='center';scoreCtx.font='bold 28px system-ui';scoreCtx.fillStyle='#fff0ce';
@@ -160,9 +162,9 @@ export function addLabFixtures(scene,boxes,actions) {
     for(const item of objects){
       if(!item.beforePhysics||item.owner||item.frozen||!item.mesh.visible)continue;
       const a=item.beforePhysics,b=item.mesh.position;
-      if(a.z<=-12||b.z>-12||item.velocity.z>=-1)continue;
-      const t=(a.z+12)/(a.z-b.z);
-      const range=Math.hypot(T.MathUtils.lerp(a.x,b.x,t)-16,T.MathUtils.lerp(a.y,b.y,t)-1.52);
+      if(a.z<=targetZ||b.z>targetZ||item.velocity.z>=-1)continue;
+      const t=(a.z-targetZ)/(a.z-b.z);
+      const range=Math.hypot(T.MathUtils.lerp(a.x,b.x,t)-targetX,T.MathUtils.lerp(a.y,b.y,t)-targetY);
       if(range<=.9+item.radius*.45){
         score+=range<.27?3:range<.58?2:1;
         drawScore();

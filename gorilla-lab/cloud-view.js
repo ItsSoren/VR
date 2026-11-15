@@ -1,5 +1,8 @@
 
 import * as T from 'three';
+import {createAvatarStyle} from './avatar-style.js';
+import {createHandSkin} from './hand-skin.js';
+import {createBodySkin} from './body-skin.js';
 import {createCloudClient,mapCode,roomCode,createObjectFeed} from './cloud-link.js';
 
 export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,applyCoconuts}){
@@ -15,19 +18,17 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     color:'#55c7ff',transparent:true,opacity:.45,side:T.DoubleSide,blending:T.AdditiveBlending,depthWrite:false,
   }));
   trail.rotation.x=Math.PI;trail.position.y=-.20;orb.add(trail);
-  const avatarMaterial=new T.MeshLambertMaterial({color:'#f4f3e7',flatShading:true});
-  const head=new T.Mesh(new T.IcosahedronGeometry(.145,1),avatarMaterial);
-  const body=new T.Mesh(new T.IcosahedronGeometry(.24,1),avatarMaterial);
-  body.position.set(0,-.35,.09);body.scale.set(.91,1.12,.69);
-  remotePlayer.add(head,body);scene.add(orb,remotePlayer);
-  const remoteHands=[-1,1].map(side=>{
-    const palm=new T.Mesh(new T.IcosahedronGeometry(.075,0),avatarMaterial);
-    const geometry=new T.CylinderGeometry(.054,.073,1,7);
-    const upper=new T.Mesh(geometry,avatarMaterial),lower=new T.Mesh(geometry,avatarMaterial);
-    remotePlayer.add(palm,upper,lower);
-    return {side,palm,upper,lower};
+  const style=createAvatarStyle(0);
+  const head=style.createHead();
+  const remoteHands=['left','right'].map(side=>{
+    const skin=createHandSkin(side,style.hand,{openWrist:true});
+    return {skin,position:new T.Vector3(),quaternion:new T.Quaternion(),pressure:[0,0,0],tracked:false};
   });
-  const up=new T.Vector3(0,1,0),handPoint=new T.Vector3(),armRoot=new T.Vector3(),elbow=new T.Vector3(),dir=new T.Vector3();
+  const bodySkin=createBodySkin(style.fur,remoteHands.map(h=>({geometry:h.skin.mesh.geometry,wristIndices:h.skin.wristIndices})));
+  const body=bodySkin.mesh;
+  body.position.y=-.46;
+  remotePlayer.add(head,body);scene.add(orb,remotePlayer);
+  const handPoint=new T.Vector3(),handPoses=[null,null];
   const relative=new T.Quaternion(),goal=new T.Quaternion();
   const replicas=new Map(),feed=createObjectFeed();
   let replicaHost=0,replicaMap=-1,replicaLight=-1,replicaCoconuts=-1;
@@ -36,16 +37,12 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     if(r){scene.remove(r.mesh);r.mesh.material.dispose();replicas.delete(id);}
   }
   function clearReplicas(){for(const id of replicas.keys())removeReplica(id); replicaHost=0;replicaMap=-1;if(replicaLight!==-1){replicaLight=-1;applyLight?.(null);}if(replicaCoconuts!==-1){replicaCoconuts=-1;applyCoconuts?.(null);}}
-  function tube(mesh,a,b){
-    dir.subVectors(b,a);
-    mesh.position.copy(a).addScaledVector(dir,.5);mesh.scale.y=Math.max(.002,dir.length());
-    mesh.quaternion.setFromUnitVectors(up,dir.normalize());
-  }
   function setReplicaAppearance(replica,record){
     if(replica.color===record.color&&replica.style===record.style)return;
     replica.color=record.color;replica.style=record.style;
     const m=replica.mesh.material;
     m.color.setHex(record.color);
+    if(record.style===0)return;
     m.roughness=[.44,.94,.12,.16,.40][record.style];
     m.metalness=[.10,0,.87,.12,0][record.style];
     m.opacity=record.style===3?.40:1;m.transparent=record.style===3;m.depthWrite=!m.transparent;
@@ -99,22 +96,26 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
       relative.copy(model.quaternion).invert();
       goal.copy(data.head).premultiply(relative);
       head.quaternion.slerp(goal,smooth);
-      body.position.y=-Math.max(.25,data.armSpan*.35);
-      body.scale.y=Math.max(.60,data.armSpan*1.35);
+      const stretch=Math.max(.38,data.armSpan*(2/3)/.82);
+      body.position.y=-.25-.24*stretch;
+      style.setColor(data.color??0);
       for(let i=0;i<remoteHands.length;i++){
         const h=remoteHands[i],state=data.hands[i];
-        h.palm.visible=h.upper.visible=h.lower.visible=Boolean(state);
-        if(!state)continue;
-        handPoint.copy(state.position).sub(pose).applyQuaternion(relative);
-        h.palm.position.lerp(handPoint,smooth);
+        handPoses[i]=state?h:null;
+        if(!state){h.tracked=false;continue;}
+        handPoint.copy(state.position).sub(pose).applyQuaternion(relative).sub(body.position);
         goal.copy(state.quaternion).premultiply(relative);
-        h.palm.quaternion.slerp(goal,smooth);
-        armRoot.set(h.side*.215,-.23,.065);
-        elbow.copy(armRoot).lerp(h.palm.position,.48);
-        elbow.x+=h.side*.075;elbow.y-=Math.min(.17,data.armSpan*.22);
-        tube(h.upper,armRoot,elbow);tube(h.lower,elbow,h.palm.position);
+        if(h.tracked){h.position.lerp(handPoint,smooth);h.quaternion.slerp(goal,smooth);}
+        else {h.position.copy(handPoint);h.quaternion.copy(goal);}
+        h.tracked=true;
+        for(let j=0;j<3;j++)h.pressure[j]+=( (state.pressure?.[j]??0)-h.pressure[j])*smooth;
+        h.skin.pose(h.pressure,false);
       }
-    }else for(const h of remoteHands)h.palm.visible=h.upper.visible=h.lower.visible=false;
+      bodySkin.pose(handPoses,data.armSpan*.5,.97,stretch,true);
+    }else{
+      handPoses.fill(null);
+      bodySkin.pose(handPoses,.42,.97,.68,true);
+    }
   }
   orb.visible=remotePlayer.visible=false;
   const $=id=>document.querySelector(id);

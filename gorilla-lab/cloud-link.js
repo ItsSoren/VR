@@ -96,7 +96,7 @@ export function createCloudClient({onStatus,onPose,Socket=WebSocket,now=Date.now
 
 
 
-const pointSize=15, quatSize=12, objectSize=43;
+const pointSize=15, quatSize=12, objectSize=44;
 const packPoint=p=>p&&[p.x,p.y,p.z].every(n=>Number.isFinite(n)&&Math.abs(n)<=180)
   ?[p.x,p.y,p.z].map(n=>digits(n*100+20000,5)).join(''):null;
 function unpackPoint(s,i){
@@ -114,14 +114,14 @@ function unpackQuat(s,i){
 export function encodeObjectState(body){
   const p=packPoint(body.mesh.position),q=packQuat(body.mesh.quaternion);
   const id=body.netId, type=body.netType;
-  if(!p||!q||!Number.isInteger(id)||id<1||id>=100000||!Number.isInteger(type)||type<0||type>8)return null;
+  if(!p||!q||!Number.isInteger(id)||id<1||id>=100000||!Number.isInteger(type)||type<0||type>10)return null;
   const flags=(body.owner?1:0)+(body.frozen?2:0)+((body.velocity.lengthSq()<.002&&body.angular.lengthSq()<.004&&!body.owner)?4:0);
   const style=Math.min(4,Math.max(0,(body.materialStyle??-1)+1));
   const color=body.mesh.material.color?.getHex()??0xffffff;
-  return digits(id,5)+type+flags+style+digits(color,8)+p+q;
+  return digits(id,5)+digits(type,2)+flags+style+digits(color,8)+p+q;
 }
 export function objectRemoval(id){
-  return digits(id,5)+'9'+'0'.repeat(objectSize-6);
+  return digits(id,5)+'99'+'0'.repeat(objectSize-7);
 }
 export function encodeAvatar(pose,avatar,delta){
   if(!avatar)return pose;
@@ -134,29 +134,36 @@ export function encodeAvatar(pose,avatar,delta){
   const height=digits(Math.max(0,Math.min(999,avatar.height*100)),3);
   const arms=digits(Math.max(0,Math.min(999,avatar.armSpan*100)),3);
   const light=String(Math.min(2,Math.max(0,avatar.light??0)));
-  return pose+'2'+head+hands.join('')+height+arms+light+digits(avatar.coconuts??31,2)+(delta?(delta.full?'2':'1')+delta.records.join(''):'0');
+  const pressures=avatar.hands.map(hand=>[0,1,2].map(i=>{
+    const pressure=hand?.pressure?.[i]??0;
+    return Math.round(Math.max(0,Math.min(1,pressure))*9);
+  }).join('')).join('');
+  return pose+'3'+head+hands.join('')+height+arms+light+digits(avatar.coconuts??31,2)+digits(avatar.color??0,2)+pressures+(delta?(delta.full?'2':'1')+delta.records.join(''):'0');
 }
 export function decodeAvatar(value,now){
   if(typeof value!=='string'||value.length>64000||!/^[0-9]+$/.test(value))return null;
   const pose=decodePose(value.slice(0,46),now);
   if(!pose||value.length===46)return pose;
-  if(value[46]!=='2'||value.length<125)return null;
+  const legacy=value[46]==='2';
+  const header=legacy?125:133, stride=legacy?43:objectSize;
+  if((!legacy&&value[46]!=='3')||value.length<header)return null;
   const head=unpackQuat(value,47);
   if(!head)return null;
-  const hands=[59,87].map(i=>value[i]==='1'?{position:unpackPoint(value,i+1),quaternion:unpackQuat(value,i+16)}:null);
+  const hands=[59,87].map(i=>value[i]==='1'?{position:unpackPoint(value,i+1),quaternion:unpackQuat(value,i+16),pressure:legacy?null:[0,1,2].map(k=>Number(value[126+(i===59?0:3)+k])/9)}:null);
   if(hands.some(h=>h&&(!h.position||!h.quaternion)))return null;
-  const light=Number(value[121]),coconuts=Number(value.slice(122,124)),mode=value[124];
-  if(light>2||coconuts>31||!['0','1','2'].includes(mode)||(value.length-125)%objectSize!==0||(mode==='0'&&value.length!==125))return null;
-  pose.avatar={head,hands,height:Number(value.slice(115,118))/100,armSpan:Number(value.slice(118,121))/100,light,coconuts};
+  const light=Number(value[121]),coconuts=Number(value.slice(122,124)),mode=value[header-1],avatarColor=legacy?0:Number(value.slice(124,126));
+  if(light>2||coconuts>31||!['0','1','2'].includes(mode)||(value.length-header)%stride!==0||(mode==='0'&&value.length!==header))return null;
+  pose.avatar={head,hands,height:Number(value.slice(115,118))/100,armSpan:Number(value.slice(118,121))/100,light,coconuts,color:avatarColor};
   if(mode!=='0'){
     const records=[];
-    for(let i=125;i<value.length;i+=objectSize){
-      const id=Number(value.slice(i,i+5)),type=Number(value[i+5]);
+    for(let i=header;i<value.length;i+=stride){
+      const offset=i+(legacy?6:7);
+      const id=Number(value.slice(i,i+5)),type=Number(value.slice(i+5,offset));
       if(!id)return null;
-      if(type===9){records.push({id,removed:true});continue;}
-      const flags=Number(value[i+6]),style=Number(value[i+7]),color=Number(value.slice(i+8,i+16));
-      const position=unpackPoint(value,i+16),rotation=unpackQuat(value,i+31);
-      if(flags>7||style>4||color>0xffffff||!position||!rotation)return null;
+      if(type===(legacy?9:99)){records.push({id,removed:true});continue;}
+      const flags=Number(value[offset]),style=Number(value[offset+1]),color=Number(value.slice(offset+2,offset+10));
+      const position=unpackPoint(value,offset+10),rotation=unpackQuat(value,offset+25);
+      if(type>10||flags>7||style>4||color>0xffffff||!position||!rotation)return null;
       records.push({id,type,flags,style,color,position,rotation});
     }
     pose.objects={full:mode==='2',records};
