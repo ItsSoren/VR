@@ -1,5 +1,6 @@
 
 import * as T from 'three';
+import { Reflector } from 'three/addons/objects/Reflector.js';
 import { addLabFixtures } from './fixtures.js';
 import { buildArena } from './arena.js';
 import { solve,handContact,solveObjects,colliderFor,distanceToObject,placeObject,boxCollider,playerObjectContact } from './physics.js';
@@ -100,13 +101,48 @@ function arms(){
     h.joint.position.copy(h.elbow);
   }
 }
+const palmGeometry=new T.IcosahedronGeometry(1,1);
+const digitGeometry=new T.CylinderGeometry(.69,1,1,6).rotateX(-Math.PI/2);
+function articulatedHand(side){
+  const group=new T.Group(), mirror=side==='left'?-1:1;
+  const palm=new T.Mesh(palmGeometry,white);
+  palm.position.set(0,0,-.024);
+  palm.scale.set(.052,.027,.057);
+  palm.castShadow=true;group.add(palm);
+  const digits=[
+    {x:-.023,y:-.003,z:-.063,length:.077,radius:.015,splay:-.08},
+    {x:.025,y:-.004,z:-.057,length:.057,radius:.015,splay:.14},
+    {x:-.044,y:-.006,z:-.014,length:.053,radius:.016,splay:-.96},
+  ].map(({x,y,z,length,radius,splay})=>{
+    const base=new T.Group();base.position.set(x*mirror,y,z);base.rotation.y=-splay*mirror;group.add(base);
+    const knuckle=new T.Group();knuckle.position.z=-length*.55;base.add(knuckle);
+    for(const [parent,len,r] of [[base,length*.58,radius],[knuckle,length*.48,radius*.92]]){
+      const digit=new T.Mesh(digitGeometry,white);
+      digit.position.z=-len/2;digit.scale.set(r,r,len);digit.castShadow=true;parent.add(digit);
+    }
+    return {base,knuckle};
+  });
+  scene.add(group);
+  return {mesh:group,digits};
+}
+function animateFingers(hand,buttons,dt){
+  const value=i=>buttons[i]?.value??(buttons[i]?.pressed?1:0);
+  const thumbDown=Math.max(...[3,4,5].map(i=>buttons[i]?.pressed?1:buttons[i]?.touched?.48:0));
+  const pressure=[value(0),value(1),thumbDown];
+  const blend=1-Math.exp(-dt*22);
+  hand.digits.forEach(({base,knuckle},i)=>{
+    base.rotation.x=T.MathUtils.lerp(base.rotation.x,-.12-pressure[i]*(i===2?.87:1.16),blend);
+    knuckle.rotation.x=T.MathUtils.lerp(knuckle.rotation.x,-.14-pressure[i]*(i===2?.76:1.12),blend);
+  });
+}
+const localAnchorRotation=new T.Quaternion();
 const hands=['left','right'].map(side=>{
-  const mesh=shape(scene,white,0,0,0,.072,.072,.072);
+  const {mesh,digits}=articulatedHand(side);
   mesh.visible=false;
   const upper=new T.Mesh(upperGeometry,fur),lower=new T.Mesh(lowerGeometry,fur);
   const joint=new T.Mesh(jointGeometry,fur);
   upper.visible=lower.visible=joint.visible=false;scene.add(upper,lower,joint);
-  return {side,mesh,upper,lower,joint,shoulder:new T.Vector3(),elbow:new T.Vector3(),anchor:new T.Vector3(),last:new T.Vector3(),target:new T.Vector3(),previous:new T.Vector3(),speed:new T.Vector3(),valid:false,surface:null,held:null,grip:false,trigger:false,menu:false,contactNormal:new T.Vector3(),contactPoint:new T.Vector3(),lastPhysical:new T.Vector3(),physicalSpeed:new T.Vector3()};
+  return {side,mesh,digits,upper,lower,joint,shoulder:new T.Vector3(),elbow:new T.Vector3(),anchor:new T.Vector3(),last:new T.Vector3(),target:new T.Vector3(),previous:new T.Vector3(),speed:new T.Vector3(),valid:false,surface:null,held:null,grip:false,trigger:false,menu:false,contactNormal:new T.Vector3(),contactPoint:new T.Vector3(),objectAnchor:new T.Vector3(),lastPhysical:new T.Vector3(),physicalSpeed:new T.Vector3()};
 });
 
 const objectSpecs=[
@@ -141,6 +177,7 @@ function spawnObject(index,origin){
   const body={mesh,spec,blocksPlayer:index===4||index===5,precise:settings.preciseHitboxes,type:spec.name,shape:selectedShape,radius:selectedShape.radius,mass:spec.mass,start:mesh.position.clone(),
     owner:null,velocity:new T.Vector3(),angular:new T.Vector3(),offset:new T.Vector3(),
     relativeRotation:new T.Quaternion(),shadow:arena.shadow(spec.shape.radius)};
+  if(body.blocksPlayer)body.handCollider={objectBody:body,friction:.78,gravity:1};
   objects.push(body);placeObject(body,arena.boxes);
   return body;
 }
@@ -228,7 +265,7 @@ function captureReport(){
   const sorted=rawFrameMs.slice().sort((a,b)=>a-b);
   const percentile=p=>sorted.length?Number(sorted[Math.min(sorted.length-1,Math.floor((sorted.length-1)*p))].toFixed(2)):null;
   reportSnapshot={
-    game:'Gorilla Lab',version:'r12',time:new Date().toISOString(),
+    game:'Gorilla Lab',version:'r13',time:new Date().toISOString(),
     mode:reportHadVR?'VR':'PC',settings:{...settings},qualityActive:liveLevel,
     performance:{fps,frames:sorted.length,frameMs:{median:percentile(.5),p95:percentile(.95),max:percentile(1)}},
     xr:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,objects:{total:objects.length,held:objects.filter(o=>o.owner).length},locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
@@ -308,6 +345,38 @@ const panel=display(640,652,.84,.86,scene);
 panel.mesh.visible=false;
 const wrist=display(416,84,.32,.065,scene);
 wrist.mesh.visible=false;
+const reflectionView=new T.PerspectiveCamera(75,1,.07,140);
+const mirrorFace=new Reflector(new T.PlaneGeometry(1.7,1.95),{
+  color:0xf4f6ff,textureWidth:256,textureHeight:256,clipBias:.004,multisample:0,
+});
+const mirrorNormal=new T.Vector3(0,0,-1),toMirror=new T.Vector3(),mirrorForward=new T.Vector3();
+mirrorFace.position.set(.05,1.16,5.9);
+mirrorFace.rotation.y=Math.PI;
+scene.add(mirrorFace);
+const mirrorBacking=new T.Mesh(new T.BoxGeometry(1.8,2.03,.10),new T.MeshLambertMaterial({color:'#344650'}));
+mirrorBacking.position.copy(mirrorFace.position).z+=.064;
+scene.add(mirrorBacking);
+const renderReflection=mirrorFace.onBeforeRender.bind(mirrorFace);
+mirrorFace.onBeforeRender=()=>{};
+mirrorFace.visible=false;
+let lastMirrorRender=-Infinity;
+function updateMirror(now,pose){
+  reflectionView.position.copy(worldHead);
+  if(pose){
+    const q=pose.transform.orientation;
+    reflectionView.quaternion.set(q.x,q.y,q.z,q.w).premultiply(headRotation.setFromAxisAngle(up,yaw));
+  }else camera.getWorldQuaternion(reflectionView.quaternion);
+  mirrorForward.set(0,0,-1).applyQuaternion(reflectionView.quaternion);
+  toMirror.subVectors(mirrorFace.position,worldHead);
+  const distance=toMirror.length();
+  mirrorFace.visible=settings.reflections&&distance<4&&toMirror.dot(mirrorNormal)<-.15&&
+    toMirror.multiplyScalar(1/Math.max(.001,distance)).dot(mirrorForward)>.66;
+  if(!mirrorFace.visible){lastMirrorRender=-Infinity;return;}
+  if(now-lastMirrorRender<45)return;
+  lastMirrorRender=now;
+  reflectionView.updateMatrixWorld(true);mirrorFace.updateMatrixWorld(true);
+  renderReflection(renderer,scene,reflectionView);
+}
 const ray=new T.Raycaster(), raySource=new T.Vector3(), forward=new T.Vector3();
 const coconutPosition=new T.Vector3();
 let fixtureAim=null;
@@ -466,6 +535,7 @@ function trackHands(frame,space,dt){
   launchVelocity.set(0,0,0);
   let count=0;
   const inputs=[...frame.session.inputSources];
+  const handBoxes=settings.collisions&&settings.objects?[...activeBoxes,...objects.filter(o=>o.handCollider&&!o.owner).map(o=>o.handCollider)]:activeBoxes;
   for(const h of hands){
     const source=inputs.find(s=>s.handedness===h.side&&s.gripSpace);
     const pose=source&&frame.getPose(source.gripSpace,space);
@@ -489,6 +559,8 @@ function trackHands(frame,space,dt){
     const grip=Boolean(source.gamepad?.buttons[1]?.pressed);
     const q=pose.transform.orientation;
     gripRotation.set(q.x,q.y,q.z,q.w).premultiply(spin.setFromAxisAngle(up,yaw));
+    h.mesh.quaternion.copy(gripRotation);
+    animateFingers(h,source.gamepad?.buttons??[],dt);
     if(!menu&&grip&&!h.grip&&settings.objects){
       let body=null, best=.15;
       const coco=fixtures.coconuts.find(m=>m.visible&&m.getWorldPosition(coconutPosition).distanceToSquared(h.target)<.26**2);
@@ -522,9 +594,14 @@ function trackHands(frame,space,dt){
       object.angular.lerp(scratch.set(inverseGrip.x,inverseGrip.y,inverseGrip.z).normalize().multiplyScalar(Math.min(24,angle/Math.max(.006,dt))),.52);
     }
     if(settings.movement&&!h.held&&launchLock<=0){
-      h.surface=handContact(h.last,h.target,.080,activeBoxes,h.contactPoint,normal);
+      const bracedObject=priorSurface?.objectBody;
+      if(bracedObject&&!bracedObject.owner){
+        h.anchor.copy(h.objectAnchor).applyQuaternion(bracedObject.mesh.quaternion).add(bracedObject.mesh.position);
+        h.last.copy(h.anchor);
+      }
+      h.surface=handContact(h.last,h.target,.080,handBoxes,h.contactPoint,normal);
       const sweptSurface=h.surface;
-      if(priorSurface&&activeBoxes.includes(priorSurface)){
+      if(priorSurface&&handBoxes.includes(priorSurface)&&!priorSurface.objectBody?.owner){
         scratch.subVectors(h.target,h.anchor);
         if(scratch.dot(h.contactNormal)<.070 && scratch.lengthSq()<.81){  
           h.surface=priorSurface;
@@ -541,6 +618,8 @@ function trackHands(frame,space,dt){
         scratch.subVectors(h.contactPoint,h.anchor);
         scratch.addScaledVector(normal,-scratch.dot(normal));
         h.anchor.addScaledVector(scratch,Math.min(.97,slip));
+        const prop=h.surface.objectBody;
+        if(prop)h.objectAnchor.copy(h.anchor).sub(prop.mesh.position).applyQuaternion(localAnchorRotation.copy(prop.mesh.quaternion).invert());
         const friction= h.surface.friction*(.22+settings.grip*.135);
         correction(h,friction);
         const inward=-h.physicalSpeed.dot(normal);
@@ -762,6 +841,7 @@ renderer.setAnimationLoop((time,frame)=>{
     c.fillStyle='#fff0cf';c.font='bold 25px system-ui';c.fillText(fps+' FPS     Q '+liveLevel+'/10',17,32);
     c.font='20px system-ui';c.fillText('B/Y : réglages   ·   Grip : saisir',17,66);wrist.texture.needsUpdate=true;
   }
+  updateMirror(time,pose);
   renderer.render(scene,camera);
   if(inVR||!reportHadVR) {
     rawFrameMs.push(actual*1000);

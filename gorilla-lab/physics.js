@@ -4,6 +4,7 @@ import * as T from 'three';
 const qInv=new T.Quaternion(), local=new T.Vector3(), closest=new T.Vector3();
 export function penetration(position,radius,box,normal) {
   if(box.heightfield)return heightContact(position,radius,box,normal);
+  if(box.objectBody)return objectPenetration(position,radius,box.objectBody,normal);
   qInv.copy(box.quaternion).invert();
   local.copy(position).sub(box.position).applyQuaternion(qInv);
   const h=box.half;
@@ -291,12 +292,15 @@ function heightContact(p,radius,field,out) {
 }
 
 const playerProbe={mesh:{position:null,quaternion:new T.Quaternion()},shape:{sphereRadius:0,normals:[],edges:[]}};
-export function playerObjectContact(position,radius,object,velocity){
-  if(!object.blocksPlayer || object.owner || !object.mesh.visible)return false;
-  if(position.distanceToSquared(object.mesh.position)>(radius+object.radius)**2)return false;
+function objectPenetration(position,radius,object,out){
+  if(!object.blocksPlayer || object.owner || !object.mesh.visible)return 0;
+  if(position.distanceToSquared(object.mesh.position)>(radius+object.radius)**2)return 0;
   playerProbe.mesh.position=position;
   playerProbe.shape.sphereRadius=radius;
-  const depth=sat(playerProbe,object,normal);
+  return sat(playerProbe,object,out);
+}
+export function playerObjectContact(position,radius,object,velocity){
+  const depth=objectPenetration(position,radius,object,normal);
   if(depth<=0)return false;
   position.addScaledVector(normal,depth+.001);
   const inward=velocity.dot(normal);
