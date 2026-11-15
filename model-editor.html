@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#131b23">
+  <title>Atelier de modèles · Gorilla Lab</title>
+  <style>
+    :root{color-scheme:dark;--ink:#eef1e9;--muted:#a6b4bd;--line:#34434d;--panel:#1a242d;--accent:#e1ef8d;--bg:#131b23;font:15px/1.5 system-ui,sans-serif}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink)}
+    button,input,select{font:inherit;color:inherit}button,input:not([type=checkbox]),select{border-radius:6px;border:1px solid var(--line);background:#222f38;padding:.5rem .65rem}
+    button{cursor:pointer}button:hover{border-color:#a8b6bd}button:disabled{opacity:.45;cursor:default}button.primary{color:#263020;background:var(--accent);border-color:var(--accent);font-weight:700}
+    :focus-visible{outline:2px solid var(--accent);outline-offset:3px}input[type=checkbox]{accent-color:var(--accent)}input[type=color]{min-height:2.6rem}
+    :where(input,select){width:100%;min-width:0}a{color:var(--accent)}[hidden]{display:none!important}
+    header,main{max-width:1440px;margin:auto;padding-inline:clamp(1rem,3vw,2.5rem)}header{padding-block:1.5rem;display:flex;justify-content:space-between;align-items:end;gap:1rem}
+    header p{margin:0;color:var(--accent);font-size:.78rem;letter-spacing:.12em;text-transform:uppercase;font-weight:750}h1{font-size:clamp(1.65rem,4vw,2.6rem);letter-spacing:-.04em;line-height:1.12;margin:.25rem 0 0}h2{font-size:1.05rem;margin:0 0 .65rem}h3{font-size:.86rem;margin:.8rem 0 .45rem}
+    nav,.actions,.controls{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}.actions button{flex:1 0 auto}.secondary{color:var(--muted)}
+    .toolbar{border-block:1px solid var(--line);padding-block:.7rem;display:flex;gap:.75rem;justify-content:space-between;align-items:center;flex-wrap:wrap}
+    #status{margin:0;font-size:.88rem;color:var(--muted);min-height:1.5em}#status[data-error=true]{color:#ffb299}
+    .workspace{display:grid;grid-template-columns:minmax(11.5rem, .85fr) minmax(19rem, 2.5fr) minmax(14rem, 1.05fr);gap:1rem;padding:1rem 0 2rem;align-items:start}
+    .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:1rem;min-width:0}.panel label{display:grid;gap:.3rem;font-size:.84rem;margin-bottom:.65rem}.panel label.check{display:flex;gap:.5rem;align-items:flex-start}.check input{width:auto;margin-top:.25rem}
+    .rule{border:0;border-top:1px solid var(--line);margin:1rem 0}.hint{margin:.65rem 0 0;color:var(--muted);font-size:.8rem}.snippet{font-size:.84rem;color:var(--muted);margin:.65rem 0 0}
+    #part-list{display:grid;gap:.3rem;max-height:13rem;overflow:auto;padding:2px;margin:.6rem -2px}.part-entry{text-align:left;display:flex;justify-content:space-between;gap:.35rem;align-items:center;min-width:0}.part-entry span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.part-entry[aria-pressed=true]{border-color:var(--accent);background:#38433b}
+    .swatch{width:.8rem;height:.8rem;border-radius:50%;flex:none;background:var(--swatch)}
+    .preview{position:relative;min-height:26rem;border:1px solid var(--line);background:#101820;border-radius:10px;overflow:hidden;height:min(68vh, 45rem)}#preview-canvas{width:100%;height:100%;display:block;touch-action:none}.preview-bar{position:absolute;inset:.7rem .7rem auto;display:flex;justify-content:space-between;gap:.5rem;pointer-events:none}.preview-bar button{pointer-events:auto}.preview-tag{padding:.5rem .65rem;background:#222f38;border:1px solid var(--line);border-radius:6px;font-size:.81rem}
+    .preview .empty{position:absolute;inset:50% 1rem auto;text-align:center;transform:translateY(-50%);background:#17222be8;padding:1rem;border:1px solid var(--line);border-radius:10px;width:fit-content;max-width:calc(100% - 2rem);margin:auto;pointer-events:none}
+    .preview-footer{font-size:.8rem;color:var(--muted);margin:.6rem 0 0}.vectors{margin:.6rem 0;padding:0;border:0}.vectors legend{font-size:.83rem;padding:0 0 .23rem}.axes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.35rem}.axes label{margin:0;color:var(--muted)}.axes input{padding:.4rem .2rem .4rem .35rem}
+    @media(max-width:930px){.workspace{grid-template-columns:minmax(11.5rem,1fr) minmax(16rem,2fr)}.inspector{grid-column:1/-1}.inspector #part-fields{display:grid;grid-template-columns:repeat(3,1fr);gap:.55rem}.inspector .vectors{margin:0}}
+    @media(max-width:570px){header{align-items:start;flex-direction:column}.workspace{grid-template-columns:1fr}.inspector{grid-column:auto}.preview{min-height:19rem;height:42vh}.inspector #part-fields{grid-template-columns:repeat(2,1fr)}.toolbar .actions{width:100%}}
+  </style>
+</head>
+<body>
+  <header>
+    <div><p>Gorilla Lab</p><h1>Atelier de modèles</h1></div>
+    <nav aria-label="Navigation"><a href="./index.html">Jouer</a><span aria-hidden="true">·</span><a href="./editor.html">Atelier de cartes</a></nav>
+  </header>
+  <main>
+    <section class="toolbar" aria-label="Enregistrement">
+      <div class="actions">
+        <button id="save" class="primary">Enregistrer pour le jeu</button>
+        <button id="export">Exporter JSON</button>
+        <button id="import">Importer JSON</button>
+        <input id="file" type="file" accept=".json,application/json" hidden>
+      </div>
+      <p id="status" role="status" aria-live="polite">Les modèles enregistrés sont chargés à l’ouverture du jeu.</p>
+    </section>
+    <div class="workspace">
+      <section class="panel" aria-labelledby="model-heading">
+        <h2 id="model-heading">Modèles</h2>
+        <label>Modèle sélectionné<select id="models"></select></label>
+        <div class="actions"><button id="new-model">Nouveau</button><button id="example">Exemple</button></div>
+        <div id="model-details" hidden>
+          <hr class="rule">
+          <label>Nom du modèle<input id="model-name" maxlength="48" autocomplete="off"></label>
+          <label class="check"><input id="in-game" type="checkbox"> Afficher dans le menu Spawn</label>
+          <button id="delete-model" class="secondary">Supprimer le modèle</button>
+          <hr class="rule">
+          <h3>Propriétés en jeu</h3>
+          <label class="check"><input id="grabbable" type="checkbox"> Saisissable</label>
+          <label class="check"><input id="frozen" type="checkbox"> Figé à l’apparition</label>
+          <label class="check"><input id="collidable" type="checkbox"> Collisions</label>
+          <label class="check"><input id="supportWhileHeld" type="checkbox"> Appui pendant la prise</label>
+          <hr class="rule">
+          <h3>Pièces</h3>
+          <div class="controls"><select id="new-shape" aria-label="Forme à ajouter"></select><button id="add-part">Ajouter la pièce</button></div>
+          <div id="part-list" aria-label="Pièces du modèle"></div>
+        </div>
+        <hr class="rule">
+        <label>Avatar du joueur<select id="avatar"></select></label>
+        <p class="hint">Un modèle sélectionné remplace la tête du singe. L’avant est orienté vers −Z.</p>
+      </section>
+      <section aria-label="Aperçu 3D">
+        <div class="preview" id="preview">
+          <canvas id="preview-canvas" aria-label="Aperçu 3D du modèle"></canvas>
+          <div class="preview-bar"><span id="preview-tag" class="preview-tag">Modèle 3D</span><button id="frame">Cadrer</button></div>
+          <p id="preview-empty" class="empty">Crée un modèle et ajoute une pièce pour commencer.</p>
+        </div>
+        <p class="preview-footer">Glisse pour tourner · Molette ou pincement pour zoomer · Clique sur une pièce pour la sélectionner</p>
+      </section>
+      <section class="panel inspector" aria-labelledby="part-heading">
+        <h2 id="part-heading">Pièce sélectionnée</h2>
+        <p class="hint" id="part-empty">Sélectionne une pièce pour modifier sa forme et son apparence.</p>
+        <div id="part-inspector" hidden>
+          <div id="part-fields">
+            <label>Nom de la pièce<input id="part-name" maxlength="48" autocomplete="off"></label>
+            <label>Forme<select id="part-shape"></select></label>
+            <label>Couleur<input id="part-color" type="color"></label>
+            <label>Surface<select id="part-surface"></select></label>
+          </div>
+          <div class="actions"><button id="duplicate-part">Dupliquer</button><button id="delete-part" class="secondary">Supprimer</button></div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <script defer src="./gorilla-model-editor-r26.js"></script>
+</body>
+</html>

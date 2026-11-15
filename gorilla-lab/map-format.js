@@ -1,3 +1,5 @@
+import {normalizeTerrain} from './terrain-edit.js';
+
 
 export const mapMaterials=['Ardoise','Nacre','Brique','Sable','Marbre','Bois','Cuivre','Chrome','Carreaux','Béton','Verre bleu','Verre ambre','Glace','Caoutchouc','Émail','Mosaïque','Benchmark'];
 export const materialColors=['#555e6a','#537586','#855443','#a28e61','#bbb8b0','#664527','#794a36','#758291','#293e4b','#626664','#94cfdd','#d1a053','#7cb0cf','#45404b','#40468c','#455d62','#141414'];
@@ -20,10 +22,12 @@ export function parseMap(input){
     spawn:{x:number(s.x,-120,120,0),y:number(s.y,-10,30,.06),z:number(s.z,-120,120,3),yaw:number(s.yaw,-360,360,0)},
     pieces:input.pieces.map((p,i)=>{
       if(!p||typeof p!=='object')throw Error('Pièce invalide : '+(i+1));
+      const terrain=p.terrain&&typeof p.terrain==='object'?normalizeTerrain(p.terrain):null;
       return {
         name:text(p.name,36,'Pièce '+(i+1)),x:number(p.x,-120,120,0),y:number(p.y,-12,33,0),z:number(p.z,-120,120,0),
         w:number(p.w,.2,64,3),h:number(p.h,.12,36,.5),d:number(p.d,.2,64,3),
-        pitch:number(p.pitch,-70,70,0),yaw:number(p.yaw,-360,360,0),
+        pitch:terrain?0:number(p.pitch,-70,70,0),yaw:terrain?0:number(p.yaw,-360,360,0),
+        ...(terrain?{terrain}:{}),
         material:Math.round(number(p.material,0,16,0)),
         color:typeof p.color==='string'&&/^#[a-f0-9]{6}$/i.test(p.color)?p.color:'#ffffff',
         grip:number(p.grip,0,1.5,.8),gravity:number(p.gravity,.05,2.5,1),bounce:number(p.bounce,0,1.65,1),

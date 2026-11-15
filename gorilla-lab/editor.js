@@ -1,5 +1,7 @@
 import * as T from 'three';
 import {tiledBox} from './texture-geometry.js';
+import {normalizeTerrain,resizeTerrain,sculptTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from './terrain-edit.js';
+import {texturePresets,seamlessTexture} from './seamless-texture.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   parseMap, exampleMap, makePiece, mapMaterials, materialColors, surfacePresets,
@@ -13,6 +15,7 @@ const draftKey = 'gorilla-lab-editor-draft';
 const shapes = {
   block: makePiece(),
   ramp: makePiece({ name: 'Rampe', w: 3, h: .30, d: 4, pitch: 16, material: 5 }),
+  terrain: makePiece({name:'Terrain',w:18,h:.12,d:18,y:0,material:3,terrain:normalizeTerrain({amplitude:.7,grass:.34})}),
   wall: makePiece({ name: 'Mur', w: .45, h: 2.5, d: 3.5, material: 2 }),
 };
 const toolHelp = {
@@ -20,6 +23,8 @@ const toolHelp = {
   block: 'Clique dans la vue 3D ou sur le plan pour poser un bloc. Échap revient à la sélection.',
   ramp: 'Clique dans la vue 3D ou sur le plan pour poser une rampe. Échap revient à la sélection.',
   wall: 'Clique dans la vue 3D ou sur le plan pour poser un mur. Échap revient à la sélection.',
+  terrain:'Clique pour poser un terrain. Sélectionne-le pour régler le bruit ou la végétation.',
+  sculpt:'Clique ou glisse sur un terrain. Le pinceau est réglable dans Relief et végétation.',
   spawn: 'Clique sur une surface pour placer le départ du joueur.',
 };
 let map = exampleMap(), selected = -1, tool = 'move', gesture = null, ghost = null;
@@ -193,7 +198,8 @@ function paintPlan() {
 
 function placeMesh(mesh, piece) {
   mesh.position.set(piece.x, piece.y, piece.z);
-  mesh.scale.set(piece.w, piece.h, piece.d);
+  if(piece.terrain&&mesh!==ghostBox)mesh.scale.setScalar(1);
+  else mesh.scale.set(piece.w, piece.h, piece.d);
   mesh.rotation.set(T.MathUtils.degToRad(piece.pitch), T.MathUtils.degToRad(piece.yaw), 0, 'YXZ');
   mesh.updateMatrixWorld();
 }
@@ -213,6 +219,7 @@ function rebuildScene() {
   for (const mesh of [...group.children]) {
     group.remove(mesh);
     if(mesh.geometry!==sharedBox)mesh.geometry.dispose();
+    if(mesh.userData.vegetation)disposeVegetation(mesh.userData.vegetation);
     mesh.material.map?.dispose();
     mesh.material.dispose();
   }
@@ -229,8 +236,12 @@ function rebuildScene() {
       material.map.wrapS = material.map.wrapT = T.RepeatWrapping;
       material.color.set(piece.color);
     }
-    const geometry=piece.texture?tiledBox(piece.w,piece.h,piece.d).scale(1/piece.w,1/piece.h,1/piece.d):sharedBox;
+    const geometry=piece.terrain?terrainGeometry(piece):piece.texture?tiledBox(piece.w,piece.h,piece.d).scale(1/piece.w,1/piece.h,1/piece.d):sharedBox;
     const mesh = new T.Mesh(geometry, material);
+    if(piece.terrain){
+      const vegetation=terrainVegetation(piece);
+      if(vegetation){mesh.add(vegetation);mesh.userData.vegetation=vegetation;}
+    }
     group.add(mesh);
     placeMesh(mesh, piece);
   }
@@ -267,6 +278,13 @@ function updateInspector() {
   for (const id of ['rotate', 'duplicate', 'texture-file', 'surface', 'spawn-here']) $(id).disabled = !piece;
   $('delete').disabled = !piece || map.pieces.length === 1;
   $('texture-clear').disabled = !piece?.texture;
+  const terrain=piece?.terrain;
+  $('terrain-controls').hidden=!terrain;
+  if(terrain){
+    for(const key of terrainFields)$('terrain-'+key).value=terrain[key];
+    $('p-pitch').disabled=$('p-yaw').disabled=true;
+  }
+  $('texture-create').disabled=!piece;
   $('surface').value = '';
   $('undo').disabled = undoStack.length === 0;
 }
@@ -441,6 +459,12 @@ function placementAt(canvas, event) {
     const x = snapCoordinate(hit.point.x), z = snapCoordinate(hit.point.z);
     return spawnOnTop(x, z, map.spawn.yaw);
   }
+  if(tool==='terrain'){
+    const point=hit?.point??rayPlane(0);
+    if(!point)return null;
+    return {...shapes.terrain,terrain:normalizeTerrain(shapes.terrain.terrain),x:snapCoordinate(point.x),y:point.y,z:snapCoordinate(point.z)};
+  }
+  if(tool==='sculpt')return null;
   const point = hit?.point ?? rayPlane(0);
   if (!point) return null;
   const normal = hit ? hit.face.normal.clone().applyNormalMatrix(normalMatrix.getNormalMatrix(hit.object.matrixWorld)) : worldUp;
@@ -483,6 +507,7 @@ function beginGesture(canvas, event) {
   canvas.setPointerCapture(event.pointerId);
   const start = { canvas, id: event.pointerId, clientX: event.clientX, clientY: event.clientY, tool };
   gesture = start;
+  if(tool==='sculpt'){applyBrush(canvas,event);return;}
   if (tool !== 'move') return;
 
   const hit = pointUnderPointer(canvas, event);
@@ -498,6 +523,11 @@ function moveGesture(canvas, event) {
   if (!gesture) {
     if (tool === 'move') canvas.toggleAttribute('data-hit', Boolean(pointUnderPointer(canvas, event)));
     else showGhost(placementAt(canvas, event));
+    return;
+  }
+  if(tool==='sculpt'&&gesture.id===event.pointerId&&gesture.canvas===canvas){
+    const distance=Math.hypot(event.clientX-gesture.clientX,event.clientY-gesture.clientY);
+    if(distance>=7){applyBrush(canvas,event);gesture.clientX=event.clientX;gesture.clientY=event.clientY;}
     return;
   }
   if (gesture.id !== event.pointerId || gesture.canvas !== canvas || gesture.height === undefined || !current()) return;
@@ -531,6 +561,10 @@ function endGesture(canvas, event, commit) {
   gesture = null;
   if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
   canvas.removeAttribute('data-dragging');
+  if(finished.tool==='sculpt'){
+    if(finished.recorded){sync();notice('Relief modifié.');}
+    return;
+  }
   if (finished.recorded) {
     pendingSave();
     notice(current().name + ' déplacé.');
@@ -670,6 +704,50 @@ $('test-map').onclick = () => {
   }
 };
 
+const terrainFields=['detail','seed','amplitude','frequency','grass','shrub'];
+for(const key of terrainFields)$('terrain-'+key).onchange=event=>{
+  const piece=current();if(!piece?.terrain)return;
+  remember();
+  piece.terrain=key==='detail'?resizeTerrain(piece.terrain,Number(event.target.value)):
+    normalizeTerrain({...piece.terrain,[key]:Number(event.target.value)});
+  sync();
+};
+$('terrain-reset').onclick=()=>{
+  if(!current()?.terrain)return;
+  remember();current().terrain.heights=null;sync();
+};
+function applyBrush(canvas,event){
+  setEventRay(canvas,event);
+  const hit=raycaster.intersectObjects(group.children,false).find(item=>map.pieces[group.children.indexOf(item.object)]?.terrain);
+  const index=hit?group.children.indexOf(hit.object):-1;
+  const piece=map.pieces[index];
+  if(!piece?.terrain)return;
+  if(!gesture.recorded){
+    remember();gesture.recorded=true;gesture.flattenY=hit.point.y;
+    choose(index);$('terrain-controls').open=true;
+  }
+  if(index!==selected)return;
+  const brush={mode:$('terrain-brush').value,radius:Number($('brush-radius').value),strength:Number($('brush-strength').value),target:gesture.flattenY};
+  if(!sculptTerrain(piece,hit.point.x,hit.point.z,brush))return;
+  const mesh=group.children[index];
+  mesh.geometry.dispose();mesh.geometry=terrainGeometry(piece);
+  selectionBox?.update();paintPlan();queueRender();
+}
+$('texture-style').replaceChildren(...texturePresets.map((label,index)=>new Option(label,index)));
+$('texture-create').onclick=()=>{
+  const piece=current();if(!piece)return;
+  const canvas=seamlessTexture(Number($('texture-style').value),$('texture-tint').value);
+  remember();piece.texture=canvas.toDataURL('image/webp',.85);sync();
+  notice('Texture répétable 512 × 512 intégrée.');
+};
+
+$('view-top').onclick=()=>{
+  const target=controls.target;
+  const distance=Math.max(10,camera.position.distanceTo(target));
+  camera.position.copy(target).add(new T.Vector3(0,distance,.001));
+  controls.update();queueRender();
+};
+$('view-perspective').onclick=fitViews;
 const toolKeys = { v: 'move', '1': 'block', '2': 'ramp', '3': 'wall', '4': 'spawn', escape: 'move' };
 document.addEventListener('keydown', event => {
   if (event.target.closest?.('input, select, textarea, [contenteditable]') || gesture) return;

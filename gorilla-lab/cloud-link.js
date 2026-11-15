@@ -4,7 +4,7 @@ const projectPrefix='itssoren.github.io/VR/gorilla-lab/';
 const names={vr:'☁ GorillaVR',pc:'☁ GorillaPC'};
 const playerNames=Array.from({length:8},(_,i)=>'☁ GorillaPlayer'+i);
 const roles=new Map([[names.vr,'vr'],[names.pc,'pc'],...playerNames.map(name=>[name,'player'])]);
-const maxObjectType=15, freshness=4400, maxValueLength=64000;
+const maxObjectType=53, freshness=4400, maxValueLength=64000;
 const digits=(n,width)=>Math.round(n).toString().padStart(width,'0');
 export function roomCode(value){return String(value).trim().toUpperCase().replace(/[\s-]/g,'');}
 export function mapCode(value){

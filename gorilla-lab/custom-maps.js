@@ -1,6 +1,7 @@
 
 import * as T from 'three';
 import {tiledBox} from './texture-geometry.js';
+import {terrainGeometry,terrainCollider,terrainVegetation,disposeVegetation,sculptTerrain,normalizeTerrain,resizeTerrain} from './terrain-edit.js';
 import {boxCollider} from './physics.js';
 import {mapCode} from './cloud-link.js';
 import {parseMap,makePiece,snapPlacement,maxPieces,maxMapBytes,storageKey,downloadMap} from './map-format.js';
@@ -36,11 +37,12 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   }
   function removeRow(row){
     group.remove(row.mesh);row.mesh.geometry.dispose();
+    if(row.vegetation)disposeVegetation(row.vegetation);
     if(row.custom){if(row.ownTexture)row.mesh.material.map?.dispose();row.mesh.material.dispose();}
   }
   function makeRow(piece,index){
     const {material,custom,ownTexture}=card(piece);
-    const mesh=new T.Mesh(tiledBox(piece.w,piece.h,piece.d),material);
+    const mesh=new T.Mesh(piece.terrain?terrainGeometry(piece):tiledBox(piece.w,piece.h,piece.d),material);
     mesh.position.set(piece.x,piece.y,piece.z);
     mesh.rotation.set(T.MathUtils.degToRad(piece.pitch),T.MathUtils.degToRad(piece.yaw),0,'YXZ');
     mesh.castShadow=mesh.receiveShadow=true;
@@ -49,7 +51,10 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     const half=new T.Vector3(piece.w/2,piece.h/2,piece.d/2);
     const collider={mesh,position:mesh.position,quaternion:mesh.quaternion,half,min:half.clone().negate(),
       shape:boxCollider(half),friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:true,type:piece.material};
-    return {mesh,collider,custom,ownTexture};
+    if(!piece.terrain)return {mesh,collider,custom,ownTexture};
+    const vegetation=terrainVegetation(piece);
+    if(vegetation)mesh.add(vegetation);
+    return {mesh,collider:terrainCollider(piece,mesh),custom,ownTexture,vegetation};
   }
   function refreshMaterials(){
     for(const row of meshRows){
@@ -111,9 +116,28 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   }
   function edit(origin,direction,click,{mode,piece,head,feet}){
     trace.set(origin,direction);trace.far=12;
-    const hit=trace.intersectObjects(meshRows.map(row=>row.mesh),false)[0];
+    const hits=trace.intersectObjects(meshRows.map(row=>row.mesh),false);
+    const hit=mode>=5?hits.find(item=>map?.pieces[item.object.userData.mapIndex]?.terrain):hits[0];
     ghost.visible=false;
     if(!map)return;
+    if(mode>=5){
+      const index=hit?.object.userData.mapIndex;
+      const target=map.pieces[index];
+      if(!target?.terrain)return;
+      if(!click)return;
+      memo();
+      if(mode===9){
+        const detail=piece.terrain?.detail??target.terrain.detail;
+        const resized=resizeTerrain(target.terrain,detail);
+        target.terrain=normalizeTerrain({...resized,...piece.terrain,heights:resized.heights});
+      }else{
+        const brush={mode:['raise','lower','smooth','flatten'][mode-5],
+          radius:piece.brushRadius,strength:piece.brushStrength,target:target.y};
+        sculptTerrain(target,hit.point.x,hit.point.z,brush);
+      }
+      rebuild();inform('Relief modifié.');
+      return;
+    }
     if(mode===2||mode===3||mode===4){
       if(!hit)return;
       const index=hit.object.userData.mapIndex;
@@ -124,7 +148,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
         memo();map.pieces.splice(index,1);selection=moving=-1;rebuild();inform('Pièce supprimée.');
       }
       if(click&&mode===4){
-        memo();Object.assign(map.pieces[index],{material:piece.material,grip:piece.grip,gravity:piece.gravity,bounce:piece.bounce,solid:piece.solid});
+        memo();Object.assign(map.pieces[index],{material:piece.material,grip:piece.grip,gravity:piece.gravity,bounce:piece.bounce,solid:piece.solid,texture:piece.texture});
         rebuild();inform('Surface modifiée.');
       }
       if(hit){
@@ -137,7 +161,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     const shape=moving>=0?map.pieces[moving]:piece;
     if(hit.object.userData.mapIndex===moving)return;
     rotatedNormal.copy(hit.face.normal).transformDirection(hit.object.matrixWorld);
-    const next=snapPlacement(hit.point,rotatedNormal,shape);
+    const next=shape.terrain?{...shape,x:Math.round(hit.point.x*2)/2,y:hit.point.y,z:Math.round(hit.point.z*2)/2,pitch:0,yaw:0}:snapPlacement(hit.point,rotatedNormal,shape);
     if(!next)return;
     ghost.position.set(next.x,next.y,next.z);
     ghost.rotation.set(T.MathUtils.degToRad(next.pitch),T.MathUtils.degToRad(next.yaw),0,'YXZ');
@@ -175,7 +199,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   document.querySelector('#map-load-url').onclick=()=>loadURL(url.value);
   document.querySelector('#map-export').onclick=save;
   document.querySelector('#map-reset').onclick=reset;
-  return {refreshMaterials,load,loadURL,reset,blank,undo,save,edit,recenter,inform,
+  return {modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,reset,blank,undo,save,edit,recenter,inform,
     clearGhost(){ghost.visible=false;},get active(){return Boolean(map);},get status(){return status;},get yaw(){return map?.spawn.yaw??0;},
     get nodes(){return map?.pieces.length??0;},get name(){return map?.name??null;},get signature(){return signature;},
   };

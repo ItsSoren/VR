@@ -1,5 +1,5 @@
 # Gorilla Lab
-Ouvrir index.html pour l'aperçu PC. Publier en HTTPS pour entrer en WebXR depuis le casque. Le site est statique. Placer index.html et game-lab-r25.js ensemble à la racine d'un dépôt GitHub Pages.
+Ouvrir index.html pour l'aperçu PC. Publier en HTTPS pour entrer en WebXR depuis le casque. Le site est statique. Placer index.html et game-lab-r26.js ensemble à la racine d'un dépôt GitHub Pages.
 ## Dans le casque
 - S'appuyer sur le sol ou un mur et pousser en bougeant les manettes.
 - Stick droit : tourner par crans de 45 degrés. B/Y ou clic du stick gauche : panneau. Gâchette : sélectionner dans le panneau.
@@ -8,7 +8,7 @@ Ouvrir index.html pour l'aperçu PC. Publier en HTTPS pour entrer en WebXR depui
 - Réglages par défaut réinitialise l'onglet ouvert. Les objets et la locomotion ont aussi leur propre bouton de retour.
 - Auto monte ou baisse la qualité selon les FPS. La résolution de session se règle séparément et prend effet en rouvrant le mode VR.
 ## Sources
-Le fichier game.js contient Three.js. Pour reconstruire : npm install --no-save three@0.180.0 esbuild@0.25.10 puis npx esbuild main.js --bundle --format=iife --target=es2022 --minify --outfile=game-lab-r25.js.
+Le fichier game.js contient Three.js. Pour reconstruire : npm install --no-save three@0.180.0 esbuild@0.25.10 puis npx esbuild main.js --bundle --format=iife --target=es2022 --minify --outfile=game-lab-r26.js.
 
 
 ## Bornes et cocotier
@@ -60,3 +60,14 @@ Dans TurboWarp, le joueur VR ouvre le salon. Les amis peuvent choisir **Jouer su
 Les objets supplémentaires sont la lampe torche, la canette de soda, le cône de chantier et le talkie-walkie. Ils se trouvent dans **Spawn > Détaillés**. Chaque collision utilise un volume convexe de 20 triangles.
 
 La locomotion utilise un balayage de la paume, des ancrages, une limite de portée et une moyenne de la vitesse réelle de déplacement pour lancer. Référence de l’algorithme : [GorillaLocomotion d’Another Axiom (MIT)](https://github.com/Another-Axiom/GorillaLocomotion).
+
+
+## Atelier R26
+
+Sur PC ou mobile, ouvre **Maps et éditeur → Ouvrir l’atelier**. Place un terrain, sélectionne-le puis règle son détail, son bruit et sa végétation. Avec **Sculpter**, monte, creuse, lisse ou aplanis. L’onglet Aspect permet d’importer une image ou de générer une texture répétable en 512 × 512.
+
+En VR, **Carte → Construction** contient les formes et textures. **Carte → Terrain** règle le pinceau et le relief. Choisis l’action de sculpture, ferme le panneau et vise le terrain avec la gâchette. **Carte → Modèle** enregistre la composition en cours comme objet ou tête. Recharge le jeu pour charger le modèle.
+
+L’atelier Modèles permet d’assembler des primitives, de définir leur matière, leur pose et leurs propriétés et d’exporter la collection. Charge la même collection sur les clients d’un salon pour partager les objets de l’atelier. Le remplacement de la tête s’applique à l’avatar local et au miroir.
+
+**Spawn → Animés** contient la gelée rouge et le cube du Néant. Dans **Rendu → Effets**, le focus démarre à 5/5 et utilise la fovéation matérielle sur les casques compatibles. La baguette et la lampe torche peuvent servir de prolongement de la paume lorsqu’elles sont tenues.

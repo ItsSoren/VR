@@ -1,25 +1,31 @@
 import * as T from 'three';
 
-// Contour runs clockwise in the XZ plane. Three of its edges connect to digits.
+// Clockwise palm outline, with a separate height for the back and underside.
+// Three edges are shared with the fingers and the last edge is the arm seam.
 const palmContour = [
-  [.026, .021, .015], [.044, -.004, .018], [.052, -.032, .017],
-  [.043, -.063, .014], [.011, -.071, .012], [-.005, -.073, .012],
-  [-.039, -.068, .013], [-.049, -.046, .014], [-.048, -.016, .015],
-  [-.039, .003, .017], [-.026, .021, .015],
+  [.026, .021, .015, -.015], [.041, .003, .013, -.018],
+  [.048, -.023, .017, -.018], [.046, -.058, .016, -.014],
+  [.014, -.059, .013, -.013], [.001, -.068, .014, -.013],
+  [-.034, -.069, .017, -.014], [-.045, -.046, .012, -.017],
+  [-.051, -.017, .011, -.021], [-.035, .001, .012, -.018],
+  [-.026, .021, .015, -.015],
 ];
+// Interior contour heights sculpt the knuckles, hollow and pads of the palm.
+const dorsalHeights = [.020, .023, .026, .031, .022, .025, .032, .025, .021, .022, .019];
+const palmarHeights = [-.020, -.023, -.026, -.022, -.015, -.018, -.022, -.029, -.031, -.027, -.020];
 const fingerSpecs = [
-  { edge: 5, length: .080, splay: .04 },
-  { edge: 3, length: .060, splay: -.04 },
-  { edge: 7, length: .053, splay: -.64 },
+  { edge: 5, length: .082, splay: .05 },
+  { edge: 3, length: .068, splay: -.14 },
+  { edge: 7, length: .051, splay: -.66 },
 ];
 const wristEdge = palmContour.length - 1;
 // Each section describes distance, width, then thickness relative to the finger root.
 const fingerSections = [
-  [.23, .98, .91], [.48, .86, .82], [.73, .78, .75], [.93, .66, .67],
+  [.19, .96, 1.02], [.43, .89, .90], [.69, .78, .81], [.90, .60, .63],
 ];
 // Each ring runs around the dorsal surface, outer side, then the palm.
-const ringWidth = [-.78, .78, 1, .78, -.78, -1];
-const ringHeight = [1, 1, 0, -1, -1, 0];
+const ringWidth = [-.57, .57, 1, .61, -.61, -1];
+const ringHeight = [1, 1, -.04, -.91, -.91, -.04];
 
 export function createHandSkin(side, material, { openWrist = false } = {}) {
   const reflected = side === 'left' || side === -1;
@@ -57,13 +63,20 @@ export function createHandSkin(side, material, { openWrist = false } = {}) {
     }
   }
 
-  const top = vertex(0, .028, -.025);
-  const bottom = vertex(-.003, -.024, -.025);
-  const palm = palmContour.map(([x, z, thickness], i) => ({
-    top: vertex(x, thickness, z),
-    middle: vertex(x * 1.08, 0, i === 0 || i === wristEdge ? z : -.025 + (z + .025) * 1.05),
-    bottom: vertex(x, -thickness, z),
-  }));
+  const top = vertex(-.003, .027, -.021);
+  const bottom = vertex(-.005, -.019, -.026);
+  const palm = palmContour.map(([x, z, dorsal, palmar], i) => {
+    const atWrist = i === 0 || i === wristEdge;
+    const innerX = x * .67;
+    const innerZ = -.024 + (z + .024) * .69;
+    return {
+      top: vertex(x, dorsal, z),
+      middle: vertex(x * 1.08, (dorsal + palmar) / 2, atWrist ? z : -.025 + (z + .025) * 1.04),
+      bottom: vertex(x, palmar, z),
+      innerTop: vertex(innerX, dorsalHeights[i], innerZ),
+      innerBottom: vertex(innerX, palmarHeights[i], innerZ),
+    };
+  });
 
   function rimAt(edge) {
     const a = palm[edge];
@@ -76,8 +89,10 @@ export function createHandSkin(side, material, { openWrist = false } = {}) {
   for (let i = 0; i < palm.length; i++) {
     const a = palm[i];
     const b = palm[(i + 1) % palm.length];
-    triangle(top, a.top, b.top);
-    triangle(bottom, b.bottom, a.bottom);
+    triangle(top, a.innerTop, b.innerTop);
+    triangle(bottom, b.innerBottom, a.innerBottom);
+    quad(a.innerTop, a.top, b.top, b.innerTop);
+    quad(b.innerBottom, b.bottom, a.bottom, a.innerBottom);
     if (!ports.has(i)) {
       quad(b.top, a.top, a.middle, b.middle);
       quad(b.middle, a.middle, a.bottom, b.bottom);
@@ -90,25 +105,27 @@ export function createHandSkin(side, material, { openWrist = false } = {}) {
   const wristIndices = reflected ? [wrist[1], wrist[0], wrist[5], wrist[4], wrist[3], wrist[2]] : wrist;
 
   for (const { edge, length, splay } of fingerSpecs) {
-    const [ax, az, at] = palmContour[edge];
-    const [bx, bz, bt] = palmContour[edge + 1];
+    const [ax, az, ad, ap] = palmContour[edge];
+    const [bx, bz, bd, bp] = palmContour[edge + 1];
     const dx = bx - ax;
     const dz = bz - az;
     const directionX = -dz + dx * splay;
     const directionZ = dx + dz * splay;
     const magnitude = Math.hypot(directionX, directionZ);
+    const rootWidth = Math.hypot(dx, dz) / 2;
+    const rootHeight = (ad + bd - ap - bp) / 4;
     const rows = [];
     let previous = rimAt(edge);
     for (const [distance, width, height] of fingerSections) {
       const ring = [vertex(), vertex(), vertex(), vertex(), vertex(), vertex()];
       connect(previous, ring);
-      rows.push({ ring, distance: distance * length, width: width * Math.hypot(dx, dz) / 2, height: height * (at + bt) / 2 });
+      rows.push({ ring, distance: distance * length, width: width * rootWidth, height: height * rootHeight });
       previous = ring;
     }
     const tip = vertex();
     cap(previous, tip);
     fingers.push({
-      x: (ax + bx) / 2, z: (az + bz) / 2,
+      x: (ax + bx) / 2, y: (ad + bd + ap + bp) / 4, z: (az + bz) / 2,
       forwardX: directionX / magnitude, forwardZ: directionZ / magnitude,
       rows, tip, length, pressure: -1,
     });
@@ -135,7 +152,7 @@ export function createHandSkin(side, material, { openWrist = false } = {}) {
       const { forwardX, forwardZ, length, rows, tip } = finger;
       let x = finger.x;
       let z = finger.z;
-      let y = 0;
+      let y = finger.y;
       let previousAngle = 0;
       let previousDistance = 0;
       for (const { ring, distance, width, height } of rows) {

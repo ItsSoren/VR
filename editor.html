@@ -95,6 +95,9 @@
             <button class="tool" id="add-block" data-tool="block" aria-pressed="false">Bloc <kbd>1</kbd></button>
             <button class="tool" id="add-ramp" data-tool="ramp" aria-pressed="false">Rampe <kbd>2</kbd></button>
             <button class="tool" id="add-wall" data-tool="wall" aria-pressed="false">Mur <kbd>3</kbd></button>
+        <button id="add-terrain" class="tool" data-tool="terrain">Terrain</button>
+        <button id="sculpt-terrain" class="tool" data-tool="sculpt">Sculpter</button>
+        <a href="./model-editor.html">Atelier modèles</a>
             <button class="tool" id="spawn-tool" data-tool="spawn" aria-pressed="false">Départ <kbd>4</kbd></button>
           </div>
           <div class="actions">
@@ -107,7 +110,7 @@
       </div>
       <div class="views">
         <section class="panel view view-3d" aria-labelledby="preview-title">
-          <div class="view-header"><h2 id="preview-title">Vue 3D</h2></div>
+          <div class="view-header"><h2 id="preview-title">Vue 3D</h2><button id="view-top">Dessus</button><button id="view-perspective">Perspective</button></div>
           <canvas id="preview" aria-label="Vue 3D interactive" tabindex="0"></canvas>
           <div class="view-footer"><span>Clic droit + glisser · tourner<br>Molette · zoomer  ·  Clic molette + glisser · décaler</span></div>
         </section>
@@ -146,6 +149,21 @@
           <label>Épaisseur<input id="p-h" type="number" step=".25"></label>
           <label>Pente (°)<input id="p-pitch" type="number" step="1"></label>
         </div>
+        <details id="terrain-controls" hidden>
+          <summary>Relief et végétation</summary>
+          <div class="fields">
+            <label>Détail<select id="terrain-detail"><option value="8">8 × 8</option><option value="16">16 × 16</option><option value="32">32 × 32</option><option value="48">48 × 48</option></select></label>
+            <label>Graine<input id="terrain-seed" type="number" min="0" max="2147483647"></label>
+            <label>Hauteur du bruit (m)<input id="terrain-amplitude" type="number" min="0" max="12" step=".1"></label>
+            <label>Fréquence du bruit<input id="terrain-frequency" type="number" min=".015" max="2" step=".015"></label>
+            <label>Herbe<input id="terrain-grass" type="range" min="0" max="1" step=".05"></label>
+            <label>Buissons<input id="terrain-shrub" type="range" min="0" max="1" step=".05"></label>
+            <label>Pinceau<select id="terrain-brush"><option value="raise">Monter</option><option value="lower">Creuser</option><option value="smooth">Lisser</option><option value="flatten">Aplanir</option></select></label>
+            <label>Rayon (m)<input id="brush-radius" value="3" type="number" min=".4" max="20" step=".2"></label>
+            <label>Force par passage<input id="brush-strength" value=".6" type="number" min=".05" max="4" step=".05"></label>
+            <button id="terrain-reset">Effacer le sculpt</button>
+          </div>
+        </details>
         <details>
           <summary>Aspect et surface</summary>
           <div class="fields">
@@ -153,6 +171,9 @@
             <label>Teinte<input id="p-color" type="color"></label>
             <label class="file">Image de texture<input id="texture-file" type="file" accept="image/png,image/jpeg,image/webp"></label>
             <button id="texture-clear">Retirer l’image</button>
+            <label>Créer une texture<select id="texture-style"><option value="stone">Pierre / grain</option><option value="soil">Terre</option><option value="woven">Trame</option></select></label>
+            <label>Couleur de base<input id="texture-tint" type="color" value="#787c54"></label>
+            <button id="texture-create">Générer la texture</button>
             <label class="wide">Préréglage<select id="surface"><option value="">Choisir une surface</option><option value="normal">Normale</option><option value="ice">Glace</option><option value="rubber">Caoutchouc</option><option value="moon">Faible gravité</option></select></label>
             <label>Adhérence<input id="p-grip" type="number" step=".05"></label>
             <label>Gravité<input id="p-gravity" type="number" step=".05"></label>
@@ -173,6 +194,6 @@
       </details>
     </aside>
   </main>
-  <script defer src="./gorilla-editor-r25.js"></script>
+  <script defer src="./gorilla-editor-r26.js"></script>
 </body>
 </html>

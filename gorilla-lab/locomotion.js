@@ -80,10 +80,11 @@ export class GorillaLocomotion {
       state.released = null;
       hand.surface = null;
       state.releaseTime = Math.max(0, state.releaseTime - dt);
-      state.eligible = hand.valid && !hand.held && settings.movement !== false;
+      state.eligible = hand.valid && (!hand.held||hand.hasSupport) && settings.movement !== false;
       if (!hand.valid) continue;
       const target = hand.locomotionTarget.subVectors(hand.target, head).clampLength(0, reach).add(head);
-      offset.set(0, 0, -.036).applyQuaternion(hand.mesh.quaternion);
+      if(hand.hasSupport)offset.copy(hand.supportOffset);
+      else offset.set(0, 0, -.036).applyQuaternion(hand.mesh.quaternion);
       if (!state.eligible) continue;
 
       const priorActive = previous && boxes.includes(previous) && !previous.objectBody?.owner;

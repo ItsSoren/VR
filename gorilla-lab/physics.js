@@ -512,7 +512,7 @@ export function solveObjects(objects,boxes,dt,gravity,rebound,surfaceAt) {
   const states=[], arena=boxes.map(box=>({box,bounds:boundsFor(box)}));
   let count=Math.max(1,Math.ceil(dt/.006));
   for(const body of objects){
-    if(body.mesh.visible===false)continue;
+    if(body.mesh.visible===false||body.collidable===false)continue;
     const dynamic=isDynamic(body);
     if(dynamic){
       // Keep travel below a fraction of the smallest collider dimension, including rotation.
@@ -595,10 +595,11 @@ function objectPenetration(position,radius,object,out){
   playerProbe.shape.sphereRadius=radius;
   return sat(playerProbe,object,out);
 }
-export function playerObjectContact(position,radius,object,velocity){
+export function playerObjectContact(position,radius,object,velocity,outNormal){
   const depth=objectPenetration(position,radius,object,normal);
   if(depth<=0)return false;
   position.addScaledVector(normal,depth+.001);
+  outNormal?.copy(normal);
   const inward=velocity.dot(normal);
   if(inward<0){
     velocity.addScaledVector(normal,-inward);
