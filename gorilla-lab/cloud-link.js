@@ -28,6 +28,7 @@ export function decodePose(value,now=Date.now()){
   return {time,id,x,y,z,yaw:angle*Math.PI/1800,map};
 }
 
+// Le relais transporte des états et des intentions. L’hôte garde l’autorité sur la physique.
 export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},onAction=()=>{},
     Socket=globalThis.WebSocket,now=Date.now,monotonicNow=now===Date.now?()=>performance.now():now,random=Math.random}={}){
   const senders=new Map();
@@ -371,6 +372,7 @@ export function decodeAvatar(value,now){
   }
   return pose;
 }
+// Les deltas évitent de renvoyer tous les objets. Les états complets permettent de rattraper un message perdu.
 export function createObjectFeed(){
   const previous=new Map();
   let last=-Infinity,fullAt=-Infinity;

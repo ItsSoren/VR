@@ -20,6 +20,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   const statusNode=document.querySelector('#map-note');
   function inform(message){status=message;statusNode.textContent=message;}
   function memo(){if(history.length>=20)history.shift();history.push(JSON.stringify(map));}
+  // Une source commune partage sa texture entre les pièces, y compris pendant leur reconstruction.
   function acquireTexture(source,material){
     let entry=textures.get(source);
     if(!entry){
@@ -216,6 +217,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
       if(request===loadRequest)load(contents);
     }catch(e){if(request===loadRequest)inform(e.message);}
   };
+  // Une importation peut se terminer après un reset ou un autre import. Seule l’opération courante peut charger la carte.
   async function loadURL(value){
     const request=++loadRequest;
     try{

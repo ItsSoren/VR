@@ -141,6 +141,7 @@ function showSelection() {
   if (selected) selection.box.setFromObject(selected);
 }
 
+// La prévisualisation réutilise les mêmes définitions géométriques que le jeu.
 function updatePreview(frame = false) {
   const model = currentModel();
   const parts = model?.parts ?? [];

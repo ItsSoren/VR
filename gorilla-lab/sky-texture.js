@@ -57,4 +57,5 @@ function buildSky(night){
   texture.generateMipmaps=true;texture.needsUpdate=true;
   return texture;
 }
+// Les panoramas sont calculés une fois, puis échantillonnés comme des textures ordinaires.
 export function createLabSky(){return {day:buildSky(false),night:buildSky(true)};}

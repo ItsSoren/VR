@@ -75,6 +75,7 @@ const horizontalPlane = new T.Plane(worldUp, 0);
 const normalMatrix = new T.Matrix3();
 let selectionBox = null, renderRequested = false;
 
+// L’éditeur ne redessine que si la vue ou le contenu change.
 function queueRender() {
   if (renderRequested) return;
   renderRequested = true;
@@ -420,6 +421,7 @@ function snapCoordinate(value) {
   return T.MathUtils.clamp(Math.round(value / step) * step, -120, 120);
 }
 
+// Les deux vues produisent un rayon dans le même monde 3D pour placer et déplacer les pièces.
 function setEventRay(canvas, event) {
   if (canvas === plan) {
     const point = toWorld(event);
@@ -716,6 +718,7 @@ $('terrain-reset').onclick=()=>{
   if(!current()?.terrain)return;
   remember();current().terrain.heights=null;sync();
 };
+// Le relief est la donnée de référence. Le pinceau l’édite puis reconstruit la géométrie visible.
 function applyBrush(canvas,event){
   setEventRay(canvas,event);
   const hit=raycaster.intersectObjects(group.children,false).find(item=>map.pieces[group.children.indexOf(item.object)]?.terrain);

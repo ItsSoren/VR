@@ -1,6 +1,7 @@
 
 import * as T from 'three';
 
+// Chaque œil dispose de sa propre cible de rendu, à la taille native de son viewport XR.
 export function createVrEffects(renderer) {
   const passScene=new T.Scene(), camera=new T.PerspectiveCamera();
   camera.matrixAutoUpdate=false;
@@ -40,6 +41,7 @@ export function createVrEffects(renderer) {
     if(eyes.length===0||eyes.some(eye=>!eye.viewport?.z||!eye.viewport?.w))return false;
     settings.bloom.value=bloom?.18:0;
     settings.exposure.value=renderer.toneMappingExposure;
+    // La composition manipule l’état global du moteur. Le bloc finally le rétablit même en cas d’erreur.
     const original=renderer.getRenderTarget(),xrEnabled=renderer.xr.enabled;
     const shadowUpdate=renderer.shadowMap.autoUpdate,autoReset=renderer.info.autoReset;
     renderer.info.reset();renderer.info.autoReset=false;

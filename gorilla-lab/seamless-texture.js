@@ -8,6 +8,7 @@ export function seamlessTexture(index,tint=colors[index]){
   c.fillRect(0,0,512,512);
   let state=(index+45)*31337;
   const random=()=>((state=(Math.imul(state,1664525)+1013904223)>>>0)/2**32);
+  // Reproduit chaque tache qui dépasse sur le bord opposé pour éviter une couture.
   const periodic=(x,y,w,h)=>{
     for(const dx of [0,-512])for(const dy of [0,-512])c.fillRect(x+dx,y+dy,w,h);
   };

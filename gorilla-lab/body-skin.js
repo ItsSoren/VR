@@ -13,6 +13,7 @@ const bodyRingPoints=profile.flatMap(([y,xRadius,zRadius])=>Array.from({length:s
   return [Math.cos(angle)*xRadius,y,Math.sin(angle)*zRadius+.04];
 }));
 
+// Les anneaux des bras réutilisent les sommets du torse et des poignets pour fermer le maillage.
 export function createBodySkin(material,handMeshes){
   const vertices=bodyRingPoints.length;
   const triangles=[];

@@ -138,6 +138,7 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     m.opacity=record.style===3?.40:1;m.transparent=record.style===3;m.depthWrite=!m.transparent;
     m.emissive?.copy(m.color);m.emissiveIntensity=record.style===4?1.65:0;m.needsUpdate=true;
   }
+  // Une carte différente peut réutiliser les mêmes identifiants. Filtre avant de créer les répliques.
   function takeObjects(pose){
     if(!readyHere(pose)){clearReplicas();return;}
     if(replicaHost!==pose.id||replicaMap!==pose.map){clearReplicas();replicaHost=pose.id;replicaMap=pose.map;}
@@ -171,6 +172,7 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     if(present)for(const id of replicas.keys())if(!present.has(id))removeReplica(id);
   }
   const objectTarget=new T.Vector3();
+  // Le lecteur interpole la pose reçue et la pose affichée sans simuler une deuxième physique.
   function drawReplicas(dt,visible,now){
     const smooth=1-Math.exp(-dt*22);
     for(const r of replicas.values()){

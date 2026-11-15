@@ -4,6 +4,7 @@ const shotInterval=.1, speed=45, range=55, maxShots=24, maxSparks=96;
 const tracerPalette=[new T.Color('#ffdc4d'),new T.Color('#ff5d35'),new T.Color('#bfc4c8')];
 const axis=new T.Vector3(0,0,-1);
 
+// impact reçoit le segment parcouru pendant cette image et renvoie la distance du premier obstacle.
 export function createArcadeBlaster(scene,{impact}){
   const mesh=new T.Group(), bore=new T.MeshStandardMaterial({color:'#596974',roughness:.38,metalness:.60});
   const shell=new T.MeshStandardMaterial({color:'#29323e',roughness:.68});
@@ -28,14 +29,15 @@ export function createArcadeBlaster(scene,{impact}){
   geometry.setAttribute('position',positions);geometry.setAttribute('color',colors);
   geometry.setDrawRange(0,0);
   const traces=new T.LineSegments(geometry,new T.LineBasicMaterial({vertexColors:true,toneMapped:false,transparent:true,opacity:.94,depthWrite:false}));
-  traces.frustumCulled=false;scene.add(traces);
+  traces.frustumCulled=false;traces.visible=false;scene.add(traces);
   const sparkPositions=new T.Float32BufferAttribute(maxSparks*3,3).setUsage(T.DynamicDrawUsage);
   const sparkGeometry=new T.BufferGeometry();
   sparkGeometry.setAttribute('position',sparkPositions);
   sparkGeometry.setDrawRange(0,0);
   const sparks=new T.Points(sparkGeometry,new T.PointsMaterial({color:'#ffd268',size:.034,toneMapped:false,
     transparent:true,opacity:.77,depthWrite:false,blending:T.AdditiveBlending}));
-  sparks.frustumCulled=false;scene.add(sparks);
+  sparks.frustumCulled=false;sparks.visible=false;scene.add(sparks);
+  // Les deux pools réutilisent leurs emplacements, même si la gâchette reste enfoncée.
   const shots=Array.from({length:maxShots},()=>({p:new T.Vector3(),d:new T.Vector3(),distance:0,active:false}));
   const particles=Array.from({length:maxSparks},()=>({p:new T.Vector3(),v:new T.Vector3(),life:0}));
   const muzzle=new T.Vector3(),scratch=new T.Vector3(),side=new T.Vector3();
@@ -61,6 +63,7 @@ export function createArcadeBlaster(scene,{impact}){
     glow=.055;total++;
   }
   function update({dt,aim,firing}){
+    if(!aim&&!mesh.visible&&!traces.visible&&!sparks.visible)return;
     dt=Math.max(0,Math.min(dt,.12));
     mesh.visible=Boolean(aim);
     if(aim){
@@ -95,19 +98,24 @@ export function createArcadeBlaster(scene,{impact}){
         }
       }
     }
-    positions.needsUpdate=true;geometry.setDrawRange(0,draw);
+    // Three.js renvoie les attributs modifiés au GPU. Une géométrie vide reste masquée et propre.
+    traces.visible=draw>0;
+    if(draw>0)positions.needsUpdate=true;
+    geometry.setDrawRange(0,draw);
     let points=0;
     for(const spark of particles){
       if(spark.life<=0)continue;
       spark.life-=dt;spark.v.y-=5*dt;spark.p.addScaledVector(spark.v,dt);
       if(spark.life>0)sparkPositions.setXYZ(points++,spark.p.x,spark.p.y,spark.p.z);
     }
-    sparkPositions.needsUpdate=true;sparkGeometry.setDrawRange(0,points);
+    sparks.visible=points>0;
+    if(points>0)sparkPositions.needsUpdate=true;
+    sparkGeometry.setDrawRange(0,points);
   }
   function reset(){
     for(const shot of shots)shot.active=false;
     for(const spark of particles)spark.life=0;
-    delay=glow=0;wasFiring=false;mesh.visible=flash.visible=false;
+    delay=glow=0;wasFiring=false;mesh.visible=flash.visible=traces.visible=sparks.visible=false;
     geometry.setDrawRange(0,0);sparkGeometry.setDrawRange(0,0);
   }
   return {update,reset,get shotsFired(){return total;}};

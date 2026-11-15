@@ -4,7 +4,7 @@
 
 `npm install`, puis `npm run build` et `npm test` à la racine du dépôt.
 
-Ouvrir index.html pour l'aperçu PC. Publier en HTTPS pour entrer en WebXR depuis le casque. Le site est statique. Placer index.html et game-lab-r28.js ensemble à la racine d'un dépôt GitHub Pages.
+Ouvrir index.html pour l'aperçu PC. Publier en HTTPS pour entrer en WebXR depuis le casque. Le site est statique. Placer index.html et game-lab-r29.js ensemble à la racine d'un dépôt GitHub Pages.
 ## Dans le casque
 - S'appuyer sur le sol ou un mur et pousser en bougeant les manettes.
 - Stick droit : tourner par crans de 45 degrés. B/Y ou clic du stick gauche : panneau. Gâchette : sélectionner dans le panneau.
@@ -82,3 +82,7 @@ La vibration légère des appuis de la main se règle dans **Locomotion → Vibr
 ## Pistolet de tir
 
 Dans **Objets → Pistolet de tir**, active le pistolet. En VR, maintiens la gâchette droite. Sur PC, **X** équipe le pistolet et le clic gauche ou **J** maintient le feu. Sur mobile, garde **Tirer** enfoncé. Un tir part toutes les 100 ms. Les traceurs jaune, rouge et gris et les étincelles sont visibles localement. Sur la machine qui simule les objets, le tir peut les pousser.
+
+## Affichage sur écran
+
+Dans **Rendu → Image → Champ de vision écran**, le champ vertical de la caméra se règle de 50 à 105°. En VR, le casque fournit sa propre projection. Sur mobile, la qualité de rendu plafonne aussi le coût des ombres et des lumières, et réduit la résolution interne sans changer la taille du canvas.

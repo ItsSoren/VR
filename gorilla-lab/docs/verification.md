@@ -87,3 +87,7 @@ Le bouton de rapport donne une trace du contexte courant. Garde aussi la version
 2. Fais un commit au nom simple, par exemple `Ajoute une balise manipulable`.
 3. Pousse ta branche et ouvre une pull request depuis GitHub. Relis la différence et lance les vérifications ci-dessus sur la branche.
 4. Après intégration à `main`, vérifie le déploiement Pages puis ouvre le jeu dans une nouvelle fenêtre. Teste aussi une fois sur casque pour éviter de comparer un changement VR uniquement depuis le PC.
+
+### Vérifier un ralentissement sur téléphone
+
+Compare deux essais dans la même zone, après quelques secondes de stabilisation et dans la même orientation. Reste à la même distance du miroir. Sur un écran mobile à forte densité, le niveau 2 rend désormais environ 27 % des pixels de l’ancien budget au même niveau. Cette mesure porte sur les dimensions du buffer. Elle ne prédit pas le nombre de FPS. Les ombres et les lumières suivent le niveau mobile, même en qualité manuelle.

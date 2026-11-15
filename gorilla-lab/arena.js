@@ -11,6 +11,7 @@ function canvasTexture(w,h,paint) {
   const map=new T.CanvasTexture(c);map.colorSpace=T.SRGBColorSpace;
   return map;
 }
+// L’arène garde ensemble les maillages, les volumes de collision et les ressources de rendu.
 export function buildArena(scene,renderer) {
   const {day:sky,night:nightSky}=createLabSky();
   const dome=new T.Mesh(new T.SphereGeometry(180,40,20),new T.MeshBasicMaterial({map:sky,side:T.BackSide,fog:false,toneMapped:false}));
@@ -60,6 +61,7 @@ export function buildArena(scene,renderer) {
     scene.background.set(light.fog);
     scene.environmentIntensity=baseReflection*[1,.56,.09][mood];
   }
+  // Centre la zone d’ombres près du joueur par pas de quatre mètres pour stabiliser la projection.
   function centerShadows(point){
     if(!sun.castShadow)return;
     const target=sun.target.position;
@@ -148,6 +150,7 @@ export function buildArena(scene,renderer) {
   const alt=tiles.map(m=>new T.MeshLambertMaterial({map:m.map,flatShading:true,opacity:m.opacity,transparent:m.transparent,depthWrite:m.depthWrite}));
   const focusAmount={value:0}, focusRadius={value:.24};
   const lightmap={value:null}, bakedStrength={value:0};
+  // Cette texture d’occlusion approximative est réutilisée jusqu’à la prochaine modification de carte.
   function bakeLightmap(){
     lightmap.value?.dispose();
     lightmap.value=canvasTexture(512,512,(ctx,w)=>{

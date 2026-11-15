@@ -71,12 +71,13 @@ export function addLabFixtures(scene,boxes,actions) {
   const targets=[], labels=[];
   const cabinet=new T.MeshLambertMaterial({color:'#485d5d',flatShading:true});
   function station([x,z],name,commands){
-    const base=new T.Mesh(new T.BoxGeometry(1.72,.91,.57),cabinet);
-    base.position.set(x,.455,z);base.castShadow=base.receiveShadow=true;scene.add(base);
-    addCollider(base,new T.Vector3(.86,.455,.285));
+    // Le pied prolonge le bord inférieur du panneau. Sa collision suit le rectangle visible.
+    const foot=new T.Mesh(new T.BoxGeometry(.095,.68,.11),cabinet);
+    foot.position.set(x,.34,z+.46);foot.castShadow=foot.receiveShadow=true;scene.add(foot);
+    addCollider(foot,new T.Vector3(.0475,.34,.055));
 
     const panel=new T.Group();
-    panel.position.set(x,1.10,z+.40);panel.rotation.x=-.35;scene.add(panel);
+    panel.position.set(x,.85,z+.40);panel.rotation.x=-.35;scene.add(panel);
     const backing=new T.Mesh(new T.BoxGeometry(.64,.36,.055),new T.MeshLambertMaterial({color:'#182831'}));
     panel.add(backing);
     const canvas=document.createElement('canvas');canvas.width=512;canvas.height=96;
@@ -158,6 +159,7 @@ export function addLabFixtures(scene,boxes,actions) {
     scoreCtx.textAlign='center';scoreCtx.font='bold 28px system-ui';scoreCtx.fillStyle='#fff0ce';
     scoreCtx.fillText('CIBLE  ·  '+score,128,42);scoreTexture.needsUpdate=true;
   }
+  // Compare les deux positions qui encadrent le pas physique pour trouver le passage dans la cible.
   function updateTarget(objects){
     for(const item of objects){
       if(!item.beforePhysics||item.owner||item.frozen||!item.mesh.visible)continue;

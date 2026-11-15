@@ -3,6 +3,7 @@ import * as T from 'three';
 const modeColors=['#66f9df','#64bfff','#ff5873','#b997ff','#ffae58','#e2ff7b','#7dcdf9'];
 const axis=new T.Vector3(0,1,0);
 
+// Le modèle, le laser et le repère de visée partagent la pose et la couleur du mode actif.
 export function createToolVisual(scene){
   const mesh=new T.Group();
   const shell=new T.MeshStandardMaterial({color:'#2c4750',roughness:.43,metalness:.47});

@@ -4,6 +4,7 @@ import * as T from 'three';
 import {createArcadeBlaster} from '../gorilla-lab/arcade-blaster.js';
 import {updateGroundHaptics} from '../gorilla-lab/ground-haptics.js';
 import {parseMap,exampleMap} from '../gorilla-lab/map-format.js';
+import {screenPixelRatio} from '../gorilla-lab/screen-render.js';
 import {terrainHeight,sculptTerrain} from '../gorilla-lab/terrain-edit.js';
 
 test('held trigger emits ten shots each second and stops on release',()=>{
@@ -53,4 +54,29 @@ test('sculpted terrain round-trips with the map',()=>{
   assert.ok(sculptTerrain(piece,piece.x,piece.z,{mode:'raise',radius:2,strength:1}));
   const [restored]=parseMap(JSON.stringify(parsed)).pieces;
   assert.ok(terrainHeight(restored,restored.x,restored.z)>original);
+});
+
+
+test('idle blaster keeps its GPU buffers clean and hides effects after they expire',()=>{
+  const scene=new T.Scene(),gun=createArcadeBlaster(scene,{});
+  const tracer=scene.children.find(node=>node.isLineSegments);
+  const sparks=scene.children.find(node=>node.isPoints);
+  const initial=[tracer,sparks].map(node=>node.geometry.attributes.position.version);
+  for(let i=0;i<120;i++)gun.update({dt:1/60,aim:null,firing:false});
+  assert.deepEqual([tracer,sparks].map(node=>node.geometry.attributes.position.version),initial);
+  assert.ok(!tracer.visible&&!sparks.visible);
+  const aim={position:new T.Vector3(),direction:new T.Vector3(0,0,-1),quaternion:new T.Quaternion()};
+  gun.update({dt:1/60,aim,firing:true});
+  assert.ok(tracer.visible&&sparks.visible);
+  for(let i=0;i<120;i++)gun.update({dt:1/60,aim:null,firing:false});
+  assert.ok(!tracer.visible&&!sparks.visible);
+});
+
+
+test('low mobile quality reduces pixel area without affecting the desktop budget',()=>{
+  const previousMobileRatio=1.75*(.53+2*.047);
+  const newMobileRatio=screenPixelRatio(2,3,true);
+  assert.ok(newMobileRatio**2<.30*previousMobileRatio**2);
+  assert.equal(screenPixelRatio(2,3,false),previousMobileRatio);
+  assert.ok(screenPixelRatio(10,3,true)<=1);
 });

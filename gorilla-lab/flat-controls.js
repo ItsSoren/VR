@@ -1,3 +1,4 @@
+// Les gestes de déplacement et de visée utilisent deux contacts indépendants sur écran tactile.
 export function createFlatControls({canvas,enabled,onLook,onAction,onMenu}){
   const movement={x:0,z:0};
   let left=null,right=null,mouse=false,jump=false;
