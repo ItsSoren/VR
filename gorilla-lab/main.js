@@ -29,7 +29,7 @@ const camera=new T.PerspectiveCamera(70,1,.065,210);
 rig.add(eye);eye.add(camera);scene.add(rig);
 const arena=buildArena(scene,renderer);
 const settings={
-  grip:6,slide:3,gravity:5,jump:5,weight:5,size:5,arms:5,bounce:4,throw:5,quality:7,auto:true,resolution:7,texturePower:7,focus:false,focusStrength:5,focusSize:5,
+  grip:6,slide:3,gravity:5,jump:5,weight:5,size:5,arms:5,contrast:5,saturation:5,exposure:5,warmth:5,bounce:4,throw:5,quality:7,auto:true,resolution:7,texturePower:7,focus:false,focusStrength:5,focusSize:5,
   movement:true,collisions:true,objects:true,body:true,hands:true,textures:true,reflections:true,shadows:true,bloom:true,
 };
 const defaults={...settings};
@@ -39,13 +39,12 @@ const velocity=new T.Vector3();
 const soft=new T.Vector3(), delta=new T.Vector3(), worldHead=new T.Vector3(), rotated=new T.Vector3(), head=new T.Vector3();
 const point=new T.Vector3(), prior=new T.Vector3(), candidate=new T.Vector3(), scratch=new T.Vector3();
 const up=new T.Vector3(0,1,0), spin=new T.Quaternion(), normal=new T.Vector3();
-let yaw=0,pitch=0, drop=0, snap=false, frameTime=0,fps=0,windowFrames=0,windowElapsed=0,qualityTimer=0,lowCount=0,highCount=0,liveLevel=7,refreshRate=72;
-let menu=false,page=0,hudDirty=true,lastDraw=0;
+let yaw=0,pitch=0, drop=0, standingHeight=NaN, snap=false, frameTime=0,fps=0,windowFrames=0,windowElapsed=0,qualityTimer=0,lowCount=0,highCount=0,liveLevel=7,refreshRate=72;
+let menu=false,panelHand='left',page=0,hudDirty=true,lastDraw=0;
 let blocked=[],activeBoxes=arena.boxes;
 const geometry=new T.IcosahedronGeometry(1,0);
 const white=new T.MeshLambertMaterial({color:'#fffdf4',flatShading:true});
-const fur=new T.MeshLambertMaterial({color:'#6c5746',flatShading:true});
-const chestMaterial=new T.MeshLambertMaterial({color:'#a7896a',flatShading:true});
+const fur=new T.MeshLambertMaterial({color:'#f6f4ec',flatShading:true});
 function shape(parent,material,x,y,z,sx,sy,sz) {
   const m=new T.Mesh(geometry,material);
   m.position.set(x,y,z);m.scale.set(sx,sy,sz);
@@ -53,14 +52,51 @@ function shape(parent,material,x,y,z,sx,sy,sz) {
 }
 const monkey=new T.Group();
 scene.add(monkey);
-shape(monkey,fur,0,.43,.105,.30,.43,.23);
-shape(monkey,chestMaterial,0,.49,-.06,.204,.26,.095);
-shape(monkey,fur,-.17,.08,.095,.12,.16,.17);
-shape(monkey,fur,.17,.08,.095,.12,.16,.17);
+const torsoGeo=new T.IcosahedronGeometry(1,1);
+const torsoVertices=torsoGeo.attributes.position;
+for(let i=0;i<torsoVertices.count;i++){
+  const y=torsoVertices.getY(i);
+  const taper=.83+y*.29;
+  torsoVertices.setXYZ(i,torsoVertices.getX(i)*taper,y,torsoVertices.getZ(i)*(.88+y*.15));
+}
+torsoGeo.computeVertexNormals();
+const torso=new T.Mesh(torsoGeo,fur);
+torso.position.set(0,.41,.14);torso.scale.set(.36,.41,.26);
+torso.castShadow=true;monkey.add(torso);
+const upperGeometry=new T.CylinderGeometry(.062,.105,1,7,1);
+const lowerGeometry=new T.CylinderGeometry(.046,.064,1,7,1);
+const armAxis=new T.Vector3(), elbowBend=new T.Vector3(), armSpan=new T.Vector3();
+const shoulderOffset=new T.Vector3(), viewNormal=new T.Vector3(), panelUp=new T.Vector3(), panelRight=new T.Vector3();
+const panelBasis=new T.Matrix4();
+function tube(mesh,a,b){
+  armAxis.subVectors(b,a);
+  mesh.position.copy(a).addScaledVector(armAxis,.5);
+  mesh.scale.y=Math.max(.001,armAxis.length());
+  mesh.quaternion.setFromUnitVectors(up,armAxis.normalize());
+}
+function arms(){
+  for(const h of hands){
+    h.upper.visible=h.lower.visible=settings.body&&h.valid;
+    if(!h.valid)continue;
+    const sign=h.side==='left'?-1:1;
+    shoulderOffset.set(sign*.255,.68,.12).multiplyScalar(monkey.scale.x).applyAxisAngle(up,yaw);
+    h.shoulder.copy(monkey.position).add(shoulderOffset);
+    armSpan.subVectors(h.mesh.position,h.shoulder);
+    const reach=armSpan.length(),length=.24+settings.arms*.036;
+    armAxis.copy(armSpan).normalize();
+    elbowBend.set(sign*.42,-1,.24).applyAxisAngle(up,yaw);
+    elbowBend.addScaledVector(armAxis,-elbowBend.dot(armAxis)).normalize();
+    h.elbow.copy(h.shoulder).addScaledVector(armSpan,.48);
+    h.elbow.addScaledVector(elbowBend,Math.sqrt(Math.max(.008,length*length-reach*reach*.25))*.79);
+    tube(h.upper,h.shoulder,h.elbow);tube(h.lower,h.elbow,h.mesh.position);
+  }
+}
 const hands=['left','right'].map(side=>{
   const mesh=shape(scene,white,0,0,0,.072,.072,.072);
   mesh.visible=false;
-  return {side,mesh,anchor:new T.Vector3(),last:new T.Vector3(),target:new T.Vector3(),previous:new T.Vector3(),speed:new T.Vector3(),valid:false,surface:null,held:null,grip:false,trigger:false,menu:false};
+  const upper=new T.Mesh(upperGeometry,fur),lower=new T.Mesh(lowerGeometry,fur);
+  upper.visible=lower.visible=false;scene.add(upper,lower);
+  return {side,mesh,upper,lower,shoulder:new T.Vector3(),elbow:new T.Vector3(),anchor:new T.Vector3(),last:new T.Vector3(),target:new T.Vector3(),previous:new T.Vector3(),speed:new T.Vector3(),valid:false,surface:null,held:null,grip:false,trigger:false,menu:false,contactNormal:new T.Vector3(),contactPoint:new T.Vector3()};
 });
 const objectSpecs=[
   [new T.BoxGeometry(.33,.33,.33),'#b76b50',.27,1.35,[-.84,.32,1.15]],
@@ -95,6 +131,10 @@ resetObjects();
 function applyVisual(){
   arena.visual(liveLevel,settings.shadows,settings.reflections,settings.bloom,settings.textures,2**(settings.texturePower-1));
   arena.focus(settings.focus,settings.focusStrength,settings.focusSize);
+  renderer.toneMappingExposure=.58+settings.exposure*.114;
+  photoContrast.value=.55+settings.contrast*.09;
+  photoSaturation.value=settings.saturation*.20;
+  photoWarmth.value=(settings.warmth-5)*.022;
   renderer.xr.setFoveation(T.MathUtils.clamp(1.16-liveLevel*.105,.12,1));
   if(!renderer.xr.isPresenting) resize();
   hudDirty=true;
@@ -123,6 +163,7 @@ const sections=[
   ]],
 ];
 sections.push(['Focus',[['Activer le focus','focus'],['Intensité','focusStrength'],['Taille de la zone nette','focusSize']]]);
+sections.push(['Photo',[['Exposition','exposure'],['Contraste','contrast'],['Saturation','saturation'],['Chaleur','warmth']]]);
 const title=document.querySelector('#section'), desktop=document.querySelector('#settings');
 const readings=document.querySelector('#readings');
 function change(key,step){
@@ -168,14 +209,14 @@ function display(w,h,width,height,parent){
   const mesh=new T.Mesh(new T.PlaneGeometry(width,height),new T.MeshBasicMaterial({map:texture,transparent:true,depthWrite:false,toneMapped:false}));
   parent.add(mesh);mesh.renderOrder=5;return {ctx,texture,mesh,w,h};
 }
-const panel=display(640,652,1.07,1.09,scene);
+const panel=display(640,652,.52,.53,scene);
 panel.mesh.visible=false;
 const wrist=display(416,84,.32,.065,scene);
 wrist.mesh.visible=false;
 const ray=new T.Raycaster(), raySource=new T.Vector3(), forward=new T.Vector3();
 const cursor=shape(scene,new T.MeshBasicMaterial({color:'#f5dfa0'}),0,0,0,.009,.009,.009);
 cursor.visible=false;
-let hitAreas=[];
+let hitAreas=[], pendingAim=null;
 function drawPanel(){
   const c=panel.ctx;hitAreas=[];
   c.clearRect(0,0,640,652);c.fillStyle='#182632';c.fillRect(0,0,640,652);
@@ -186,7 +227,7 @@ function drawPanel(){
     c.textAlign='center';c.fillText(label,x+w/2,y+h/2+7);c.textAlign='left';
     hitAreas.push({x,y,w,h,action});
   }
-  sections.forEach(([name],i)=>item(25+i*150,61,140,44,name,()=>page=i,page===i?'#68705a':'#334b58'));
+  sections.forEach(([name],i)=>item(25+i*120,61,112,44,name,()=>page=i,page===i?'#68705a':'#334b58'));
   sections[page][1].forEach(([name,key],i)=>{
     const y=119+i*44;
     c.fillStyle='#e9e5ce';c.font='22px system-ui';c.fillText(name,30,y+26);
@@ -203,16 +244,29 @@ function drawPanel(){
   c.fillStyle='#c4d5d8';c.font='17px system-ui';c.fillText('Gâchette : choisir  ·  B/Y : panneau  ·  ¹ Prochaine session VR',25,645);
   panel.texture.needsUpdate=true;
 }
-function setMenu(){
+function setMenu(side){
   menu=!menu;
-  if(!menu) return;
-  camera.getWorldPosition(point);camera.getWorldDirection(forward);
-  forward.y=0;
-  if(forward.lengthSq()<.01) forward.set(0,0,-1);
-  forward.normalize();
-  panel.mesh.position.copy(point).addScaledVector(forward,1.35);
-  panel.mesh.lookAt(point);
-  panel.mesh.updateMatrixWorld(true);hudDirty=true;
+  if(menu)panelHand=side;
+  hudDirty=true;
+}
+function placePanel(){
+  const hand=hands.find(h=>h.side===panelHand);
+  if(!hand?.valid)return false;
+  panelUp.subVectors(hand.mesh.position,hand.elbow);
+  if(panelUp.lengthSq()<.002)panelUp.set(0,0,-1).applyAxisAngle(up,yaw);
+  panelUp.normalize();
+  panel.mesh.position.copy(hand.mesh.position).lerp(hand.elbow,.44);
+  viewNormal.subVectors(worldHead,panel.mesh.position);
+  viewNormal.addScaledVector(panelUp,-viewNormal.dot(panelUp));
+  if(viewNormal.lengthSq()<.002)viewNormal.set(0,1,0).addScaledVector(panelUp,-panelUp.y);
+  if(viewNormal.lengthSq()<.002)viewNormal.set(0,0,1);
+  viewNormal.normalize();
+  panelRight.crossVectors(panelUp,viewNormal).normalize();
+  panelUp.crossVectors(viewNormal,panelRight);
+  panel.mesh.position.addScaledVector(viewNormal,.105);
+  panel.mesh.quaternion.setFromRotationMatrix(panelBasis.makeBasis(panelRight,panelUp,viewNormal));
+  panel.mesh.updateMatrixWorld(true);
+  return true;
 }
 function aim(frame,space,input,trig){
   const pose=frame.getPose(input.targetRaySpace,space);
@@ -263,7 +317,7 @@ enter.onclick=async()=>{
     renderer.xr.setFramebufferScaleFactor(.45+settings.resolution*.055);
     await renderer.xr.setSession(session);
     refreshRate=session.frameRate||72;
-    drop=NaN;resetPlayer();applyVisual();
+    standingHeight=NaN;drop=0;resetPlayer();applyVisual();
     document.body.classList.add('immersive');
   }catch(error){
     if(session) await session.end().catch(()=>{});
@@ -289,13 +343,16 @@ function trackHands(frame,space,dt){
     if(!pose){h.valid=false;h.surface=null;release(h,false);continue;}
     const p=pose.transform.position;
     candidate.set(p.x,p.y-drop,p.z);
-    scratch.subVectors(candidate,head).clampLength(0,.58+settings.arms*.088);
+    scratch.subVectors(candidate,head);
+    if(!menu && scratch.y<0) scratch.y*=1.18+settings.arms*.04;
+    scratch.clampLength(0,.82+settings.arms*.098);
     h.target.copy(head).add(scratch).applyAxisAngle(up,yaw).add(rig.position);
     const wasValid=h.valid;
     if(!wasValid){h.last.copy(h.target);h.previous.copy(h.target);h.speed.set(0,0,0);}
     h.valid=true;
     h.speed.lerp(scratch.subVectors(h.target,h.previous).multiplyScalar(1/Math.max(.006,dt)).clampLength(0,18),.55);
     h.previous.copy(h.target);
+    const priorSurface=h.surface;
     h.surface=null;
     const grip=Boolean(source.gamepad?.buttons[1]?.pressed);
     if(!menu&&grip&&!h.grip&&settings.objects){
@@ -312,8 +369,22 @@ function trackHands(frame,space,dt){
       h.held.velocity.copy(h.speed);
     }
     if(!menu&&settings.movement&&!h.held){
-      h.surface=handContact(h.last,h.target,.074,activeBoxes,h.anchor,normal);
+      h.surface=handContact(h.last,h.target,.080,activeBoxes,h.contactPoint,normal);
+      if(!h.surface&&priorSurface&&activeBoxes.includes(priorSurface)){
+        scratch.subVectors(h.target,h.anchor);
+        if(scratch.dot(h.contactNormal)<.038 && scratch.lengthSq()<.29){
+          h.surface=priorSurface;
+          h.contactPoint.copy(h.anchor);
+          normal.copy(h.contactNormal);
+        }
+      }
       if(h.surface){
+        if(h.surface!==priorSurface || normal.dot(h.contactNormal)<.75) h.anchor.copy(h.contactPoint);
+        h.contactNormal.copy(normal);
+        const slip=(1-h.surface.friction*.92)*(.12+settings.slide*.065);
+        scratch.subVectors(h.contactPoint,h.anchor);
+        scratch.addScaledVector(normal,-scratch.dot(normal));
+        h.anchor.addScaledVector(scratch,Math.min(.97,slip));
         const friction= h.surface.friction*(.22+settings.grip*.135);
         correction(h,friction);
         count++;
@@ -321,10 +392,10 @@ function trackHands(frame,space,dt){
     }
     h.last.copy(h.surface?h.anchor:h.target);
     const btn=Boolean(source.gamepad?.buttons[5]?.pressed||source.gamepad?.buttons[3]?.pressed&&h.side==='left');
-    if(btn&&!h.menu)setMenu();
+    if(btn&&!h.menu)setMenu(h.side);
     h.menu=btn;
     const trigger=Boolean(source.gamepad?.buttons[0]?.pressed);
-    if(menu)aim(frame,space,source,trigger&&!h.trigger);
+    if(menu&&h.side!==panelHand) pendingAim={source,click:trigger&&!h.trigger};
     h.trigger=trigger;
   }
   return count;
@@ -347,11 +418,9 @@ function character(frame,space,pose,dt){
   const targetEye=.43+settings.size*.088;
   if(inVR){
     const p=pose.transform.position;
-    if(!Number.isFinite(drop))drop=p.y-targetEye;
-    // Keep the physical head and both hands in one translated tracking space.
-    const desiredDrop=T.MathUtils.clamp(drop,-.65,1.5);
-    eye.position.y=-desiredDrop;
-    drop=desiredDrop;
+    if(!Number.isFinite(standingHeight))standingHeight=p.y;
+    drop=T.MathUtils.clamp(standingHeight-targetEye,-.65,1.7);
+    eye.position.y=-drop;
     head.set(p.x,p.y-drop,p.z);
     const source=[...frame.session.inputSources].find(s=>s.handedness==='right');
     const x=source?.gamepad?.axes[2]??0;
@@ -404,13 +473,15 @@ function character(frame,space,pose,dt){
   rig.rotation.y=yaw;
   if(inVR)camera.position.set(0,0,0);
   for(const h of hands){
-    if(h.valid)h.mesh.position.copy(h.surface?h.anchor:h.target);
+    if(h.valid)h.mesh.position.copy(h.surface?h.anchor:h.target.add(delta));
     if(!inVR)h.mesh.visible=false;
   }
   const bodyScale=.72+settings.size*.05;
   monkey.visible=settings.body;
   monkey.position.set(worldHead.x,rig.position.y+.14,worldHead.z);
   monkey.rotation.y=yaw;monkey.scale.setScalar(bodyScale);
+  arms();
+  rig.updateMatrixWorld(true);
   camera.updateWorldMatrix(true,false);
 }
 function updateFps(dt,inVR){
@@ -429,6 +500,29 @@ function updateFps(dt,inVR){
     liveLevel=next;qualityTimer=lowCount=highCount=0;applyVisual();
   }
 }
+const photoContrast={value:1},photoSaturation={value:1},photoWarmth={value:0};
+const graded=new Set();
+function grade(material){ if(!material||graded.has(material))return;
+  graded.add(material);
+  const previous=material.onBeforeCompile;
+  const cacheKey=material.customProgramCacheKey.call(material);
+  material.onBeforeCompile=function(shader,renderer){
+    previous.call(this,shader,renderer);
+    Object.assign(shader.uniforms,{uPhotoContrast:photoContrast,uPhotoSaturation:photoSaturation,uPhotoWarmth:photoWarmth});
+    shader.fragmentShader='uniform float uPhotoContrast; uniform float uPhotoSaturation; uniform float uPhotoWarmth;\n'+shader.fragmentShader;
+    shader.fragmentShader=shader.fragmentShader.replace('#include <colorspace_fragment>',`
+      #include <colorspace_fragment>
+      vec3 photo=gl_FragColor.rgb;
+      photo=mix(vec3(dot(photo,vec3(.2126,.7152,.0722))),photo,uPhotoSaturation);
+      photo=(photo-.5)*uPhotoContrast+.5;
+      gl_FragColor.rgb=clamp(photo+uPhotoWarmth*vec3(1.,.16,-1.),0.,1.);
+    `);
+  };
+  material.customProgramCacheKey=()=>cacheKey+'-photo-v1';
+  material.needsUpdate=true;
+}
+for(const material of arena.materials) grade(material);
+scene.traverse(object=>{ if(object.isMesh&&![panel.mesh,wrist.mesh,cursor].includes(object))grade(object.material); });
 applyVisual();
 renderer.setAnimationLoop((time,frame)=>{
   const actual=frameTime?Math.max(0,(time-frameTime)/1000):.014;
@@ -439,7 +533,8 @@ renderer.setAnimationLoop((time,frame)=>{
   if(inVR&&!pose)return;
   cursor.visible=false;
   activeBoxes=settings.collisions?arena.boxes:blocked;
-  panel.mesh.visible=inVR&&menu;
+  pendingAim=null;
+  panel.mesh.visible=false;
   character(frame,space,pose,dt);
   for(const object of objects){
     object.mesh.visible=settings.objects;
@@ -452,8 +547,9 @@ renderer.setAnimationLoop((time,frame)=>{
   solveObjects(objects,arena.boxes,dt,9.81*settings.gravity/5,.12+settings.bounce*.064,surfaceAt);
   arena.probe.rotation.y+=dt*.29;
   updateFps(Math.min(.3,actual),inVR);
-  panel.mesh.visible=inVR&&menu;
-  wrist.mesh.visible=inVR&&hands[0].valid;
+  panel.mesh.visible=inVR&&menu&&placePanel();
+  if(panel.mesh.visible&&pendingAim) aim(frame,space,pendingAim.source,pendingAim.click);
+  wrist.mesh.visible=inVR&&!menu&&hands[0].valid;
   if(wrist.mesh.visible){
     wrist.mesh.position.copy(hands[0].mesh.position).y+=.12;
     wrist.mesh.lookAt(worldHead);
@@ -467,6 +563,7 @@ renderer.setAnimationLoop((time,frame)=>{
   }
   renderer.render(scene,camera);
 });
+
 
 
 

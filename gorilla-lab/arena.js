@@ -153,8 +153,9 @@ export function buildArena(scene,renderer) {
     dome.visible=level>=2;
     scene.background=new T.Color('#83c7ed');
   }
-  return {boxes,probe,display,visual,shadow,focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
+  return {boxes,probe,display,visual,shadow,materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
 }
+
 
 
 
