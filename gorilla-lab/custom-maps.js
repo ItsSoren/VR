@@ -1,6 +1,7 @@
 
 import * as T from 'three';
 import {boxCollider} from './physics.js';
+import {mapCode} from './cloud-link.js';
 import {parseMap,makePiece,snapPlacement,maxPieces,maxMapBytes,storageKey,downloadMap} from './map-format.js';
 
 export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultObjects}){
@@ -8,7 +9,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   const group=new T.Group();scene.add(group);
   const meshRows=[], history=[];
   const loader=new T.TextureLoader();
-  let map=null, selection=-1,moving=-1,status='', lastGhostKey='';
+  let map=null, signature='', selection=-1,moving=-1,status='', lastGhostKey='';
   const slab=new T.BoxGeometry(1,1,1);
   const ghost=new T.Mesh(slab,new T.MeshBasicMaterial({color:'#8be4b9',wireframe:true,transparent:true,opacity:.8,depthWrite:false}));
   ghost.visible=false;scene.add(ghost);
@@ -53,6 +54,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     for(const row of meshRows)removeRow(row);
     meshRows.length=0;
     const nodes=map?.pieces??[];
+    signature=map?'custom-'+mapCode(JSON.stringify(map)):'';
     defaultObjects.forEach(mesh=>mesh.visible=!map);
     for(let i=0;i<nodes.length;i++)meshRows.push(makeRow(nodes[i],i));
     if(map)arena.boxes.splice(0,arena.boxes.length,...meshRows.filter((row,i)=>nodes[i].solid).map(row=>row.collider));
@@ -162,7 +164,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   document.querySelector('#map-reset').onclick=reset;
   return {load,loadURL,reset,blank,undo,save,edit,recenter,inform,
     clearGhost(){ghost.visible=false;},get active(){return Boolean(map);},get status(){return status;},get yaw(){return map?.spawn.yaw??0;},
-    get nodes(){return map?.pieces.length??0;},get name(){return map?.name??null;},
+    get nodes(){return map?.pieces.length??0;},get name(){return map?.name??null;},get signature(){return signature;},
   };
 }
 

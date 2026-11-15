@@ -1,6 +1,7 @@
 
 import * as T from 'three';
 import { Reflector } from 'three/addons/objects/Reflector.js';
+import { addSpectator } from './cloud-view.js';
 import { connectMaps } from './custom-maps.js';
 import { makePiece, mapMaterials, surfacePresets, storageKey } from './map-format.js';
 import { createVrEffects, addRayProbe } from './vr-effects.js';
@@ -64,6 +65,18 @@ function shape(parent,material,x,y,z,sx,sy,sz) {
 }
 const monkey=new T.Group();
 scene.add(monkey);
+const avatarHead=new T.Group();
+const headShell=new T.Mesh(new T.IcosahedronGeometry(1,1),new T.MeshLambertMaterial({color:'#f6f4ec',flatShading:true}));
+headShell.scale.set(.148,.158,.136);
+avatarHead.add(headShell);
+const muzzle=new T.Mesh(new T.IcosahedronGeometry(1,1),new T.MeshLambertMaterial({color:'#d2d8d1',flatShading:true}));
+muzzle.position.set(0,-.056,-.112);muzzle.scale.set(.092,.057,.056);avatarHead.add(muzzle);
+const eyeMaterial=new T.MeshBasicMaterial({color:'#24313a'});
+for(const side of [-1,1]){
+  const eyeDot=new T.Mesh(new T.IcosahedronGeometry(.017,0),eyeMaterial);
+  eyeDot.position.set(side*.047,.023,-.125);avatarHead.add(eyeDot);
+}
+avatarHead.visible=false;scene.add(avatarHead);
 const torsoGeo=new T.IcosahedronGeometry(1,1);
 const torsoVertices=torsoGeo.attributes.position;
 for(let i=0;i<torsoVertices.count;i++){
@@ -90,15 +103,16 @@ function tube(mesh,a,b){
   mesh.scale.y=Math.max(.001,armAxis.length());
   mesh.quaternion.setFromUnitVectors(up,armAxis.normalize());
 }
+function armSegmentLength(){return .24+settings.arms*.036;}
 function arms(){
   for(const h of hands){
     h.upper.visible=h.lower.visible=h.joint.visible=settings.body&&h.valid;
     if(!h.valid)continue;
     const sign=h.side==='left'?-1:1;
-    shoulderOffset.set(sign*.255,.72,.12).multiplyScalar(monkey.scale.x).applyAxisAngle(up,bodyYaw);
+    shoulderOffset.set(sign*.255*monkey.scale.x,.72*monkey.scale.y,.12*monkey.scale.z).applyAxisAngle(up,bodyYaw);
     h.shoulder.copy(monkey.position).add(shoulderOffset);
     armSpan.subVectors(h.mesh.position,h.shoulder);
-    const reach=armSpan.length(),length=.24+settings.arms*.036;
+    const reach=armSpan.length(),length=armSegmentLength();
     armAxis.copy(armSpan).normalize();
     elbowBend.set(sign*.42,-1,.24).applyAxisAngle(up,bodyYaw);
     elbowBend.addScaledVector(armAxis,-elbowBend.dot(armAxis)).normalize();
@@ -278,7 +292,7 @@ function captureReport(){
   const sorted=rawFrameMs.slice().sort((a,b)=>a-b);
   const percentile=p=>sorted.length?Number(sorted[Math.min(sorted.length-1,Math.floor((sorted.length-1)*p))].toFixed(2)):null;
   reportSnapshot={
-    game:'Gorilla Lab',version:'r17',time:new Date().toISOString(),
+    game:'Gorilla Lab',version:'r22',time:new Date().toISOString(),
     mode:reportHadVR?'VR':'PC',settings:{...settings},qualityActive:liveLevel,
     performance:{fps,frames:sorted.length,frameMs:{median:percentile(.5),p95:percentile(.95),max:percentile(1)}},
     xr:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},targetScore:fixtures.score(),locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
@@ -410,7 +424,8 @@ function updateMirror(now,pose){
   if(now-lastMirrorRender<45)return;
   lastMirrorRender=now;
   reflectionView.updateMatrixWorld(true);mirrorFace.updateMatrixWorld(true);
-  renderReflection(renderer,scene,reflectionView);
+  avatarHead.visible=settings.body;
+  try{renderReflection(renderer,scene,reflectionView);}finally{avatarHead.visible=false;}
 }
 const ray=new T.Raycaster(), raySource=new T.Vector3(), forward=new T.Vector3();
 const coconutPosition=new T.Vector3(), fixtureTouchPoint=new T.Vector3(), fixtureKeyPoint=new T.Vector3();
@@ -434,6 +449,7 @@ const mapSurfaceNames=['Normale','Glace','Caoutchouc','Lune'];
 const maps=connectMaps({scene,arena,boot,onReset:angle=>{clearObjects();resetPlayer();yaw=T.MathUtils.degToRad(angle);},onVisual:applyVisual,
   getLevel:()=>liveLevel,defaultObjects:[...arena.builtObjects,...scene.children.filter(n=>!beforeFixtures.has(n)),mirrorBacking],
 });
+const spectator=addSpectator({scene,currentMap:()=>maps.signature||'arena-'+arena.hillSeed,seedArena:seed=>arena.setHillSeed(seed)});
 function mapPiece(){
   const dims=[
     {name:'Bloc',w:1.25,h:.55,d:1.25},{name:'Rampe',w:1.75,h:.32,d:2.3,pitch:18},
@@ -639,7 +655,7 @@ function aim(frame,space,input,trig){
   }
 }
 const keys=new Set();
-addEventListener('keydown',e=>{if(e.target.closest?.('button,select,input'))return;keys.add(e.code);if(e.code==='KeyR')resetPlayer();});
+addEventListener('keydown',e=>{if(e.target.closest?.('button,select,input'))return;if(spectator.role==='pc'&&['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space','KeyC'].includes(e.code))e.preventDefault();if(e.code==='KeyC'&&e.repeat)return;keys.add(e.code);if(e.code==='KeyR')resetPlayer();});
 addEventListener('keyup',e=>keys.delete(e.code));
 addEventListener('blur',()=>keys.clear());
 const canvas=renderer.domElement;
@@ -738,7 +754,7 @@ function trackHands(frame,space,dt){
     const q=pose.transform.orientation;
     gripRotation.set(q.x,q.y,q.z,q.w).premultiply(spin.setFromAxisAngle(up,yaw));
     h.controllerRotation.copy(gripRotation);
-    h.mesh.quaternion.copy(gripRotation).multiply(handTwist.setFromAxisAngle(handAxis,h.side==='left'?-Math.PI/2:Math.PI/2));
+    h.mesh.quaternion.copy(gripRotation).multiply(handTwist.setFromAxisAngle(handAxis,h.side==='left'?Math.PI/2:-Math.PI/2));
     animateFingers(h,source.gamepad?.buttons??[],dt);
     if(!menu&&grip&&!h.grip&&settings.objects&&!h.held){
       let body=null, best=.15;
@@ -946,10 +962,14 @@ function character(frame,space,pose,dt){
     if(!inVR)h.mesh.visible=false;
   }
   const shoulderHeight=Math.min(.30,Math.max(.21,head.y*.31));
-  const bodyScale=Math.min(.72+settings.size*.05,Math.max(.3,(head.y-shoulderHeight)/.72));
+  const bodyScale=.72+settings.size*.05;
+  const torsoScale=(armSegmentLength()*2)*(2/3)/.82;
   monkey.visible=settings.body;
-  monkey.position.set(worldHead.x,worldHead.y-shoulderHeight-.72*bodyScale,worldHead.z);
-  monkey.rotation.y=bodyYaw;monkey.scale.setScalar(bodyScale);
+  monkey.position.set(worldHead.x,worldHead.y-shoulderHeight-.72*torsoScale,worldHead.z);
+  monkey.rotation.y=bodyYaw;monkey.scale.set(bodyScale,torsoScale,bodyScale);
+  avatarHead.position.copy(worldHead);
+  if(inVR)avatarHead.quaternion.copy(headRotation).premultiply(spin.setFromAxisAngle(up,yaw));
+  else avatarHead.quaternion.setFromEuler(new T.Euler(pitch,yaw,0,'YXZ'));
   arms();
   rig.updateMatrixWorld(true);
   camera.updateWorldMatrix(true,false);
@@ -1014,7 +1034,11 @@ renderer.setAnimationLoop((time,frame)=>{
   pendingAim=null;fixtureAim=null;toolLook=null;mapLook=null;
   maps.clearGhost();
   panel.mesh.visible=false;
-  character(frame,space,pose,dt);
+  if(!inVR&&spectator.role==='pc'){
+    monkey.visible=false;
+    for(const h of hands){h.mesh.visible=h.upper.visible=h.lower.visible=h.joint.visible=false;}
+  }else character(frame,space,pose,dt);
+  spectator.update({inVR,time,dt,position:worldHead,yaw:!inVR&&spectator.role==='pc'?yaw:bodyYaw,pitch,camera,rig,keys});
   for(const object of objects){
     object.mesh.visible=settings.objects;
     if(object.mesh.position.y<-8 || Math.abs(object.mesh.position.x)>28 || object.mesh.position.z < -57 || object.mesh.position.z>13){
@@ -1087,6 +1111,10 @@ renderer.setAnimationLoop((time,frame)=>{
     }
   }
 });
+
+
+
+
 
 
 

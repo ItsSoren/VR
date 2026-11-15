@@ -186,7 +186,11 @@ export function buildArena(scene,renderer) {
   box('Point de montée',-7.7,-.092,-19.7,4.6,.19,2.25,5);
   const hillGeometry=new T.PlaneGeometry(12,58,16,64).rotateX(-Math.PI/2).translate(-18,0,-22);
   const hillPositions=hillGeometry.attributes.position;
-  const hillSeed=Math.floor(Math.random()*1000000),phase=hillSeed*.017;
+  let hillSeed;
+  function setHillSeed(seed){
+  if(hillSeed===seed)return;
+  hillSeed=seed;
+  const phase=hillSeed*.017;
   for(let i=0;i<hillPositions.count;i++){
     const x=hillPositions.getX(i),z=hillPositions.getZ(i);
     const edge=Math.sin(Math.PI*T.MathUtils.clamp((x+24)/12,0,1));
@@ -194,7 +198,10 @@ export function buildArena(scene,renderer) {
     const rolling=.93+.56*Math.sin(z*.36+phase)+.32*Math.cos(x*.67+z*.26+phase*1.4)+.19*Math.sin(z*.81+phase*.67);
     hillPositions.setY(i,Math.max(0,edge*ends*rolling));
   }
-  hillGeometry.computeVertexNormals();
+  hillPositions.needsUpdate=true;
+  hillGeometry.computeVertexNormals();hillGeometry.computeBoundingSphere();
+  }
+  setHillSeed(Math.floor(Math.random()*1000000));
   const hill=new T.Mesh(hillGeometry,tiles[3]);
   hill.receiveShadow=hill.castShadow=true;scene.add(hill);
   const height=(x,z)=>{
@@ -300,7 +307,7 @@ export function buildArena(scene,renderer) {
     dome.visible=level>=2;
     scene.background=new T.Color('#83c7ed');
   }
-  return {boxes,probe,display,visual,shadow,hillSeed,bakeLightmap,mapMaterial:(i,level)=>level>=4?tiles[i]:alt[i],builtObjects:[...boxes.map(b=>b.mesh).filter(m=>m?.isObject3D),hill,probe,...props],materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
+  return {boxes,probe,display,visual,shadow,get hillSeed(){return hillSeed;},setHillSeed,bakeLightmap,mapMaterial:(i,level)=>level>=4?tiles[i]:alt[i],builtObjects:[...boxes.map(b=>b.mesh).filter(m=>m?.isObject3D),hill,probe,...props],materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
 }
 
 
