@@ -1,10 +1,7 @@
 
 import * as T from 'three';
 import { Reflector } from 'three/addons/objects/Reflector.js';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { createVrEffects, addRayProbe } from './vr-effects.js';
 import { addLabFixtures } from './fixtures.js';
 import { buildArena } from './arena.js';
 import { solve,handContact,solveObjects,colliderFor,distanceToObject,placeObject,boxCollider,playerObjectContact } from './physics.js';
@@ -34,21 +31,10 @@ const rig=new T.Group(), eye=new T.Group();
 const camera=new T.PerspectiveCamera(70,1,.065,210);
 rig.add(eye);eye.add(camera);scene.add(rig);
 const arena=buildArena(scene,renderer);
-let desktopEffects=null;
-function renderDesktopEffects(){
-  if(!desktopEffects){
-    const composer=new EffectComposer(renderer);
-    composer.addPass(new RenderPass(scene,camera));
-    composer.addPass(new UnrealBloomPass(new T.Vector2(innerWidth,innerHeight),.34,.42,.82));
-    composer.addPass(new OutputPass());
-    desktopEffects=composer;
-    desktopEffects.setPixelRatio(renderer.getPixelRatio());
-    desktopEffects.setSize(innerWidth,innerHeight);
-  }
-  desktopEffects.render();
-}
+const vrEffects=createVrEffects(renderer);
+const updateRayProbe=addRayProbe(arena.probe);
 const settings={
-  grip:6,slide:3,gravity:5,jump:5,weight:5,size:5,arms:5,contrast:5,saturation:5,exposure:5,warmth:5,bounce:4,throw:5,preciseHitboxes:false,quality:7,auto:true,resolution:7,texturePower:7,preset:2,lightmap:true,post:true,toolMode:1,toolActive:false,focus:false,focusStrength:5,focusSize:5,
+  grip:6,slide:3,gravity:5,jump:5,weight:5,size:5,arms:5,contrast:5,saturation:5,exposure:5,warmth:5,bounce:4,throw:5,preciseHitboxes:false,quality:7,auto:true,resolution:7,texturePower:7,preset:2,lightmap:true,post:true,rayTrace:false,toolMode:1,toolActive:false,focus:false,focusStrength:5,focusSize:5,
   movement:true,collisions:true,objects:true,body:true,hands:true,textures:true,reflections:true,shadows:true,bloom:true,
 };
 const defaults={...settings};
@@ -247,17 +233,17 @@ function resize(){
   if(renderer.xr.isPresenting) return;
   renderer.setPixelRatio(Math.min(devicePixelRatio,1.75)*(.53+liveLevel*.047));
   renderer.setSize(innerWidth,innerHeight,false);
-  if(desktopEffects){desktopEffects.setPixelRatio(renderer.getPixelRatio());desktopEffects.setSize(innerWidth,innerHeight);}
+
   camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
 }
 addEventListener('resize',resize);
 
 const toolModes=['Saisir','Figer','Supprimer','Dupliquer','Couleur','Matière +','Matière −'];
 const visualPresets={
-  'Fluide':{quality:3,auto:false,texturePower:6,resolution:5,shadows:false,reflections:false,bloom:false,focus:true,focusStrength:6,focusSize:4},
-  'Équilibré':{quality:7,auto:true,texturePower:8,resolution:7,shadows:true,reflections:true,bloom:true,focus:true,focusStrength:3,focusSize:6},
-  'Vitrine':{quality:10,auto:false,texturePower:12,resolution:10,shadows:true,reflections:true,bloom:true,focus:false},
-  'Benchmark':{quality:10,auto:false,texturePower:10,resolution:7,shadows:true,reflections:true,bloom:false,focus:false},
+  'Fluide':{post:false,rayTrace:false,quality:3,auto:false,texturePower:6,resolution:5,shadows:false,reflections:false,bloom:false,focus:true,focusStrength:6,focusSize:4},
+  'Équilibré':{post:true,rayTrace:false,quality:7,auto:true,texturePower:8,resolution:7,shadows:true,reflections:true,bloom:true,focus:true,focusStrength:3,focusSize:6},
+  'Vitrine':{post:true,rayTrace:true,quality:10,auto:false,texturePower:12,resolution:10,shadows:true,reflections:true,bloom:true,focus:false},
+  'Benchmark':{post:true,rayTrace:true,quality:10,auto:false,texturePower:10,resolution:7,shadows:true,reflections:true,bloom:false,focus:false},
 };
 function usePreset(name){
   Object.assign(settings,{textures:true,contrast:5,saturation:5,exposure:5,warmth:5},visualPresets[name]);
@@ -278,7 +264,7 @@ const sections=[
   ['Rendu',[
     ['Préréglage','preset'],['Qualité automatique','auto'],['Qualité manuelle','quality'],
     ['Textures','textures'],['Taille textures','texturePower'],['Reflets','reflections'],['Ombres','shadows'],['Bloom du soleil','bloom'],
-    ['Lightmap','lightmap'],['Post FX PC','post'],
+    ['Lightmap','lightmap'],['Post FX VR','post'],['Ray tracing VR','rayTrace'],
   ]],
 ];
 sections.push(['Focus',[['Activer le focus','focus'],['Intensité','focusStrength'],['Taille de la zone nette','focusSize']]]);
@@ -288,7 +274,7 @@ function captureReport(){
   const sorted=rawFrameMs.slice().sort((a,b)=>a-b);
   const percentile=p=>sorted.length?Number(sorted[Math.min(sorted.length-1,Math.floor((sorted.length-1)*p))].toFixed(2)):null;
   reportSnapshot={
-    game:'Gorilla Lab',version:'r14',time:new Date().toISOString(),
+    game:'Gorilla Lab',version:'r15',time:new Date().toISOString(),
     mode:reportHadVR?'VR':'PC',settings:{...settings},qualityActive:liveLevel,
     performance:{fps,frames:sorted.length,frameMs:{median:percentile(.5),p95:percentile(.95),max:percentile(1)}},
     xr:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,objects:{total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},targetScore:fixtures.score(),locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
@@ -568,7 +554,7 @@ function drawPanel(){
   }
   sections.forEach(([name],i)=>item(25+i*99,61,94,44,name,()=>page=i,page===i?'#68705a':'#334b58'));
   sections[page][1].forEach(([name,key],i)=>{
-    const y=119+i*44;
+    const y=113+i*40;
     c.fillStyle='#e9e5ce';c.font='22px system-ui';c.fillText(name,30,y+26);
     if(typeof key==='function') item(438,y,174,36,key===captureReport?'Capturer':page===5?(key===clearObjects?'Vider':'Créer'):page===4?'Appliquer':'Réinitialiser',key);
     else if(typeof settings[key]==='boolean') item(438,y,174,36,toggleLabel(key),()=>change(key,1));
@@ -1003,8 +989,11 @@ renderer.setAnimationLoop((time,frame)=>{
     placeObject(desktopToolHold,arena.boxes);
   }
   updateMirror(time,pose);
-  if(!inVR&&liveLevel>=8&&(settings.post||(settings.auto&&liveLevel===10)))renderDesktopEffects();
-  else renderer.render(scene,camera);
+  const fullAuto=settings.auto&&liveLevel===10;
+  const useVrPost=inVR&&(fullAuto||settings.post&&(!settings.auto||liveLevel>=7));
+  const useVrTrace=inVR&&(settings.rayTrace||fullAuto);
+  updateRayProbe(useVrTrace,objects);
+  if(!useVrPost||!vrEffects.render(scene,camera,{bloom:settings.bloom||fullAuto,finish:true,level:liveLevel}))renderer.render(scene,camera);
   if(inVR||!reportHadVR) {
     rawFrameMs.push(actual*1000);
     if(rawFrameMs.length>720)rawFrameMs.splice(0,rawFrameMs.length-720);
@@ -1013,10 +1002,12 @@ renderer.setAnimationLoop((time,frame)=>{
     if(inVR)lastVR={
       refreshHz:renderer.xr.getSession()?.frameRate??null,
       foveation:renderer.xr.getFoveation()??null,
+      visualEffects:{post:useVrPost,bloom:useVrPost&&(settings.bloom||fullAuto),rayTrace:useVrTrace},
       eyeViewports:renderer.xr.getCamera().cameras.map(c=>({width:c.viewport?.z??null,height:c.viewport?.w??null})),
     };
   }
 });
+
 
 
 
