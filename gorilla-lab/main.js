@@ -164,11 +164,35 @@ const sections=[
 ];
 sections.push(['Focus',[['Activer le focus','focus'],['Intensité','focusStrength'],['Taille de la zone nette','focusSize']]]);
 sections.push(['Photo',[['Exposition','exposure'],['Contraste','contrast'],['Saturation','saturation'],['Chaleur','warmth']]]);
+let reportSnapshot=null, rawFrameMs=[], lastVR=null, reportHadVR=false, contactFrames=0, trackedFrames=0, renderStats={};
+function captureReport(){
+  const sorted=rawFrameMs.slice().sort((a,b)=>a-b);
+  const percentile=p=>sorted.length?Number(sorted[Math.min(sorted.length-1,Math.floor((sorted.length-1)*p))].toFixed(2)):null;
+  reportSnapshot={
+    game:'Gorilla Lab',version:'r6',time:new Date().toISOString(),
+    mode:reportHadVR?'VR':'PC',settings:{...settings},qualityActive:liveLevel,
+    performance:{fps,frames:sorted.length,frameMs:{median:percentile(.5),p95:percentile(.95),max:percentile(1)}},
+    xr:lastVR,renderer:renderStats,locomotion:{trackedFrames,contactFrames,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
+  };
+  document.querySelector('#download-report').disabled=false;
+  hudDirty=true;
+}
+function downloadReport(){
+  if(!reportSnapshot) captureReport();
+  const url=URL.createObjectURL(new Blob([JSON.stringify(reportSnapshot,null,2)],{type:'application/json'}));
+  const a=document.createElement('a');
+  a.href=url;a.download='gorilla-lab-rapport.json';a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+document.querySelector('#download-report').onclick=downloadReport;
+document.querySelector('#capture-report').onclick=captureReport;
+sections[1][1].push(['Capturer un rapport',captureReport]);
 const title=document.querySelector('#section'), desktop=document.querySelector('#settings');
 const readings=document.querySelector('#readings');
 function change(key,step){
   if(typeof settings[key]==='boolean') settings[key]=!settings[key];
   else settings[key]=T.MathUtils.clamp(settings[key]+step,1,10);
+  if(key==='size'||key==='arms') for(const hand of hands) {hand.valid=false;hand.surface=null;}
   if(key==='quality'){settings.auto=false;liveLevel=settings.quality;}
   if(key==='auto'&&!settings.auto) liveLevel=settings.quality;
   if(key==='movement'||key==='collisions') for(const h of hands) h.surface=null;
@@ -231,7 +255,7 @@ function drawPanel(){
   sections[page][1].forEach(([name,key],i)=>{
     const y=119+i*44;
     c.fillStyle='#e9e5ce';c.font='22px system-ui';c.fillText(name,30,y+26);
-    if(typeof key==='function') item(438,y,174,36,'Réinitialiser',key);
+    if(typeof key==='function') item(438,y,174,36,key===captureReport?'Capturer':'Réinitialiser',key);
     else if(typeof settings[key]==='boolean') item(438,y,174,36,settings[key]?'Actif':'Coupé',()=>change(key,1));
     else {
       item(438,y,46,36,'−',()=>change(key,-1));
@@ -241,7 +265,7 @@ function drawPanel(){
   });
   item(25,579,286,44,'Réglages par défaut',restore);
   item(325,579,287,44,'Fermer',()=>menu=false);
-  c.fillStyle='#c4d5d8';c.font='17px system-ui';c.fillText('Gâchette : choisir  ·  B/Y : panneau  ·  ¹ Prochaine session VR',25,645);
+  c.fillStyle='#c4d5d8';c.font='17px system-ui';c.fillText(reportSnapshot?'Rapport capturé. Quitte la VR pour le télécharger.':'Gâchette : choisir  ·  B/Y : panneau  ·  ¹ Prochaine session VR',25,645);
   panel.texture.needsUpdate=true;
 }
 function setMenu(side){
@@ -317,6 +341,7 @@ enter.onclick=async()=>{
     renderer.xr.setFramebufferScaleFactor(.45+settings.resolution*.055);
     await renderer.xr.setSession(session);
     refreshRate=session.frameRate||72;
+    rawFrameMs=[];contactFrames=trackedFrames=0;reportHadVR=true;lastVR=null;
     standingHeight=NaN;drop=0;resetPlayer();applyVisual();
     document.body.classList.add('immersive');
   }catch(error){
@@ -344,7 +369,7 @@ function trackHands(frame,space,dt){
     const p=pose.transform.position;
     candidate.set(p.x,p.y-drop,p.z);
     scratch.subVectors(candidate,head);
-    if(!menu && scratch.y<0) scratch.y*=1.18+settings.arms*.04;
+    if(scratch.y<0) scratch.y*=1.18+settings.arms*.04;
     scratch.clampLength(0,.82+settings.arms*.098);
     h.target.copy(head).add(scratch).applyAxisAngle(up,yaw).add(rig.position);
     const wasValid=h.valid;
@@ -368,7 +393,7 @@ function trackHands(frame,space,dt){
       h.held.mesh.quaternion.set(q.x,q.y,q.z,q.w).premultiply(spin.setFromAxisAngle(up,yaw));
       h.held.velocity.copy(h.speed);
     }
-    if(!menu&&settings.movement&&!h.held){
+    if(settings.movement&&!h.held){
       h.surface=handContact(h.last,h.target,.080,activeBoxes,h.contactPoint,normal);
       if(!h.surface&&priorSurface&&activeBoxes.includes(priorSurface)){
         scratch.subVectors(h.target,h.anchor);
@@ -440,6 +465,8 @@ function character(frame,space,pose,dt){
   const floor=surfaceAt(worldHead);
   const gravity=9.81*(settings.gravity/5)*(floor?.gravity??1);
   const contacts=inVR?trackHands(frame,space,dt):0;
+  if(inVR && hands.some(h=>h.valid))trackedFrames++;
+  if(contacts)contactFrames++;
   if(contacts){
     delta.multiplyScalar(1/contacts).clampLength(0,dt*10);
     const response=(.57+settings.jump*.12)/( .65+settings.weight*.07);
@@ -457,7 +484,7 @@ function character(frame,space,pose,dt){
     }
     delta.copy(velocity).multiplyScalar(dt);
   }
-  if(menu){delta.set(0,0,0);velocity.set(0,0,0);}
+
   rig.position.add(delta);
   worldHead.copy(head).applyAxisAngle(up,yaw).add(rig.position);
   if(settings.collisions){
@@ -562,7 +589,21 @@ renderer.setAnimationLoop((time,frame)=>{
     c.font='20px system-ui';c.fillText('B/Y : réglages   ·   Grip : saisir',17,66);wrist.texture.needsUpdate=true;
   }
   renderer.render(scene,camera);
+  if(inVR||!reportHadVR) {
+    rawFrameMs.push(actual*1000);
+    if(rawFrameMs.length>720)rawFrameMs.splice(0,rawFrameMs.length-720);
+    const {calls,triangles,lines,points}=renderer.info.render;
+    renderStats={calls,triangles,lines,points,textures:renderer.info.memory.textures};
+    if(inVR)lastVR={
+      refreshHz:renderer.xr.getSession()?.frameRate??null,
+      foveation:renderer.xr.getFoveation()??null,
+      eyeViewports:renderer.xr.getCamera().cameras.map(c=>({width:c.viewport?.z??null,height:c.viewport?.w??null})),
+    };
+  }
 });
+
+
+
 
 
 
