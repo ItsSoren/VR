@@ -318,7 +318,7 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     drawReplicas(dt,showWorld,now);
     renderPeers(ready,time,dt,now);
     if(client.role==='pc'&&!inVR){
-      if(keys.delete('KeyC'))cycleCamera();
+      if((frame.actions??keys).delete('KeyC'))cycleCamera();
       const physical=cameraMode===3&&showWorld?[...replicas.values()].find(r=>r.type===cameraType)?.mesh:null;
       const model=showWorld?peers.get(host.id)?.art?.model:null;
       if(physical){

@@ -56,3 +56,20 @@ export function createFlatControls({canvas,enabled,onLook,onAction,onMenu}){
   });
   return {movement,clear,consumeJump(){const value=jump;jump=false;return value;}};
 }
+
+
+const oneShotKeys=new Set(['KeyC','KeyE','KeyF','KeyG','KeyT','KeyX','Space']);
+
+// Une action brève survit jusqu’à la prochaine image, même si la touche est déjà relâchée.
+export function createKeyboardState(){
+  const held=new Set(),pressed=new Set();
+  return {
+    held,pressed,
+    down(code,repeat=false){
+      if(oneShotKeys.has(code)){if(!repeat)pressed.add(code);}
+      else held.add(code);
+    },
+    up(code){held.delete(code);},
+    clear(){held.clear();pressed.clear();},
+  };
+}

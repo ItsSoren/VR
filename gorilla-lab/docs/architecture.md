@@ -90,3 +90,16 @@ sequenceDiagram
 **L'autorité** est la machine qui décide de l'état d'un objet. Dans ce jeu, c'est le joueur VR. Le PC transmet une demande de saisie, de création ou d'action sur l'objet. L'hôte décide et diffuse l'état. Les autres clients dessinent des répliques et lissent leurs déplacements entre deux paquets.
 
 [cloud-link.js](../cloud-link.js) s'occupe du transport, du format des messages et des identifiants. [cloud-view.js](../cloud-view.js) s'occupe de la caméra, des répliques et de l'affichage de l'état du salon. Le transport utilise des mises à jour groupées et périodiques. Un code de salon sert à retrouver une session. Il ne fait pas office de compte ou de mot de passe. Pour partager une carte et des objets personnalisés, charge la même carte et la même collection sur les appareils du salon.
+
+## Où intervenir dans la R30
+
+| Pour modifier… | Fichier |
+| --- | --- |
+| Les valeurs par défaut, les préréglages ou les noms de modes | [game-settings.js](../game-settings.js) |
+| Les gestes tactiles et la distinction entre appui bref et touche maintenue | [flat-controls.js](../flat-controls.js) |
+| La résolution du canvas sur mobile et PC | [screen-render.js](../screen-render.js) |
+| Les commandes de tir, la visée et les collisions avec le monde | [blaster-system.js](../blaster-system.js) |
+| La cadence, le mouvement, les traînées et les particules | [arcade-blaster.js](../arcade-blaster.js) |
+| L’ordre des systèmes et le lien avec la scène | [main.js](../main.js) |
+
+Un appui bref, comme **X**, est mémorisé jusqu’à l’image qui le traite. Un mouvement ou un tir maintenu, comme **Z** ou **J**, dépend de l’état courant de la touche. Ce découpage évite de perdre les appuis courts à faible fréquence d’images.

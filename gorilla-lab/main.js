@@ -4,12 +4,13 @@ import { Reflector } from 'three/addons/objects/Reflector.js';
 import { addSpectator } from './cloud-view.js';
 import {normalizeTerrain} from './terrain-edit.js';
 import {texturePresets,seamlessTexture} from './seamless-texture.js';
-import { createFlatControls } from './flat-controls.js';
+import {createFlatControls,createKeyboardState} from './flat-controls.js';
 import {screenPixelRatio} from './screen-render.js';
 import { GorillaLocomotion } from './locomotion.js';
 import { updateGroundHaptics } from './ground-haptics.js';
 import { createToolVisual } from './tool-visual.js';
-import { createArcadeBlaster } from './arcade-blaster.js';
+import {createBlasterSystem,bindBlasterTrigger} from './blaster-system.js';
+import {createSettings,toolModes,shaderNames,visualPresets} from './game-settings.js';
 import { avatarPalettes,createAvatarStyle } from './avatar-style.js';
 import { makeLabProps } from './lab-props.js';
 import { makeAnimatedProps,clonePropMaterial } from './animated-props.js';
@@ -56,10 +57,7 @@ rig.add(eye);eye.add(camera);scene.add(rig);
 const arena=buildArena(scene,renderer);
 const vrEffects=createVrEffects(renderer);
 const updateRayProbe=addRayProbe(arena.probe);
-const settings={
-  timeOfDay:1,stepHaptics:true,blasterActive:false,viewFov:70,shaderMode:1,shadowQuality:10,lightQuality:10,grip:6,slide:3,gravity:5,jump:5,weight:5,size:5,arms:5,contrast:5,saturation:5,exposure:5,warmth:5,bounce:4,throw:5,preciseHitboxes:false,quality:mobileScreen?2:7,auto:true,resolution:7,texturePower:7,preset:2,lightmap:true,post:true,rayTrace:false,mapEdit:false,mapMode:1,mapShape:1,mapMaterial:1,mapSurface:1,mapTurn:1,mapTexture:1,modelGrab:true,modelFrozen:false,modelCollidable:true,modelSupport:false,terrainResolution:2,terrainAmplitude:2,terrainFrequency:3,terrainGrass:4,terrainShrub:1,terrainSeed:1,brushRadius:4,brushStrength:4,toolMode:1,toolActive:false,focus:true,focusStrength:5,focusSize:5,
-  movement:true,collisions:true,objects:true,body:true,hands:true,textures:true,reflections:true,shadows:true,bloom:true,
-};
+const settings=createSettings(mobileScreen);
 const defaults={...settings};
 const boot=new T.Vector3(labSpawn.x,labSpawn.y,labSpawn.z);
 rig.position.copy(boot);
@@ -273,7 +271,7 @@ function resetObjects(){
   }
 }
 function resetPlayer(){
-  blaster.reset();blasterInFlight=0;
+  blaster.reset();
   rig.position.copy(boot);yaw=T.MathUtils.degToRad(maps.yaw);pitch=0;rig.rotation.y=yaw;
   velocity.set(0,0,0);snap=false;grounded=false;hasPreviousHead=false;locomotion.reset();
   for(const hand of hands){hand.valid=false;hand.hapticGrounded=false;hand.hapticCooldown=0;hand.gamepad=null;release(hand,false);}
@@ -318,14 +316,6 @@ function resize(){
 addEventListener('resize',resize);
 globalThis.visualViewport?.addEventListener('resize',resize);
 
-const toolModes=['Saisir','Figer','Supprimer','Dupliquer','Couleur','Matière +','Matière −'];
-const shaderNames=['Naturel','Cellulo','Affiche','Rétro'];
-const visualPresets={
-  'Fluide':{shadowQuality:2,lightQuality:2,post:false,rayTrace:false,quality:3,auto:false,texturePower:6,resolution:5,shadows:false,reflections:false,bloom:false,focus:true,focusStrength:6,focusSize:4},
-  'Équilibré':{shadowQuality:10,lightQuality:10,post:true,rayTrace:false,quality:7,auto:true,texturePower:8,resolution:7,shadows:true,reflections:true,bloom:true,focus:true,focusStrength:5,focusSize:5},
-  'Vitrine':{shadowQuality:10,lightQuality:10,post:true,rayTrace:true,quality:10,auto:false,texturePower:12,resolution:10,shadows:true,reflections:true,bloom:true,focus:false},
-  'Benchmark':{shadowQuality:10,lightQuality:10,post:true,rayTrace:true,quality:10,auto:false,texturePower:10,resolution:7,shadows:true,reflections:true,bloom:false,focus:false},
-};
 function usePreset(name){
   Object.assign(settings,{textures:true,contrast:5,saturation:5,exposure:5,warmth:5},visualPresets[name]);
   liveLevel=settings.quality;
@@ -389,7 +379,7 @@ function captureReport(){
   const sorted=rawFrameMs.slice().sort((a,b)=>a-b);
   const percentile=p=>sorted.length?Number(sorted[Math.min(sorted.length-1,Math.floor((sorted.length-1)*p))].toFixed(2)):null;
   reportSnapshot={
-    game:'Gorilla Lab',version:'r29',time:new Date().toISOString(),
+    game:'Gorilla Lab',version:'r30',time:new Date().toISOString(),
     mode:reportHadVR?'VR':'PC',settings:{...settings},qualityActive:liveLevel,
     performance:{fps,frames:sorted.length,frameMs:{median:percentile(.5),p95:percentile(.95),max:percentile(1)}},
     xr:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},cloud:{role:spectator.role,connected:spectator.connected,replicas:spectator.replicaCount},targetScore:fixtures.score(),locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
@@ -707,53 +697,7 @@ function fixtureRay(origin,direction,activate){
 
 const toolDirection=new T.Vector3(),toolRotation=new T.Quaternion();
 const toolVisual=createToolVisual(scene);
-const shotRay=new T.Raycaster(),shotsAgainst=[],shotObjects=new Map();
-// Le tir interroge les surfaces visuelles. Seule la simulation locale de référence pousse les objets.
-const blaster=createArcadeBlaster(scene,{impact(origin,direction,length){
-  shotRay.set(origin,direction);shotRay.far=length;
-  const hit=shotRay.intersectObjects(shotsAgainst,false)[0];
-  if(!hit)return null;
-  const body=shotObjects.get(hit.object);
-  if(body&&!body.owner&&!body.frozen)body.velocity.addScaledVector(direction,Math.min(4,2.6/body.mass));
-  return hit.distance;
-}});
-const blasterAim={position:new T.Vector3(),quaternion:new T.Quaternion(),direction:new T.Vector3(),modelPosition:new T.Vector3()};
-function updateBlaster(frame,space,inVR,spectating,remoteWorld,dt){
-  let aim=null,firing=false;
-  if(settings.blasterActive&&!spectating&&!menu&&!settings.mapEdit){
-    if(inVR){
-      const input=[...frame.session.inputSources].find(source=>source.handedness==='right');
-      const pose=input&&frame.getPose(input.targetRaySpace,space);
-      if(pose){
-        const {position:p,orientation:q}=pose.transform;
-        aim=blasterAim;
-        aim.position.set(p.x,p.y-drop,p.z).applyAxisAngle(up,yaw).add(rig.position);
-        aim.modelPosition.copy(hands[1].valid?hands[1].mesh.position:aim.position);
-        aim.quaternion.set(q.x,q.y,q.z,q.w).premultiply(spin.setFromAxisAngle(up,yaw));
-        aim.direction.set(0,0,-1).applyQuaternion(aim.quaternion);
-        firing=Boolean(input.gamepad?.buttons[0]?.pressed);
-      }
-    }else{
-      aim=blasterAim;
-      camera.getWorldPosition(aim.position);camera.getWorldQuaternion(aim.quaternion);
-      aim.direction.set(0,0,-1).applyQuaternion(aim.quaternion);
-      aim.modelPosition.set(.16,-.17,-.43).applyQuaternion(aim.quaternion).add(aim.position);
-      firing=firePointer||touchFire||keys.has('KeyJ');
-    }
-  }
-  shotsAgainst.length=0;shotObjects.clear();
-  if(aim||blasterInFlight){
-    for(const box of arena.boxes)if(box.mesh?.isMesh&&box.mesh.visible)shotsAgainst.push(box.mesh);
-    if(remoteWorld)spectator.forEachReplica(mesh=>shotsAgainst.push(mesh));
-    else for(const body of objects)if(body.mesh.visible&&body.collidable&&!body.owner){
-      shotsAgainst.push(body.mesh);shotObjects.set(body.mesh,body);
-    }
-  }
-  blaster.update({dt,aim,firing});
-  if(firing)blasterInFlight=1.3;
-  else blasterInFlight=Math.max(0,blasterInFlight-dt);
-}
-let blasterInFlight=0;
+const blaster=createBlasterSystem({scene,rig,camera,arena,objects,spectator});
 const tool=toolVisual.mesh;
 const toolEnd=new T.Vector3(),toolRotationWorld=new T.Quaternion(),toolOrigin=new T.Vector3();
 const toolState={mode:0,position:toolOrigin,quaternion:toolRotationWorld,end:toolEnd};
@@ -1019,17 +963,8 @@ function aim(frame,space,input,trig){
     hudDirty=true;
   }
 }
-const keys=new Set();
-let firePointer=false,touchFire=false;
-renderer.domElement.addEventListener('pointerdown',event=>{
-  if(event.pointerType!=='touch'&&event.button===0)firePointer=true;
-});
-renderer.domElement.addEventListener('lostpointercapture',()=>{firePointer=false;});
-addEventListener('pointerup',()=>{firePointer=false;});
-addEventListener('pointercancel',()=>{firePointer=touchFire=false;});
-const shootButton=document.querySelector('#touch-fire');
-shootButton.onpointerdown=event=>{event.preventDefault();touchFire=true;shootButton.setPointerCapture(event.pointerId);};
-shootButton.onpointerup=shootButton.onpointercancel=shootButton.onlostpointercapture=()=>{touchFire=false;};
+const keyboard=createKeyboardState(),{held:keys,pressed:actions}=keyboard;
+const blasterTrigger=bindBlasterTrigger(renderer.domElement,document.querySelector('#touch-fire'));
 const settingsPanel=document.querySelector('#game-settings'),openSettings=document.querySelector('#open-settings');
 const hint=document.querySelector('#game-hint');
 let hintUntil=0;
@@ -1050,7 +985,7 @@ const flat=createFlatControls({
   onLook:(x,y,factor)=>{yaw-=x*factor;pitch=T.MathUtils.clamp(pitch-y*factor,-1.42,1.42);},
   onAction:action=>{
     const key={interact:'KeyE',tool:'KeyG',mode:'KeyT',spawn:'KeyF',camera:'KeyC'}[action];
-    if(key)keys.add(key);
+    if(key)actions.add(key);
   },
   onMenu:()=>toggleSettings(),
 });
@@ -1060,12 +995,11 @@ addEventListener('keydown',e=>{
     e.preventDefault();if(!e.repeat)toggleSettings();return;
   }
   if(e.code==='Space')e.preventDefault();
-  if(e.repeat&&['KeyC','KeyE','KeyF','KeyG','KeyT','KeyX','Space'].includes(e.code))return;
-  keys.add(e.code);
+  keyboard.down(e.code,e.repeat);
   if(e.code==='KeyR')resetPlayer();
 });
-addEventListener('keyup',e=>keys.delete(e.code));
-addEventListener('blur',()=>{keys.clear();flat.clear();firePointer=touchFire=false;});
+addEventListener('keyup',e=>keyboard.up(e.code));
+addEventListener('blur',()=>{keyboard.clear();flat.clear();blasterTrigger.clear();});
 function grabFlat(origin,direction){
   if(!settings.objects)return false;
   const online=spectator.role==='player';
@@ -1282,7 +1216,7 @@ function character(frame,space,pose,dt){
     scratch.set(x,0,z).clampLength(0,1).applyAxisAngle(up,yaw).multiplyScalar(sprint?5.4:3.4);
     const a=1-Math.exp(-dt*(floor?.friction<.1?2:grounded?13:4));
     velocity.x=T.MathUtils.lerp(velocity.x,scratch.x,a);velocity.z=T.MathUtils.lerp(velocity.z,scratch.z,a);
-    const jump=flat.consumeJump()||keys.delete('Space');
+    const jump=flat.consumeJump()||actions.delete('Space');
     if(jump&&grounded)velocity.y=3.1+settings.jump*.18;
     delta.copy(velocity).multiplyScalar(dt);
   }
@@ -1469,14 +1403,14 @@ renderer.setAnimationLoop((time,frame)=>{
   else if(inVR&&fixtureAim)aimFixture(frame,space,fixtureAim.source,fixtureAim.click);
   else if(!inVR&&!spectating){
     camera.getWorldPosition(raySource);camera.getWorldDirection(forward);
-    if(keys.delete('KeyX'))change('blasterActive',1);
-    if(keys.delete('KeyG')){change('toolActive',1);if(settings.toolActive)showGameHint('Outil · '+toolModes[settings.toolMode-1]);}
-    if(keys.delete('KeyT'))change('toolMode',1);
-    const interact=keys.delete('KeyE');
+    if(actions.delete('KeyX'))change('blasterActive',1);
+    if(actions.delete('KeyG')){change('toolActive',1);if(settings.toolActive)showGameHint('Outil · '+toolModes[settings.toolMode-1]);}
+    if(actions.delete('KeyT'))change('toolMode',1);
+    const interact=actions.delete('KeyE');
     if(settings.toolActive)useToolRay(raySource,forward,interact,null);
     else if(interact&&!grabFlat(raySource,forward))fixtureRay(raySource,forward,true);
     else if(!interact&&!remoteWorld)fixtureRay(raySource,forward,false);
-    if(keys.delete('KeyF')){settings.objects=true;requestSpawn(spawnTypes[0]);}
+    if(actions.delete('KeyF')){settings.objects=true;requestSpawn(spawnTypes[0]);}
   }
   const wristWasVisible=wrist.mesh.visible;
   wrist.mesh.visible=inVR&&!menu&&hands[0].valid;
@@ -1500,9 +1434,13 @@ renderer.setAnimationLoop((time,frame)=>{
     color:avatarColor,coconuts:fixtures.coconuts.reduce((mask,coco,i)=>mask|(Number(coco.visible)<<i),0),
     tool:toolState.mode?toolState:null,
   }:null;
-  spectator.update({inVR,time,dt,position:worldHead,yaw:spectating?yaw:bodyYaw,pitch,camera,rig,keys,flat,avatar:networkAvatar,
+  spectator.update({inVR,time,dt,position:worldHead,yaw:spectating?yaw:bodyYaw,pitch,camera,rig,keys,actions,flat,avatar:networkAvatar,
     bodies:settings.objects?objects:noBodies});
-  updateBlaster(frame,space,inVR,spectating,remoteWorld,dt);
+  blaster.update({frame,space,inVR,remoteWorld,dt,yaw,drop,rightHand:hands[1],
+    enabled:settings.blasterActive&&!spectating&&!menu&&!settings.mapEdit,
+    flatFiring:blasterTrigger.held||keys.has('KeyJ'),
+  });
+  actions.clear();
   updatePropLights(remoteWorld);
   arena.centerShadows(lightView);
   const interval=25+(10-shadowLevel())*(inVR?7:4);

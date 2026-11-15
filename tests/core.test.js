@@ -4,6 +4,7 @@ import * as T from 'three';
 import {createArcadeBlaster} from '../gorilla-lab/arcade-blaster.js';
 import {updateGroundHaptics} from '../gorilla-lab/ground-haptics.js';
 import {parseMap,exampleMap} from '../gorilla-lab/map-format.js';
+import {createKeyboardState} from '../gorilla-lab/flat-controls.js';
 import {screenPixelRatio} from '../gorilla-lab/screen-render.js';
 import {terrainHeight,sculptTerrain} from '../gorilla-lab/terrain-edit.js';
 
@@ -79,4 +80,15 @@ test('low mobile quality reduces pixel area without affecting the desktop budget
   assert.ok(newMobileRatio**2<.30*previousMobileRatio**2);
   assert.equal(screenPixelRatio(2,3,false),previousMobileRatio);
   assert.ok(screenPixelRatio(10,3,true)<=1);
+});
+
+
+test('a quick key tap survives release until the next game frame',()=>{
+  const keys=createKeyboardState();
+  keys.down('KeyX');keys.up('KeyX');
+  assert.ok(keys.pressed.delete('KeyX'));
+  keys.down('KeyX',true);
+  assert.ok(!keys.pressed.has('KeyX'));
+  keys.down('KeyZ');assert.ok(keys.held.has('KeyZ'));
+  keys.up('KeyZ');assert.ok(!keys.held.has('KeyZ'));
 });

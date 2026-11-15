@@ -91,3 +91,14 @@ Le bouton de rapport donne une trace du contexte courant. Garde aussi la version
 ### Vérifier un ralentissement sur téléphone
 
 Compare deux essais dans la même zone, après quelques secondes de stabilisation et dans la même orientation. Reste à la même distance du miroir. Sur un écran mobile à forte densité, le niveau 2 rend désormais environ 27 % des pixels de l’ancien budget au même niveau. Cette mesure porte sur les dimensions du buffer. Elle ne prédit pas le nombre de FPS. Les ombres et les lumières suivent le niveau mobile, même en qualité manuelle.
+
+### Essai sur un profil PC lent
+
+Scène intégrée, caméra immobile, fenêtre 960 × 540, qualité manuelle. Chromium utilisait SwiftShader (rendu logiciel) et un ralentissement CPU ×4. Les nombres décrivent cette simulation, avec ses limites. Sur un PC équipé d’une carte graphique, la répartition CPU/GPU peut différer.
+
+| Qualité | Buffer interne | Images mesurées | Médiane | 95e percentile |
+| --- | ---: | ---: | ---: | ---: |
+| 2/10 | 599 × 336 | 87 | 50 ms | 50 ms |
+| 7/10 | 824 × 463 | 39 | 117 ms | 217 ms |
+
+Pour reproduire la vérification des commandes sur PC, charge l’arène, ferme le panneau avec **Tab**, avance avec **Z**, saute avec **Espace**, puis glisse la souris pour tourner. Appuie brièvement sur **X** et maintiens **J** pour tirer. Relâche **J** et vérifie que le tir cesse. Dans **Rendu → Image**, fais passer le champ de vision de 70° à 75°. Le test Chromium a aussi vérifié l’appui et le relâchement de **X** entre deux images.

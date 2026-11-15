@@ -96,3 +96,5 @@ La cadence est un tir toutes les 100 ms, soit jusqu'à dix par seconde pendant l
 Dans [arcade-blaster.js](../arcade-blaster.js), `createArcadeBlaster(scene, { impact })` fabrique l'effet. L'intégration appelle `update({ dt, aim, firing })`. `aim` contient une position, une rotation et une direction. La fonction `impact(start, direction, length)` renvoie la distance à un impact, ou `null` quand le segment reste libre.
 
 **Exercice**. Change la couleur du trait, puis teste le tir en visant un mur mince et un objet proche. Pour ajouter un mode rafale, garde un compteur de tirs dans ce mode et laisse les projectiles et les impacts au module. Garde aussi le nombre d'effets borné. Un **pool** réserve des emplacements et recycle ceux dont l'effet est terminé.
+
+Pour une nouvelle arme, garde la traduction des entrées, la visée et les réactions du monde dans [blaster-system.js](../blaster-system.js). Modifie les paramètres des projectiles et les effets dans [arcade-blaster.js](../arcade-blaster.js). Les valeurs initiales du menu vivent dans [game-settings.js](../game-settings.js).
