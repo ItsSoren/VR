@@ -3,6 +3,7 @@ import * as T from 'three';
 
 const qInv=new T.Quaternion(), local=new T.Vector3(), closest=new T.Vector3();
 export function penetration(position,radius,box,normal) {
+  if(box.heightfield)return heightContact(position,radius,box,normal);
   qInv.copy(box.quaternion).invert();
   local.copy(position).sub(box.position).applyQuaternion(qInv);
   const h=box.half;
@@ -75,7 +76,19 @@ export function colliderFor(geometry,sphereRadius=0) {
     if(n.lengthSq()>.1)faces.push({a,b,c,n});
   }
   const radius=sphereRadius||Math.max(...vertices.map(v=>v.length()));
-  return {vertices,faces,sphereRadius,radius};
+  const unique=list=>{
+    const result=[];
+    for(const direction of list)if(direction.lengthSq()>.5&&!result.some(n=>Math.abs(n.dot(direction))>.9999))result.push(direction);
+    return result;
+  };
+  return {vertices,faces,sphereRadius,radius,
+    normals:sphereRadius?[]:unique(faces.map(f=>f.n)),
+    edges:sphereRadius?[]:unique(faces.flatMap(f=>[
+      new T.Vector3().subVectors(f.b,f.a).normalize(),
+      new T.Vector3().subVectors(f.c,f.b).normalize(),
+      new T.Vector3().subVectors(f.a,f.c).normalize(),
+    ])),
+  };
 }
 export function distanceToObject(point,body){
   const {mesh,shape}=body;
@@ -90,17 +103,19 @@ export function distanceToObject(point,body){
   }
   return Math.sqrt(distance);
 }
-function shapeContact(body,box,outNormal,outPoint) {
+function vertexContact(body,box,outNormal,outPoint) {
   const {mesh,shape}=body;
   if(shape.sphereRadius){
     const amount=penetration(mesh.position,shape.sphereRadius,box,outNormal);
     outPoint.copy(mesh.position).addScaledVector(outNormal,-shape.sphereRadius);
     return amount;
   }
-  qInv.copy(box.quaternion).invert();
-  local.copy(mesh.position).sub(box.position).applyQuaternion(qInv);
-  closest.copy(local).clamp(box.min,box.half);
-  if(local.distanceToSquared(closest)>shape.radius*shape.radius)return 0;
+  if(!box.heightfield){
+    qInv.copy(box.quaternion).invert();
+    local.copy(mesh.position).sub(box.position).applyQuaternion(qInv);
+    closest.copy(local).clamp(box.min,box.half);
+    if(local.distanceToSquared(closest)>shape.radius*shape.radius)return 0;
+  }
   let deepest=0, matches=0;
   for(const vertex of shape.vertices){
     probePoint.copy(vertex).applyQuaternion(mesh.quaternion).add(mesh.position);
@@ -115,6 +130,68 @@ function shapeContact(body,box,outNormal,outPoint) {
     }
   }
   return deepest;
+}
+const satAxis=new T.Vector3(), satCross=new T.Vector3(), satPoint=new T.Vector3();
+const separating=new T.Vector3(), reverseAxis=new T.Vector3();
+export function boxCollider(half) {
+  return colliderFor(new T.BoxGeometry(half.x*2,half.y*2,half.z*2));
+}
+function sat(a,b,out) {
+  const d=separating.subVectors(a.mesh.position,b.mesh.position);
+  let best=Infinity;
+  function axisTest(axis){
+    if(axis.lengthSq()<.00001)return true;
+    axis.normalize();
+    const center=d.dot(axis);
+    const reverse=reverseAxis.copy(axis).negate();
+    const towardPositive=support(a,reverse)+support(b,axis)-center;
+    const towardNegative=support(a,axis)+support(b,reverse)+center;
+    if(towardPositive<=0||towardNegative<=0)return false;
+    if(Math.min(towardPositive,towardNegative)<best){
+      best=Math.min(towardPositive,towardNegative);
+      out.copy(axis).multiplyScalar(towardPositive<towardNegative?1:-1);
+    }
+    return true;
+  }
+  for(const n of a.shape.normals)if(!axisTest(satAxis.copy(n).applyQuaternion(a.mesh.quaternion)))return 0;
+  for(const n of b.shape.normals)if(!axisTest(satAxis.copy(n).applyQuaternion(b.mesh.quaternion)))return 0;
+  for(const ae of a.shape.edges){
+    satPoint.copy(ae).applyQuaternion(a.mesh.quaternion);
+    for(const be of b.shape.edges)if(!axisTest(satAxis.copy(be).applyQuaternion(b.mesh.quaternion).cross(satPoint)))return 0;
+  }
+  if(a.shape.sphereRadius||b.shape.sphereRadius){
+    if(!axisTest(satCross.copy(d)))return 0;
+    const ball=a.shape.sphereRadius?a:b, hull=ball===a?b:a;
+    if(!hull.shape.sphereRadius){
+      let distance=Infinity;
+      qInv.copy(hull.mesh.quaternion).invert();
+      local.copy(ball.mesh.position).sub(hull.mesh.position).applyQuaternion(qInv);
+      for(const {a,b,c} of hull.shape.faces){
+        triangle.set(a,b,c).closestPointToPoint(local,nearestPoint);
+        const dd=local.distanceToSquared(nearestPoint);
+        if(dd<distance){distance=dd;satPoint.copy(nearestPoint);}
+      }
+      if(!axisTest(satAxis.subVectors(local,satPoint).applyQuaternion(hull.mesh.quaternion)))return 0;
+    }
+  }
+  return Number.isFinite(best)?best:0;
+}
+const lastShapePoint=new T.Vector3();
+function shapeContact(body,box,outNormal,outPoint) {
+  if(!body.precise||body.shape.sphereRadius||!box.shape||box.heightfield)return vertexContact(body,box,outNormal,outPoint);
+  qInv.copy(box.quaternion).invert();
+  local.copy(body.mesh.position).sub(box.position).applyQuaternion(qInv);
+  if(local.distanceToSquared(closest.copy(local).clamp(box.min,box.half))>body.radius**2)return 0;
+  const depth=sat(body,box,outNormal);
+  if(!depth)return 0;
+  let lowest=Infinity,count=0;
+  for(const vertex of body.shape.vertices){
+    lastShapePoint.copy(vertex).applyQuaternion(body.mesh.quaternion).add(body.mesh.position);
+    const value=lastShapePoint.dot(outNormal);
+    if(value<lowest-.003){lowest=value;count=1;outPoint.copy(lastShapePoint);}
+    else if(value<lowest+.003)outPoint.lerp(lastShapePoint,1/(++count));
+  }
+  return depth;
 }
 export function placeObject(body,boxes){
   for(let pass=0;pass<2;pass++) for(const box of boxes){
@@ -175,15 +252,18 @@ export function solveObjects(objects,boxes,dt,gravity,rebound,surfaceAt) {
       againstArena(body,boxes,rebound,step);
     }
     const ordered=objects.filter(o=>o.mesh.visible).sort((a,b)=>a.mesh.position.x-b.mesh.position.x);
+    const largest=ordered.reduce((max,body)=>Math.max(max,body.radius),0);
     for(let i=0;i<ordered.length;i++) for(let j=i+1;j<ordered.length;j++) {
       const a=ordered[i], b=ordered[j];
-      if(b.mesh.position.x-a.mesh.position.x>a.radius+.46)break;
+      if(b.mesh.position.x-a.mesh.position.x>a.radius+largest)break;
       if(a.owner&&b.owner)continue;
       correction.subVectors(b.mesh.position,a.mesh.position);
       const d=correction.length();
       if(d>=a.radius+b.radius||d<.0001)continue;
       correction.multiplyScalar(1/d);
-      const overlap=support(a,correction)+support(b,angular.copy(correction).negate())-d;
+      const precise=a.precise||b.precise;
+      const overlap=precise?sat(a,b,normal):support(a,correction)+support(b,angular.copy(correction).negate())-d;
+      if(precise)correction.copy(normal).negate();
       if(overlap<=0)continue;
       const ia=a.owner?0:1/a.mass,ib=b.owner?0:1/b.mass,total=ia+ib;
       a.mesh.position.addScaledVector(correction,-overlap*ia/total);
@@ -196,5 +276,34 @@ export function solveObjects(objects,boxes,dt,gravity,rebound,surfaceAt) {
       }
     }
   }
+}
+
+
+function heightContact(p,radius,field,out) {
+  if(p.x<field.xMin||p.x>field.xMax||p.z<field.zMin||p.z>field.zMax)return 0;
+  const h=field.height(p.x,p.z);
+  if(p.y-h>=radius*1.6)return 0;
+  const eps=.045;
+  const dx=(field.height(p.x+eps,p.z)-field.height(p.x-eps,p.z))/(2*eps);
+  const dz=(field.height(p.x,p.z+eps)-field.height(p.x,p.z-eps))/(2*eps);
+  out.set(-dx,1,-dz).normalize();
+  return Math.max(0,radius-(p.y-h)*out.y);
+}
+
+const playerProbe={mesh:{position:null,quaternion:new T.Quaternion()},shape:{sphereRadius:0,normals:[],edges:[]}};
+export function playerObjectContact(position,radius,object,velocity){
+  if(!object.blocksPlayer || object.owner || !object.mesh.visible)return false;
+  if(position.distanceToSquared(object.mesh.position)>(radius+object.radius)**2)return false;
+  playerProbe.mesh.position=position;
+  playerProbe.shape.sphereRadius=radius;
+  const depth=sat(playerProbe,object,normal);
+  if(depth<=0)return false;
+  position.addScaledVector(normal,depth+.001);
+  const inward=velocity.dot(normal);
+  if(inward<0){
+    velocity.addScaledVector(normal,-inward);
+    if(Math.abs(normal.y)<.6)object.velocity.addScaledVector(normal,-Math.min(2.8,-inward*.24));
+  }
+  return true;
 }
 

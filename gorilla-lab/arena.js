@@ -1,5 +1,6 @@
 
 import * as T from 'three';
+import {boxCollider} from './physics.js';
 
 function canvasTexture(w,h,paint) {
   const c=document.createElement('canvas');c.width=w;c.height=h;
@@ -141,17 +142,55 @@ export function buildArena(scene,renderer) {
     mesh.receiveShadow=true;mesh.castShadow=true;
     scene.add(mesh);
     const half=new T.Vector3(w/2,h/2,d/2);
-    const b={mesh,position:mesh.position,quaternion:mesh.quaternion,half,min:half.clone().negate(),friction,gravity,name,type};
+    const b={mesh,position:mesh.position,quaternion:mesh.quaternion,half,min:half.clone().negate(),friction,gravity,name,type,shape:boxCollider(half)};
     boxes.push(b);return b;
   }
-  box('Normal',0,-.33,-5,12,.66,24,0,0,.78);
-  box('Glace',-9,-.33,-5,6,.66,24,1,0,.035);
-  box('Faible gravité',9,-.33,-5,6,.66,24,3,0,.75,.28);
+  box('Normal',0,-.33,-22,12,.66,58,0,0,.78);
+  box('Glace',-9,-.33,-22,6,.66,58,1,0,.035);
+  box('Faible gravité',9,-.33,-22,6,.66,58,3,0,.75,.28);
   box('Pente',0,.47,-10,5,.43,5,2,.28,.88);
   box('Mur gauche',-3.4,2.2,-14.8,.38,4.4,5.7,2);
   box('Mur droit',3.4,2.2,-14.8,.38,4.4,5.7,2);
   box('Palier',0,1.55,-16,2.7,.38,1.4,3);
-  box('Mur fond',0,1.7,-17.2,24,3.4,.38,2);
+  box('Portique haut',0,3.15,-18,7,.45,.58,2);
+  const hillGeometry=new T.PlaneGeometry(12,58,16,64).rotateX(-Math.PI/2).translate(-18,0,-22);
+  const hillPositions=hillGeometry.attributes.position;
+  const hillSeed=Math.floor(Math.random()*1000000),phase=hillSeed*.017;
+  for(let i=0;i<hillPositions.count;i++){
+    const x=hillPositions.getX(i),z=hillPositions.getZ(i);
+    const edge=Math.sin(Math.PI*T.MathUtils.clamp((x+24)/12,0,1));
+    const ends=Math.min(1,(z+51)*.48,(7-z)*.48);
+    const rolling=.93+.56*Math.sin(z*.36+phase)+.32*Math.cos(x*.67+z*.26+phase*1.4)+.19*Math.sin(z*.81+phase*.67);
+    hillPositions.setY(i,Math.max(0,edge*ends*rolling));
+  }
+  hillGeometry.computeVertexNormals();
+  const hill=new T.Mesh(hillGeometry,tiles[3]);
+  hill.receiveShadow=hill.castShadow=true;scene.add(hill);
+  const height=(x,z)=>{
+    const gx=T.MathUtils.clamp((x+24)/12*16,0,15.999999),gz=T.MathUtils.clamp((z+51)/58*64,0,63.999999);
+    const i=Math.floor(gx),j=Math.floor(gz),u=gx-i,v=gz-j;
+    const idx=j*17+i;
+    const a=hillPositions.getY(idx),b=hillPositions.getY(idx+1),c=hillPositions.getY(idx+17),d=hillPositions.getY(idx+18);
+    return u+v<=1?a+(b-a)*u+(c-a)*v:d+(c-d)*(1-u)+(b-d)*(1-v);
+  };
+  boxes.push({heightfield:true,height,xMin:-24,xMax:-12,zMin:-51,zMax:7,friction:.81,gravity:1});
+  box('Aile droite',18,-.33,-22,12,.66,58,0);
+  for(let i=0;i<5;i++){
+    const y=.30+i*.29;
+    box('Paliers '+(i+1),-8.3+(i%2)*1.38,y*.5,-21-i*2.05,1.8,y,1.42,i%2?2:3);
+  }
+  box('Rampe longue',-5.8,1.32,-32.6,3.25,.40,8.8,2,.34);
+  box('Balcon',-5.8,2.60,-38.2,7.4,.48,3.65,3);
+  box('Passerelle',-.8,2.60,-38.2,2.75,.40,1.40,0);
+  box('Arrivée',3.6,2.57,-39.5,4.8,.44,4.8,1);
+  for(let i=0;i<3;i++){
+    box('Paroi ouest '+i,5.7,2.15+i*.32,-22.8-i*4.6,.48,4.30+i*.64,3.3,2);
+    box('Paroi est '+i,9.15,2.36+i*.30,-24.1-i*4.6,.48,4.72+i*.60,3.25,3);
+  }
+  box('Plateforme haute',7.4,3.4,-36.0,3.5,.45,3.0,0);
+  box('Butée arrière',0,1.35,-50.6,48,2.7,.6,2);
+  box('Butée ouest',-23.7,1.05,-22,.6,2.1,58,2);
+  box('Butée est',23.7,1.05,-22,.6,2.1,58,2);
   box('Appui haut',5.5,.48,-6,1.1,.96,2,0);
   box('Marche',5.5,.21,-4,1.1,.42,2,3);
   function sign(text,x,z,color) {
@@ -167,9 +206,13 @@ export function buildArena(scene,renderer) {
   const probe=new T.Mesh(new T.IcosahedronGeometry(.54,2),chrome);
   probe.position.set(2.6,.68,-3.6);probe.castShadow=true;scene.add(probe);
   sign('MATÉRIAUX / BENCHMARK',0,-8,'#ffddb0');
+  sign('PALIERS / RAMPE',-7.6,-20,'#f4dca5');
+  sign('TERRAIN VALLONNÉ',-16.8,1.0,'#deefb4');
+  sign('PARCOURS MURAL',7.4,-20,'#f4dca5');
+  sign('ARRIVÉE',3.6,-41,'#f4dca5');
   const display=palette.map((_,i)=>{
-    const m=new T.Mesh(new T.BoxGeometry(.65,.65,.65),tiles[i]);
-    m.position.set(-4.7+(i%8)*1.31,.40,-2.7-Math.floor(i/8)*1.52);m.castShadow=true;scene.add(m);return m;
+    const displayBox=box('Échantillon '+palette[i][0],-4.7+(i%8)*1.31,.325,-2.7-Math.floor(i/8)*1.52,.65,.65,.65,i);
+    return displayBox.mesh;
   });
   const shadowGeo=new T.CircleGeometry(1,12).rotateX(-Math.PI/2);
   const shadowMaterial=new T.MeshBasicMaterial({color:0x564b38,transparent:true,opacity:.13,depthWrite:false});
@@ -193,7 +236,8 @@ export function buildArena(scene,renderer) {
       });
     }
     const standard=level>=4;
-    for(const b of boxes) b.mesh.material=standard?tiles[b.type]:alt[b.type];
+    for(const b of boxes) if(b.mesh) b.mesh.material=standard?tiles[b.type]:alt[b.type];
+    hill.material=standard?tiles[3]:alt[3];
     for(let i=0;i<display.length;i++)display[i].material=standard?tiles[i]:alt[i];
     tiles.forEach((m,i)=>{for(const material of [m,alt[i]]) {
       if(!material.userData.texture) material.userData.texture=material.map;
@@ -207,7 +251,7 @@ export function buildArena(scene,renderer) {
     dome.visible=level>=2;
     scene.background=new T.Color('#83c7ed');
   }
-  return {boxes,probe,display,visual,shadow,materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
+  return {boxes,probe,display,visual,shadow,hillSeed,materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
 }
 
 
