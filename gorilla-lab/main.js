@@ -8,6 +8,7 @@ import { createFlatControls } from './flat-controls.js';
 import { GorillaLocomotion } from './locomotion.js';
 import { updateGroundHaptics } from './ground-haptics.js';
 import { createToolVisual } from './tool-visual.js';
+import { createArcadeBlaster } from './arcade-blaster.js';
 import { avatarPalettes,createAvatarStyle } from './avatar-style.js';
 import { makeLabProps } from './lab-props.js';
 import { makeAnimatedProps,clonePropMaterial } from './animated-props.js';
@@ -53,7 +54,7 @@ const arena=buildArena(scene,renderer);
 const vrEffects=createVrEffects(renderer);
 const updateRayProbe=addRayProbe(arena.probe);
 const settings={
-  timeOfDay:1,stepHaptics:true,shaderMode:1,shadowQuality:10,lightQuality:10,grip:6,slide:3,gravity:5,jump:5,weight:5,size:5,arms:5,contrast:5,saturation:5,exposure:5,warmth:5,bounce:4,throw:5,preciseHitboxes:false,quality:7,auto:true,resolution:7,texturePower:7,preset:2,lightmap:true,post:true,rayTrace:false,mapEdit:false,mapMode:1,mapShape:1,mapMaterial:1,mapSurface:1,mapTurn:1,mapTexture:1,modelGrab:true,modelFrozen:false,modelCollidable:true,modelSupport:false,terrainResolution:2,terrainAmplitude:2,terrainFrequency:3,terrainGrass:4,terrainShrub:1,terrainSeed:1,brushRadius:4,brushStrength:4,toolMode:1,toolActive:false,focus:true,focusStrength:5,focusSize:5,
+  timeOfDay:1,stepHaptics:true,blasterActive:false,shaderMode:1,shadowQuality:10,lightQuality:10,grip:6,slide:3,gravity:5,jump:5,weight:5,size:5,arms:5,contrast:5,saturation:5,exposure:5,warmth:5,bounce:4,throw:5,preciseHitboxes:false,quality:7,auto:true,resolution:7,texturePower:7,preset:2,lightmap:true,post:true,rayTrace:false,mapEdit:false,mapMode:1,mapShape:1,mapMaterial:1,mapSurface:1,mapTurn:1,mapTexture:1,modelGrab:true,modelFrozen:false,modelCollidable:true,modelSupport:false,terrainResolution:2,terrainAmplitude:2,terrainFrequency:3,terrainGrass:4,terrainShrub:1,terrainSeed:1,brushRadius:4,brushStrength:4,toolMode:1,toolActive:false,focus:true,focusStrength:5,focusSize:5,
   movement:true,collisions:true,objects:true,body:true,hands:true,textures:true,reflections:true,shadows:true,bloom:true,
 };
 const defaults={...settings};
@@ -266,6 +267,7 @@ function resetObjects(){
   }
 }
 function resetPlayer(){
+  blaster.reset();blasterInFlight=0;
   rig.position.copy(boot);yaw=T.MathUtils.degToRad(maps.yaw);pitch=0;rig.rotation.y=yaw;
   velocity.set(0,0,0);snap=false;grounded=false;hasPreviousHead=false;locomotion.reset();
   for(const hand of hands){hand.valid=false;hand.hapticGrounded=false;hand.hapticCooldown=0;hand.gamepad=null;release(hand,false);}
@@ -373,7 +375,7 @@ function captureReport(){
   const sorted=rawFrameMs.slice().sort((a,b)=>a-b);
   const percentile=p=>sorted.length?Number(sorted[Math.min(sorted.length-1,Math.floor((sorted.length-1)*p))].toFixed(2)):null;
   reportSnapshot={
-    game:'Gorilla Lab',version:'r27',time:new Date().toISOString(),
+    game:'Gorilla Lab',version:'r28',time:new Date().toISOString(),
     mode:reportHadVR?'VR':'PC',settings:{...settings},qualityActive:liveLevel,
     performance:{fps,frames:sorted.length,frameMs:{median:percentile(.5),p95:percentile(.95),max:percentile(1)}},
     xr:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},cloud:{role:spectator.role,connected:spectator.connected,replicas:spectator.replicaCount},targetScore:fixtures.score(),locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
@@ -390,7 +392,7 @@ function downloadReport(){
 }
 document.querySelector('#download-report').onclick=downloadReport;
 document.querySelector('#capture-report').onclick=captureReport;
-sections[1][1].push(['Tool Gun','toolActive'],['Action Tool Gun','toolMode'],['Capturer un rapport',captureReport]);
+sections[1][1].push(['Tool Gun','toolActive'],['Action Tool Gun','toolMode'],['Pistolet de tir','blasterActive'],['Capturer un rapport',captureReport]);
 const workshopGroups=Array.from({length:Math.ceil(workshopTypes.length/8)},(_,i)=>['Atelier'+(workshopTypes.length>8?' '+(i+1):''),workshopTypes.slice(i*8,i*8+8)]);
 const spawnGroups=[['Basiques',basicTypes],['Détaillés',detailTypes],['Animés',animatedTypes],...workshopGroups].map(([label,types])=>[
   label,[...types.map(i=>[objectSpecs[i].name,()=>requestSpawn(i)]),['Tout retirer',clearSpawnBank]],
@@ -444,7 +446,12 @@ function change(key,step){
   if(key==='auto'&&!settings.auto) liveLevel=settings.quality;
   if(key==='movement'||key==='collisions') for(const h of hands) h.surface=null;
   if(key==='objects'&&!settings.objects) resetObjects();
-  if(key==='toolActive'&&!settings.toolActive)for(const h of hands)if(h.held?.toolHold)release(h,false);
+  if(key==='blasterActive'&&settings.blasterActive)settings.toolActive=false;
+  if(key==='toolActive'&&settings.toolActive)settings.blasterActive=false;
+  if(!settings.toolActive&&(key==='toolActive'||key==='blasterActive')){
+    for(const h of hands)if(h.held?.toolHold)release(h,false);
+    releaseFlat(false);
+  }
   if(key==='preciseHitboxes')syncHitboxes();
   applyVisual();
 }
@@ -484,7 +491,7 @@ function currentGroup(){return page===2?renderPage:page===3?spawnPage:mapPage;}
 function selectGroup(index){if(page===2)renderPage=index;else if(page===3)spawnPage=index;else mapPage=index;}
 function actionLabel(key){
   if(key===captureReport)return 'Capturer';
-  if(key===clearObjects)return 'Vider';
+  if(key===clearObjects||key===clearSpawnBank)return 'Vider';
   if(key===resetPlayer||key===resetObjects)return 'Réinitialiser';
   return page===3?'Créer':'Appliquer';
 }
@@ -680,6 +687,52 @@ function fixtureRay(origin,direction,activate){
 
 const toolDirection=new T.Vector3(),toolRotation=new T.Quaternion();
 const toolVisual=createToolVisual(scene);
+const shotRay=new T.Raycaster(),shotsAgainst=[],shotObjects=new Map();
+const blaster=createArcadeBlaster(scene,{impact(origin,direction,length){
+  shotRay.set(origin,direction);shotRay.far=length;
+  const hit=shotRay.intersectObjects(shotsAgainst,false)[0];
+  if(!hit)return null;
+  const body=shotObjects.get(hit.object);
+  if(body&&!body.owner&&!body.frozen)body.velocity.addScaledVector(direction,Math.min(4,2.6/body.mass));
+  return hit.distance;
+}});
+const blasterAim={position:new T.Vector3(),quaternion:new T.Quaternion(),direction:new T.Vector3(),modelPosition:new T.Vector3()};
+function updateBlaster(frame,space,inVR,spectating,remoteWorld,dt){
+  let aim=null,firing=false;
+  if(settings.blasterActive&&!spectating&&!menu&&!settings.mapEdit){
+    if(inVR){
+      const input=[...frame.session.inputSources].find(source=>source.handedness==='right');
+      const pose=input&&frame.getPose(input.targetRaySpace,space);
+      if(pose){
+        const {position:p,orientation:q}=pose.transform;
+        aim=blasterAim;
+        aim.position.set(p.x,p.y-drop,p.z).applyAxisAngle(up,yaw).add(rig.position);
+        aim.modelPosition.copy(hands[1].valid?hands[1].mesh.position:aim.position);
+        aim.quaternion.set(q.x,q.y,q.z,q.w).premultiply(spin.setFromAxisAngle(up,yaw));
+        aim.direction.set(0,0,-1).applyQuaternion(aim.quaternion);
+        firing=Boolean(input.gamepad?.buttons[0]?.pressed);
+      }
+    }else{
+      aim=blasterAim;
+      camera.getWorldPosition(aim.position);camera.getWorldQuaternion(aim.quaternion);
+      aim.direction.set(0,0,-1).applyQuaternion(aim.quaternion);
+      aim.modelPosition.set(.16,-.17,-.43).applyQuaternion(aim.quaternion).add(aim.position);
+      firing=firePointer||touchFire||keys.has('KeyJ');
+    }
+  }
+  shotsAgainst.length=0;shotObjects.clear();
+  if(aim||blasterInFlight){
+    for(const box of arena.boxes)if(box.mesh?.isMesh&&box.mesh.visible)shotsAgainst.push(box.mesh);
+    if(remoteWorld)spectator.forEachReplica(mesh=>shotsAgainst.push(mesh));
+    else for(const body of objects)if(body.mesh.visible&&body.collidable&&!body.owner){
+      shotsAgainst.push(body.mesh);shotObjects.set(body.mesh,body);
+    }
+  }
+  blaster.update({dt,aim,firing});
+  if(firing)blasterInFlight=1.3;
+  else blasterInFlight=Math.max(0,blasterInFlight-dt);
+}
+let blasterInFlight=0;
 const tool=toolVisual.mesh;
 const toolEnd=new T.Vector3(),toolRotationWorld=new T.Quaternion(),toolOrigin=new T.Vector3();
 const toolState={mode:0,position:toolOrigin,quaternion:toolRotationWorld,end:toolEnd};
@@ -945,6 +998,16 @@ function aim(frame,space,input,trig){
   }
 }
 const keys=new Set();
+let firePointer=false,touchFire=false;
+renderer.domElement.addEventListener('pointerdown',event=>{
+  if(event.pointerType!=='touch'&&event.button===0)firePointer=true;
+});
+renderer.domElement.addEventListener('lostpointercapture',()=>{firePointer=false;});
+addEventListener('pointerup',()=>{firePointer=false;});
+addEventListener('pointercancel',()=>{firePointer=touchFire=false;});
+const shootButton=document.querySelector('#touch-fire');
+shootButton.onpointerdown=event=>{event.preventDefault();touchFire=true;shootButton.setPointerCapture(event.pointerId);};
+shootButton.onpointerup=shootButton.onpointercancel=shootButton.onlostpointercapture=()=>{touchFire=false;};
 const settingsPanel=document.querySelector('#game-settings'),openSettings=document.querySelector('#open-settings');
 const hint=document.querySelector('#game-hint');
 let hintUntil=0;
@@ -975,12 +1038,12 @@ addEventListener('keydown',e=>{
     e.preventDefault();if(!e.repeat)toggleSettings();return;
   }
   if(e.code==='Space')e.preventDefault();
-  if(e.repeat&&['KeyC','KeyE','KeyF','KeyG','KeyT','Space'].includes(e.code))return;
+  if(e.repeat&&['KeyC','KeyE','KeyF','KeyG','KeyT','KeyX','Space'].includes(e.code))return;
   keys.add(e.code);
   if(e.code==='KeyR')resetPlayer();
 });
 addEventListener('keyup',e=>keys.delete(e.code));
-addEventListener('blur',()=>{keys.clear();flat.clear();});
+addEventListener('blur',()=>{keys.clear();flat.clear();firePointer=touchFire=false;});
 function grabFlat(origin,direction){
   if(!settings.objects)return false;
   const online=spectator.role==='player';
@@ -1143,7 +1206,7 @@ function trackHands(frame,space,dt){
     }
     else if(!menu&&h.side==='right'&&settings.mapEdit)mapLook={source,click:trigger&&!h.trigger};
     else if(!menu&&h.side==='right'&&settings.toolActive)toolLook={source,hand:h,click:trigger&&!h.trigger};
-    else if(!menu&&(h.side==='right'||trigger&&!h.trigger))fixtureAim={source,click:trigger&&!h.trigger};
+    else if(!menu&&!settings.blasterActive&&(h.side==='right'||trigger&&!h.trigger))fixtureAim={source,click:trigger&&!h.trigger};
     h.trigger=trigger;
   }
 }
@@ -1377,6 +1440,7 @@ renderer.setAnimationLoop((time,frame)=>{
   else if(inVR&&fixtureAim)aimFixture(frame,space,fixtureAim.source,fixtureAim.click);
   else if(!inVR&&!spectating){
     camera.getWorldPosition(raySource);camera.getWorldDirection(forward);
+    if(keys.delete('KeyX'))change('blasterActive',1);
     if(keys.delete('KeyG')){change('toolActive',1);if(settings.toolActive)showGameHint('Outil · '+toolModes[settings.toolMode-1]);}
     if(keys.delete('KeyT'))change('toolMode',1);
     const interact=keys.delete('KeyE');
@@ -1395,7 +1459,7 @@ renderer.setAnimationLoop((time,frame)=>{
     if(menu)drawPanel();
     const c=wrist.ctx;c.clearRect(0,0,416,84);c.fillStyle='#182632';c.fillRect(0,0,416,84);
     c.fillStyle='#fff0cf';c.font='bold 25px system-ui';c.fillText(fps+' FPS     Q '+liveLevel+'/10',17,32);
-    c.font='20px system-ui';c.fillText(settings.mapEdit?'Édition : '+mapToolNames[settings.mapMode-1]:settings.toolActive?'Tool Gun : '+toolModes[settings.toolMode-1]:'B/Y : réglages   ·   A : Tool Gun',17,66);wrist.texture.needsUpdate=true;
+    c.font='20px system-ui';c.fillText(settings.mapEdit?'Édition : '+mapToolNames[settings.mapMode-1]:settings.blasterActive?'Pistolet : maintenir la gâchette':settings.toolActive?'Tool Gun : '+toolModes[settings.toolMode-1]:'B/Y : réglages   ·   A : Tool Gun',17,66);wrist.texture.needsUpdate=true;
   }
   const networkAvatar=(!spectating&&(spectator.role==='player'||inVR&&spectator.role==='vr'))?{
     head:avatarHead.quaternion,hands:inVR?hands.map(h=>h.valid?{position:h.mesh.position,quaternion:h.mesh.quaternion,pressure:h.pressure}:null):[null,toolState.mode?desktopHand:null],
@@ -1405,6 +1469,7 @@ renderer.setAnimationLoop((time,frame)=>{
   }:null;
   spectator.update({inVR,time,dt,position:worldHead,yaw:spectating?yaw:bodyYaw,pitch,camera,rig,keys,flat,avatar:networkAvatar,
     bodies:settings.objects?objects:noBodies});
+  updateBlaster(frame,space,inVR,spectating,remoteWorld,dt);
   updatePropLights(remoteWorld);
   arena.centerShadows(lightView);
   const interval=25+(10-shadowLevel())*(inVR?7:4);

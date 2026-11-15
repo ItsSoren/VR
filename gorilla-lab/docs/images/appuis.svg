@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 332" width="960" height="332" role="img" aria-labelledby="title desc">
+  <title id="title">Pourquoi une poussée de la main fait monter le corps</title>
+  <desc id="desc">Le contrôleur descend sous le plan du sol, tandis que la paume simulée reste ancrée au contact. Le déplacement de la cible fait monter le corps dans le sens opposé.</desc>
+  <defs>
+    <marker id="mint" markerWidth="12" markerHeight="12" refX="8" refY="5" orient="auto"><path d="M0 0l9 5-9 5z" fill="#8ce2ba"/></marker>
+    <marker id="gold" markerWidth="12" markerHeight="12" refX="8" refY="5" orient="auto"><path d="M0 0l9 5-9 5z" fill="#f8d399"/></marker>
+    <pattern id="ground" width="16" height="16" patternUnits="userSpaceOnUse"><path d="M-3 3L3-3M0 16L16 0M13 19l6-6" stroke="#477573" stroke-width="2"/></pattern>
+  </defs>
+  <rect width="960" height="332" rx="24" fill="#14272c"/>
+  <g font-family="system-ui, sans-serif">
+    <text x="40" y="60" fill="#faeed5" font-size="32" font-weight="700">Un appui de la main</text>
+    <text x="40" y="92" fill="#bad3d0" font-size="15">Vue de profil, avec le corps, la paume et la cible de la manette.</text>
+    <path d="M48 231h864v43H48z" fill="url(#ground)"/>
+    <path d="M48 231h864" stroke="#93afa9" stroke-width="3"/>
+    <path d="M178 132h81q24 0 24 24v16q0 24-24 24h-81q-24 0-24-24v-16q0-24 24-24z" fill="#28564f" stroke="#8ce2ba" stroke-width="2"/>
+    <text x="196" y="168" fill="#ecf5e8" font-size="15">Corps</text>
+    <path d="M281 165Q388 178 455 216" fill="none" stroke="#abc9c4" stroke-width="8" stroke-linecap="round"/>
+    <path d="M137 190v-64" stroke="#8ce2ba" stroke-width="3" marker-end="url(#mint)"/>
+    <circle cx="455" cy="224" r="12" fill="#8ce2ba" stroke="#143536" stroke-width="3"/>
+    <path d="M455 189v90" stroke="#f8d399" stroke-width="2.4" stroke-dasharray="4 6" marker-end="url(#gold)"/>
+    <circle cx="455" cy="282" r="9" fill="#f8d399"/>
+    <g font-size="16">
+      <text x="66" y="124" fill="#a6ebcf">Le corps monte</text>
+      <text x="482" y="210" fill="#a6ebcf">La paume reste au point de contact</text>
+      <text x="481" y="305" fill="#f8d399">La cible de la manette descend</text>
+    </g>
+  </g>
+</svg>

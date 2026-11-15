@@ -10,7 +10,8 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   const builtBoxes=arena.boxes.slice();
   const group=new T.Group();scene.add(group);
   const meshRows=[], history=[];
-  const loader=new T.TextureLoader();
+  const loader=new T.TextureLoader(), textures=new Map();
+  let loadRequest=0;
   let map=null, signature='', selection=-1,moving=-1,status='', lastGhostKey='';
   const slab=new T.BoxGeometry(1,1,1);
   const ghost=new T.Mesh(slab,new T.MeshBasicMaterial({color:'#8be4b9',wireframe:true,transparent:true,opacity:.8,depthWrite:false}));
@@ -19,6 +20,36 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   const statusNode=document.querySelector('#map-note');
   function inform(message){status=message;statusNode.textContent=message;}
   function memo(){if(history.length>=20)history.shift();history.push(JSON.stringify(map));}
+  function acquireTexture(source,material){
+    let entry=textures.get(source);
+    if(!entry){
+      entry={materials:new Set(),texture:null,failed:false};
+      textures.set(source,entry);
+      const reject=message=>{
+        if(textures.get(source)!==entry||entry.failed)return;
+        entry.failed=true;
+        for(const user of entry.materials){user.map=null;user.needsUpdate=true;}
+        entry.texture?.dispose();
+        if(message)inform(message);
+      };
+      const texture=loader.load(source,image=>{
+        if(image.image.width>2048||image.image.height>2048)reject('Une texture a été ignorée : maximum 2048 px.');
+      },undefined,()=>reject());
+      entry.texture=texture;
+      texture.colorSpace=T.SRGBColorSpace;
+      texture.wrapS=texture.wrapT=T.RepeatWrapping;
+    }
+    entry.materials.add(material);
+    material.map=entry.failed?null:entry.texture;
+    return entry;
+  }
+  function pruneTextures(){
+    for(const [source,entry] of textures){
+      if(entry.materials.size)continue;
+      textures.delete(source);
+      if(!entry.failed)entry.texture.dispose();
+    }
+  }
   function card(model){
     const base=arena.mapMaterial(model.material,getLevel());
     if(!model.texture&&model.color==='#ffffff')return {material:base,custom:false};
@@ -26,19 +57,12 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     material.onBeforeCompile=base.onBeforeCompile;
     material.customProgramCacheKey=base.customProgramCacheKey;
     material.color.multiply(new T.Color(model.color));
-    if(model.texture){
-      material.map=loader.load(model.texture,texture=>{
-        if(texture.image.width>2048||texture.image.height>2048){material.map=null;texture.dispose();material.needsUpdate=true;inform('Une texture a été ignorée : maximum 2048 px.');}
-      },undefined,()=>{material.map=null;material.needsUpdate=true;});
-      material.map.colorSpace=T.SRGBColorSpace;
-      material.map.wrapS=material.map.wrapT=T.RepeatWrapping;
-    }
-    return {material,custom:true,ownTexture:Boolean(model.texture)};
+    return {material,custom:true,ownTexture:model.texture?acquireTexture(model.texture,material):null};
   }
   function removeRow(row){
     group.remove(row.mesh);row.mesh.geometry.dispose();
     if(row.vegetation)disposeVegetation(row.vegetation);
-    if(row.custom){if(row.ownTexture)row.mesh.material.map?.dispose();row.mesh.material.dispose();}
+    if(row.custom){row.ownTexture?.materials.delete(row.mesh.material);row.mesh.material.dispose();}
   }
   function makeRow(piece,index){
     const {material,custom,ownTexture}=card(piece);
@@ -74,6 +98,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     signature=map?'custom-'+mapCode(JSON.stringify(map)):'';
     defaultObjects.forEach(mesh=>mesh.visible=!map);
     for(let i=0;i<nodes.length;i++)meshRows.push(makeRow(nodes[i],i));
+    pruneTextures();
     if(map)arena.boxes.splice(0,arena.boxes.length,...meshRows.filter((row,i)=>nodes[i].solid).map(row=>row.collider));
     else arena.boxes.splice(0,arena.boxes.length,...builtBoxes);
     group.updateMatrixWorld(true);
@@ -87,12 +112,14 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   }
   function load(value){
     const validated=parseMap(value);
+    loadRequest++;
     history.length=0;map=validated;selection=moving=-1;
     boot.set(map.spawn.x,map.spawn.y,map.spawn.z);
     rebuild();onReset(map.spawn.yaw);
     inform('Map : '+map.name+' · '+map.pieces.length+' pièces');
   }
   function reset(){
+    loadRequest++;
     map=null;history.length=0;selection=moving=-1;boot.set(0,0,3);
     rebuild();onReset(0);inform('Arène intégrée');
   }
@@ -180,21 +207,28 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   }
   const input=document.querySelector('#map-file'), url=document.querySelector('#map-url');
   input.onchange=async()=>{
-    const file=input.files[0]; if(!file)return;
-    try{if(file.size>maxMapBytes)throw Error('Map trop lourde.');load(await file.text());}
-    catch(e){inform(e.message);}
-    finally{input.value='';}
+    const file=input.files[0];if(!file)return;
+    const request=++loadRequest;
+    input.value='';
+    try{
+      if(file.size>maxMapBytes)throw Error('Map trop lourde.');
+      const contents=await file.text();
+      if(request===loadRequest)load(contents);
+    }catch(e){if(request===loadRequest)inform(e.message);}
   };
   async function loadURL(value){
+    const request=++loadRequest;
     try{
       const requested=new URL(value,location.href);
       if(!['http:','https:'].includes(requested.protocol))throw Error('Il faut une URL HTTP ou HTTPS.');
       const response=await fetch(requested,{credentials:'omit'});
+      if(request!==loadRequest)return;
       if(!response.ok)throw Error('URL de map inaccessible ('+response.status+').');
       const length=Number(response.headers.get('content-length'));
       if(length>maxMapBytes)throw Error('Map trop lourde.');
-      load(await response.text());
-    }catch(e){inform(e.message);}
+      const contents=await response.text();
+      if(request===loadRequest)load(contents);
+    }catch(e){if(request===loadRequest)inform(e.message);}
   }
   document.querySelector('#map-load-url').onclick=()=>loadURL(url.value);
   document.querySelector('#map-export').onclick=save;

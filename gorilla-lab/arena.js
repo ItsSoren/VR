@@ -243,7 +243,7 @@ export function buildArena(scene,renderer) {
     const a=hillPositions.getY(idx),b=hillPositions.getY(idx+1),c=hillPositions.getY(idx+row),d=hillPositions.getY(idx+row+1);
     return u+v<=1?a+(b-a)*u+(c-a)*v:d+(c-d)*(1-u)+(b-d)*(1-v);
   };
-  boxes.push({heightfield:true,height,...labZones.hills.bounds,friction:.81,gravity:1});
+  boxes.push({heightfield:true,mesh:hill,height,...labZones.hills.bounds,friction:.81,gravity:1});
 
   function sign(text,x,z,color,y=1.45) {
     const texture=canvasTexture(384,72,(c,w,h)=>{
@@ -322,7 +322,7 @@ export function buildArena(scene,renderer) {
     dome.visible=level>=2;
     setTimeOfDay(mood);
   }
-  return {boxes,floors,probe,display,visual,shadow,setTimeOfDay,centerShadows,get hillSeed(){return hillSeed;},setHillSeed,bakeLightmap,mapMaterial:(i,level)=>level>=4?tiles[i]:alt[i],builtObjects:[...boxes.map(b=>b.mesh).filter(m=>m?.isObject3D),hill,probe,...props],materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
+  return {boxes,floors,probe,display,visual,shadow,setTimeOfDay,centerShadows,get hillSeed(){return hillSeed;},setHillSeed,bakeLightmap,mapMaterial:(i,level)=>level>=4?tiles[i]:alt[i],builtObjects:[...boxes.map(b=>b.mesh).filter(m=>m?.isObject3D),probe,...props],materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
 }
 
 

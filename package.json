@@ -1,0 +1,13 @@
+{
+  "name": "gorilla-lab",
+  "private": true,
+  "version": "0.28.0",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/core.test.js"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": { "three": "0.180.0" },
+  "devDependencies": { "esbuild": "0.25.10" }
+}

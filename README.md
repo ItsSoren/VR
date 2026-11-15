@@ -1,5 +1,10 @@
 # Gorilla Lab
-Ouvrir index.html pour l'aperçu PC. Publier en HTTPS pour entrer en WebXR depuis le casque. Le site est statique. Placer index.html et game-lab-r27.js ensemble à la racine d'un dépôt GitHub Pages.
+
+[Guide de reprise et exercices](./gorilla-lab/docs/README.md) · [Jouer en ligne](https://itssoren.github.io/VR/)
+
+`npm install`, puis `npm run build` et `npm test` à la racine du dépôt.
+
+Ouvrir index.html pour l'aperçu PC. Publier en HTTPS pour entrer en WebXR depuis le casque. Le site est statique. Placer index.html et game-lab-r28.js ensemble à la racine d'un dépôt GitHub Pages.
 ## Dans le casque
 - S'appuyer sur le sol ou un mur et pousser en bougeant les manettes.
 - Stick droit : tourner par crans de 45 degrés. B/Y ou clic du stick gauche : panneau. Gâchette : sélectionner dans le panneau.
@@ -8,7 +13,7 @@ Ouvrir index.html pour l'aperçu PC. Publier en HTTPS pour entrer en WebXR depui
 - Réglages par défaut réinitialise l'onglet ouvert. Les objets et la locomotion ont aussi leur propre bouton de retour.
 - Auto monte ou baisse la qualité selon les FPS. La résolution de session se règle séparément et prend effet en rouvrant le mode VR.
 ## Sources
-Le fichier game.js contient Three.js. Pour reconstruire : npm install --no-save three@0.180.0 esbuild@0.25.10 puis npx esbuild main.js --bundle --format=iife --target=es2022 --minify --outfile=game-lab-r27.js.
+Le fichier game.js contient Three.js. Pour reconstruire : npm install --no-save three@0.180.0 esbuild@0.25.10 puis npx esbuild main.js --bundle --format=iife --target=es2022 --minify --outfile=game-lab-r28.js.
 
 
 ## Bornes et cocotier
@@ -73,3 +78,7 @@ L’atelier Modèles permet d’assembler des primitives, de définir leur mati�
 **Spawn → Animés** contient la gelée rouge et le cube du Néant. Dans **Rendu → Effets**, le focus démarre à 5/5 et utilise la fovéation matérielle sur les casques compatibles. La baguette et la lampe torche peuvent servir de prolongement de la paume lorsqu’elles sont tenues.
 
 La vibration légère des appuis de la main se règle dans **Locomotion → Vibration des appuis**.
+
+## Pistolet de tir
+
+Dans **Objets → Pistolet de tir**, active le pistolet. En VR, maintiens la gâchette droite. Sur PC, **X** équipe le pistolet et le clic gauche ou **J** maintient le feu. Sur mobile, garde **Tirer** enfoncé. Un tir part toutes les 100 ms. Les traceurs jaune, rouge et gris et les étincelles sont visibles localement. Sur la machine qui simule les objets, le tir peut les pousser.

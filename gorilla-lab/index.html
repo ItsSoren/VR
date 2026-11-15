@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="fr">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Gorilla Lab — Laboratoire WebXR</title>
+<style>#map-access summary{cursor:pointer;margin:.65rem 0}#map-access input{max-width:100%;margin:.35rem 0}#map-access a{color:#ffe6ac}
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;color:#faf0da;background:#87c4e7;font:15px system-ui,sans-serif}canvas{display:block;width:100vw;height:100vh;touch-action:none}
+aside{position:fixed;left:clamp(10px,2vw,24px);top:clamp(10px,2vw,24px);width:min(342px,calc(100vw - 20px));max-height:calc(100vh - 30px);overflow:auto;padding:19px 19px 16px;background:#192934f3;border:1px solid #a1b3ac;border-radius:12px;box-shadow:0 16px 52px #17324455}
+a{color:#ffe6ac}h1{font-size:30px;letter-spacing:-.04em;margin:0}h2{font-size:17px;margin:.85rem 0 .35rem}p{line-height:1.4;margin:.55rem 0;color:#d4dfdf}small{color:#c2d0d3}button{font:inherit;padding:.35rem .62rem;background:#385363;color:#fff2d6;border:1px solid #6b8285;border-radius:5px;cursor:pointer}
+button:focus-visible{outline:2px solid #ffe6a5}button:hover{background:#4d6b78}button:disabled{opacity:.55;cursor:default}#vr{background:#ffe6ac;color:#28343d;font-weight:750;margin:.5rem 0;width:100%;padding:.65rem}nav{display:flex;flex-wrap:wrap;gap:5px;margin-top:12px}nav button{flex:1}nav button[aria-pressed="true"]{background:#586d53;border-color:#a7bb8d}#settings nav{margin:0 0 .45rem}
+.setting{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:34px;border-bottom:1px solid #41515a;font-size:14px}.setting button{font-size:13px;padding:.22rem .42rem;min-width:29px}.setting span{white-space:nowrap;font-variant-numeric:tabular-nums}#restore{margin-top:10px}.immersive aside,.immersive #open-settings,.immersive #flat-actions,.immersive #crosshair,.immersive #game-hint{display:none}
+[hidden]{display:none!important}#close-settings{float:right}#open-settings{position:fixed;top:14px;left:14px}
+#game-hint{position:fixed;top:15px;left:50%;transform:translateX(-50%);background:#243944f0;padding:.5rem .8rem;border-radius:5px;pointer-events:none}
+#crosshair{pointer-events:none;position:fixed;left:50%;top:50%;width:6px;height:6px;border-radius:50%;transform:translate(-50%,-50%);background:#fff4d1;box-shadow:0 0 4px #071219}
+#flat-actions{display:none;position:fixed;right:max(12px,env(safe-area-inset-right));bottom:max(12px,env(safe-area-inset-bottom));gap:8px;max-width:200px;flex-wrap:wrap;justify-content:flex-end}
+#flat-actions button{min-height:45px;background:#273c4bb5;touch-action:none}
+@media (any-pointer:coarse){#flat-actions{display:flex}aside{max-height:calc(100dvh - 125px)}}
+</style></head>
+<body><canvas id="game" tabindex="0" aria-label="Arène Gorilla Lab"></canvas>
+<button id="open-settings" hidden>Réglages</button><div id="crosshair" aria-hidden="true"></div>
+<div id="game-hint" role="status" hidden></div>
+<div id="flat-actions" aria-label="Commandes tactiles">
+<button data-flat-action="interact">Saisir</button><button data-flat-action="jump">Sauter</button>
+<button data-flat-action="tool">Outil</button><button data-flat-action="mode">Mode</button>
+<button data-flat-action="spawn">Objet</button><button data-flat-action="camera">Caméra</button><button id="touch-fire">Tirer</button>
+</div>
+<aside id="game-settings"><button id="close-settings" aria-label="Fermer les réglages">Fermer</button><h1>Gorilla Lab</h1><p id="readings" role="status">Mesure des performances…</p>
+<button id="vr" disabled>Entrer en VR</button><small id="status">Mode PC. Pour la VR, ouvrir en HTTPS sur le casque.</small>
+<p>VR : pousse avec les mains. Stick droit : rotation à 45°. Grip : saisir. B/Y : réglages. A : Tool Gun, clic stick droit : action suivante.</p>
+<small>PC : ZQSD ou WASD, Maj pour courir, Espace pour sauter. Glisse pour regarder. E : saisir ou interagir. F : créer un cube. G/T : outil et mode. X : pistolet. Clic ou J : tirer. Tab : réglages.<br>Mobile : glisse à gauche pour marcher et à droite pour regarder.</small>
+<nav aria-label="Réglages"><button data-page>Locomotion</button><button data-page>Objets</button><button data-page>Rendu</button><button data-page>Spawn</button><button data-page>Carte</button></nav>
+<p><a href="./floor-plan.html" target="_blank" rel="noopener">Plan de l’arène</a></p><h2 id="section">Locomotion</h2><div id="settings"></div>
+<button id="restore">Réglages par défaut</button>
+<p><button id="capture-report">Capturer le rapport</button> <button id="download-report" disabled>JSON</button></p><details id="cloud-access"><summary>Salon TurboWarp</summary>
+<p>Connexion facultative. Le joueur VR ouvre un salon. Rejoins-le avec le même code en joueur PC/mobile ou en spectateur. La position et l’orientation de jeu sont envoyées à TurboWarp tant que le salon est actif.</p>
+<label>Code du salon <input id="cloud-room" maxlength="14" autocomplete="off"></label>
+<p><button id="cloud-vr">Joueur VR</button> <button id="cloud-pc">Spectateur</button> <button id="cloud-player">Jouer sur PC ou mobile</button></p>
+<p><button id="cloud-camera">Caméra : Libre</button></p><small>ZQSD : voler · Espace / Maj : monter / descendre · Ctrl : accélérer · C : changer de caméra.</small>
+<p><button id="cloud-copy">Copier le lien</button> <button id="cloud-leave">Déconnecter</button></p>
+<p id="cloud-status" aria-live="polite" role="status">Hors ligne</p>
+</details><details id="map-access"><summary>Maps et éditeur PC</summary><p><a href="./editor.html">Ouvrir l’atelier sur PC</a></p><label>Importer un fichier <input id="map-file" type="file" accept=".json,application/json"></label><label>URL de map <input id="map-url" type="url" placeholder="https://…/map.gorilla.json"></label><button id="map-load-url">Charger URL</button> <button id="map-export">Exporter JSON</button> <button id="map-reset">Arène</button><p id="map-note" role="status"></p></details><p><small>La résolution XR s’applique à la prochaine entrée en VR.</small></p>
+</aside><script defer src="./game-lab-r28.js"></script></body></html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

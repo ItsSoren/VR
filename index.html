@@ -20,12 +20,12 @@ button:focus-visible{outline:2px solid #ffe6a5}button:hover{background:#4d6b78}b
 <div id="flat-actions" aria-label="Commandes tactiles">
 <button data-flat-action="interact">Saisir</button><button data-flat-action="jump">Sauter</button>
 <button data-flat-action="tool">Outil</button><button data-flat-action="mode">Mode</button>
-<button data-flat-action="spawn">Objet</button><button data-flat-action="camera">Caméra</button>
+<button data-flat-action="spawn">Objet</button><button data-flat-action="camera">Caméra</button><button id="touch-fire">Tirer</button>
 </div>
 <aside id="game-settings"><button id="close-settings" aria-label="Fermer les réglages">Fermer</button><h1>Gorilla Lab</h1><p id="readings" role="status">Mesure des performances…</p>
 <button id="vr" disabled>Entrer en VR</button><small id="status">Mode PC. Pour la VR, ouvrir en HTTPS sur le casque.</small>
 <p>VR : pousse avec les mains. Stick droit : rotation à 45°. Grip : saisir. B/Y : réglages. A : Tool Gun, clic stick droit : action suivante.</p>
-<small>PC : ZQSD ou WASD, Maj pour courir, Espace pour sauter. Glisse pour regarder. E : saisir ou interagir. F : créer un cube. G/T : outil et mode. Tab : réglages.<br>Mobile : glisse à gauche pour marcher et à droite pour regarder.</small>
+<small>PC : ZQSD ou WASD, Maj pour courir, Espace pour sauter. Glisse pour regarder. E : saisir ou interagir. F : créer un cube. G/T : outil et mode. X : pistolet. Clic ou J : tirer. Tab : réglages.<br>Mobile : glisse à gauche pour marcher et à droite pour regarder.</small>
 <nav aria-label="Réglages"><button data-page>Locomotion</button><button data-page>Objets</button><button data-page>Rendu</button><button data-page>Spawn</button><button data-page>Carte</button></nav>
 <p><a href="./floor-plan.html" target="_blank" rel="noopener">Plan de l’arène</a></p><h2 id="section">Locomotion</h2><div id="settings"></div>
 <button id="restore">Réglages par défaut</button>
@@ -37,7 +37,7 @@ button:focus-visible{outline:2px solid #ffe6a5}button:hover{background:#4d6b78}b
 <p><button id="cloud-copy">Copier le lien</button> <button id="cloud-leave">Déconnecter</button></p>
 <p id="cloud-status" aria-live="polite" role="status">Hors ligne</p>
 </details><details id="map-access"><summary>Maps et éditeur PC</summary><p><a href="./editor.html">Ouvrir l’atelier sur PC</a></p><label>Importer un fichier <input id="map-file" type="file" accept=".json,application/json"></label><label>URL de map <input id="map-url" type="url" placeholder="https://…/map.gorilla.json"></label><button id="map-load-url">Charger URL</button> <button id="map-export">Exporter JSON</button> <button id="map-reset">Arène</button><p id="map-note" role="status"></p></details><p><small>La résolution XR s’applique à la prochaine entrée en VR.</small></p>
-</aside><script defer src="./game-lab-r27.js"></script></body></html>
+</aside><script defer src="./game-lab-r28.js"></script></body></html>
 
 
 

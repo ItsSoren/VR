@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 365" width="960" height="365" role="img" aria-labelledby="title desc">
+  <title id="title">Une image de Gorilla Lab</title>
+  <desc id="desc">Les entrées alimentent le joueur, puis la physique. L’état ainsi obtenu est envoyé au rendu et, en salon, au réseau.</desc>
+  <defs>
+    <linearGradient id="background" x2="1" y2="1"><stop stop-color="#152c32"/><stop offset="1" stop-color="#102024"/></linearGradient>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="8" refY="5" orient="auto"><path d="M0 0l9 5-9 5z" fill="#8eadab"/></marker>
+  </defs>
+  <rect width="960" height="365" rx="24" fill="url(#background)"/>
+  <g font-family="system-ui, sans-serif">
+    <text x="40" y="62" fill="#faeed5" font-size="32" font-weight="700">Une image de Gorilla Lab</text>
+    <text x="40" y="95" fill="#b2cfcd" font-size="15">Le temps écoulé, dt, est mesuré en secondes à chaque passage.</text>
+    <g fill="#203c43" stroke="#577879">
+      <rect x="40" y="147" width="162" height="111" rx="14"/>
+      <rect x="247" y="147" width="163" height="111" rx="14"/>
+      <rect x="455" y="147" width="175" height="111" rx="14"/>
+      <rect x="704" y="128" width="216" height="82" rx="14"/>
+      <rect x="704" y="236" width="216" height="82" rx="14"/>
+    </g>
+    <g stroke="#8eadab" stroke-width="2.4" fill="none" marker-end="url(#arrow)">
+      <path d="M202 202h33"/><path d="M410 202h33"/><path d="M630 202h26l35-33"/><path d="M630 202h26l35 75"/>
+    </g>
+    <g font-size="20" font-weight="700" fill="#f3e7c9">
+      <text x="59" y="184">Commandes</text><text x="267" y="184">Joueur</text><text x="475" y="184">Physique</text>
+      <text x="724" y="162">Three.js</text><text x="724" y="270">Salon</text>
+    </g>
+    <g font-size="14" fill="#b9d5d2">
+      <text x="59" y="214">Mains, clavier,</text><text x="59" y="234">souris et tactile.</text>
+      <text x="267" y="214">Pose, locomotion</text><text x="267" y="234">et interactions.</text>
+      <text x="475" y="214">Contacts, prises</text><text x="475" y="234">et objets mobiles.</text>
+      <text x="724" y="187">Dessine la scène.</text><text x="724" y="295">Partage l’état utile.</text>
+    </g>
+    <text x="40" y="317" fill="#beda9a" font-size="14">Une prochaine image relit les commandes et continue depuis cet état.</text>
+  </g>
+</svg>
