@@ -44,29 +44,79 @@ export function buildArena(scene,renderer) {
   sun.shadow.bias=-.00025;
   sun.shadow.normalBias=.025;
   scene.add(ambient,sun);
-  const tiles=['#a9a586','#7099a6','#a58572','#9a936e'].map((color,index)=>{
+
+  const palette=[
+    ['Ardoise','#555e6a','#b8c8d2',.77,0,1],
+    ['Nacre','#537586','#f5e9de',.22,.34,1],
+    ['Brique','#855443','#e8a879',.92,0,1],
+    ['Sable','#a28e61','#e3c58e',.96,0,1],
+    ['Marbre','#bbb8b0','#676d95',.24,.03,1],
+    ['Bois','#664527','#d9a864',.63,0,1],
+    ['Cuivre','#794a36','#f4a461',.25,.83,1],
+    ['Chrome','#758291','#eaf2fa',.10,.97,1],
+    ['Carreaux','#293e4b','#a5d9cb',.19,.15,1],
+    ['Béton','#626664','#acafa0',.96,0,1],
+    ['Verre bleu','#94cfdd','#e3fcff',.12,.24,.39],
+    ['Verre ambre','#d1a053','#f9e3a4',.18,.26,.46],
+    ['Glace','#7cb0cf','#e4fcff',.16,.20,.64],
+    ['Caoutchouc','#45404b','#a1a1b6',.98,0,1],
+    ['Émail','#40468c','#f5e1a8',.30,.14,1],
+    ['Mosaique','#455d62','#f4d2a4',.52,.16,1],
+    ['Benchmark','#141414','#efefef',.86,0,1],
+  ];
+  const tiles=palette.map(([name,color,accent,roughness,metalness,opacity],index)=>{
     const tex=canvasTexture(512,512,(ctx,w)=>{
-      ctx.scale(w/128,w/128);w=128;
       ctx.fillStyle=color;ctx.fillRect(0,0,w,w);
       let seed=index+19;
       function rng(){seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;}
-      for(let i=0;i<3500;i++) {
-        ctx.fillStyle=rng()>.5?'rgba(255,245,217,.13)':'rgba(44,38,31,.12)';
-        ctx.fillRect(rng()*w,rng()*w,1+rng()*3,1+rng()*2);
+      ctx.fillStyle=accent;
+      if(index===16){
+        for(let y=0;y<16;y++)for(let x=0;x<16;x++)if((x+y)%2===0)ctx.fillRect(x*32,y*32,32,32);
+        ctx.fillStyle='#ff3957';ctx.fillRect(253,0,6,512);ctx.fillRect(0,253,512,6);
+      }else if([0,2,8,15].includes(index)){
+        const step=index===15?32:64;
+        ctx.globalAlpha=.48;
+        for(let y=0;y<w;y+=step) {
+          ctx.fillRect(0,y,w,index===8?3:2);
+          for(let x=-step;x<w;x+=step)ctx.fillRect(x+(y/step%2)*(index===2?step/2:0),y,2,step);
+        }
+      }else if([4,5,6,7,10,11,12].includes(index)){
+        const lines=index===5?38:index===7?64:18;
+        for(let j=0;j<lines;j++){
+          ctx.strokeStyle=accent;ctx.globalAlpha=.08+rng()*.22;
+          ctx.lineWidth=index===5?1+rng()*8:1+rng()*4;
+          const y=rng()*w;
+          const frequency=index===5?.018:.009;
+          ctx.beginPath();
+          for(let x=0;x<=w;x+=8){
+            const v=y+Math.sin(x*frequency+j)*((index===6||index===7)?4:12+j%5*3)+(index===4?x*.28:0);
+            if(x===0)ctx.moveTo(x,v);else ctx.lineTo(x,v);
+          }
+          ctx.stroke();
+        }
+      }else{
+        ctx.globalAlpha=.27;
+        for(let j=0;j<120;j++){
+          const x=rng()*w,y=rng()*w,r=2+rng()*6;
+          ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();
+        }
       }
-      ctx.strokeStyle='rgba(28,35,31,.19)';
-      ctx.lineWidth=1.5;
-      for(let y=0;y<=128;y+=32){
-        ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();
-        for(let x=(y%64?16:0);x<128;x+=32) {ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,y+32);ctx.stroke();}
+      if(index!==16) for(let i=0;i<4400;i++){
+        ctx.globalAlpha=.05+rng()*.10;
+        ctx.fillStyle=rng()>.5?accent:'#222324';
+        ctx.fillRect(rng()*w,rng()*w,1+rng()*4,1+rng()*3);
       }
     });
-    tex.wrapS=tex.wrapT=T.RepeatWrapping;tex.repeat.set(index===1?2:4,index===1?2:4);
-    return new T.MeshStandardMaterial({map:tex,roughness:[.87,.20,.72,.95][index],metalness:index===1?.28:0,flatShading:true});
+    tex.wrapS=tex.wrapT=T.RepeatWrapping;
+    if(index<4)tex.repeat.set(index===1?2:4,index===1?2:4);
+    const material=new T.MeshStandardMaterial({map:tex,roughness,metalness,flatShading:true,opacity,
+      transparent:opacity<1,depthWrite:opacity===1});
+    material.name=name;
+    return material;
   });
   const originals=tiles.map(m=>m.map.image);
   let textureSize=512;
-  const alt=tiles.map(m=>new T.MeshLambertMaterial({map:m.map,flatShading:true}));
+  const alt=tiles.map(m=>new T.MeshLambertMaterial({map:m.map,flatShading:true,opacity:m.opacity,transparent:m.transparent,depthWrite:m.depthWrite}));
   const focusAmount={value:0}, focusRadius={value:.24};
   for(const material of [...tiles,...alt]) {
     material.onBeforeCompile=shader=>{
@@ -116,9 +166,10 @@ export function buildArena(scene,renderer) {
   const chrome=new T.MeshStandardMaterial({color:'#c8e6ed',metalness:1,roughness:.16});
   const probe=new T.Mesh(new T.IcosahedronGeometry(.54,2),chrome);
   probe.position.set(2.6,.68,-3.6);probe.castShadow=true;scene.add(probe);
-  const display=[0,1,2,3].map((i)=>{
+  sign('MATÉRIAUX / BENCHMARK',0,-8,'#ffddb0');
+  const display=palette.map((_,i)=>{
     const m=new T.Mesh(new T.BoxGeometry(.65,.65,.65),tiles[i]);
-    m.position.set(-1.35+i*.9,.4,-3.6);m.castShadow=true;scene.add(m);return m;
+    m.position.set(-4.7+(i%8)*1.31,.40,-2.7-Math.floor(i/8)*1.52);m.castShadow=true;scene.add(m);return m;
   });
   const shadowGeo=new T.CircleGeometry(1,12).rotateX(-Math.PI/2);
   const shadowMaterial=new T.MeshBasicMaterial({color:0x564b38,transparent:true,opacity:.13,depthWrite:false});
@@ -135,16 +186,19 @@ export function buildArena(scene,renderer) {
         const image=document.createElement('canvas');
         image.width=image.height=size;
         image.getContext('2d').drawImage(originals[i],0,0,size,size);
-        tex.image=image;tex.needsUpdate=true;
+        const resized=new T.CanvasTexture(image);
+        resized.colorSpace=tex.colorSpace;resized.wrapS=tex.wrapS;resized.wrapT=tex.wrapT;resized.repeat.copy(tex.repeat);
+        for(const material of [m,alt[i]]){material.userData.texture=resized;material.map=resized;material.needsUpdate=true;}
+        tex.dispose();
       });
     }
     const standard=level>=4;
     for(const b of boxes) b.mesh.material=standard?tiles[b.type]:alt[b.type];
+    for(let i=0;i<display.length;i++)display[i].material=standard?tiles[i]:alt[i];
     tiles.forEach((m,i)=>{for(const material of [m,alt[i]]) {
-      const map=textures?m.userData.texture??m.map:null;
       if(!material.userData.texture) material.userData.texture=material.map;
       material.map=textures?material.userData.texture:null;
-      material.color.set(textures?'#ffffff':['#a9a586','#7099a6','#a58572','#9a936e'][i]);
+      material.color.set(textures?'#ffffff':palette[i][1]);
       material.needsUpdate=true;
     }});
     scene.environmentIntensity=reflections?(level>=4?.8:.22):0;

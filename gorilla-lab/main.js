@@ -1,7 +1,7 @@
 
 import * as T from 'three';
 import { buildArena } from './arena.js';
-import { solve,handContact,solveObjects } from './physics.js';
+import { solve,handContact,solveObjects,colliderFor,distanceToObject,placeObject } from './physics.js';
 
 let gameCanvas=document.getElementById('game');
 if(!(gameCanvas instanceof HTMLCanvasElement)) {
@@ -98,29 +98,60 @@ const hands=['left','right'].map(side=>{
   upper.visible=lower.visible=false;scene.add(upper,lower);
   return {side,mesh,upper,lower,shoulder:new T.Vector3(),elbow:new T.Vector3(),anchor:new T.Vector3(),last:new T.Vector3(),target:new T.Vector3(),previous:new T.Vector3(),speed:new T.Vector3(),valid:false,surface:null,held:null,grip:false,trigger:false,menu:false,contactNormal:new T.Vector3(),contactPoint:new T.Vector3()};
 });
+
 const objectSpecs=[
-  [new T.BoxGeometry(.33,.33,.33),'#b76b50',.27,1.35,[-.84,.32,1.15]],
-  [new T.IcosahedronGeometry(.225,1),'#73afcb',.22,.85,[0,.28,1.15]],
-  [new T.TetrahedronGeometry(.29),'#d8ae53',.265,1.0,[.84,.33,1.15]],
-];
-const objects=objectSpecs.map(([geo,color,radius,mass,start])=>{
-  const mesh=new T.Mesh(geo,new T.MeshStandardMaterial({color,roughness:.44,metalness:.10,flatShading:true}));
-  mesh.castShadow=true;mesh.receiveShadow=true;scene.add(mesh);
-  return {mesh,radius,mass,start:new T.Vector3(...start),owner:null,velocity:new T.Vector3(),spin:0,axis:new T.Vector3(0,1,0),shadow:arena.shadow(radius)};
-});
+  ['Cube',new T.BoxGeometry(.33,.33,.33),'#b76b50',0,1.35],
+  ['Boule',new T.IcosahedronGeometry(.225,2),'#73afcb',.225,.85],
+  ['Tétraèdre',new T.TetrahedronGeometry(.29),'#d8ae53',0,1],
+  ['Brique',new T.BoxGeometry(.56,.19,.28),'#b35a71',0,1.5],
+  ['Cylindre',new T.CylinderGeometry(.155,.155,.38,12),'#91aa63',0,1.1],
+  ['Cône',new T.ConeGeometry(.18,.41,12),'#e3a16d',0,.82],
+  ['Octaèdre',new T.OctahedronGeometry(.27),'#9b82c9',0,.94],
+  ['Prisme',new T.CylinderGeometry(.22,.22,.33,3),'#63b8a2',0,1.18],
+].map(([name,geo,color,sphere,mass])=>({name,geo,mass,shape:colliderFor(geo,sphere),
+  material:new T.MeshStandardMaterial({color,roughness:.44,metalness:.1,flatShading:true}),
+}));
+const objects=[];
+const gripRotation=new T.Quaternion(), inverseGrip=new T.Quaternion();
+const spawnPoint=new T.Vector3(),spawnDirection=new T.Vector3();
+function spawnObject(index,origin){
+  const spec=objectSpecs[index];
+  if(!origin){
+    camera.getWorldPosition(spawnPoint);
+    camera.getWorldDirection(spawnDirection);
+    spawnDirection.y=0;
+    if(spawnDirection.lengthSq()<.01)spawnDirection.set(0,0,-1).applyAxisAngle(up,yaw);
+    spawnPoint.addScaledVector(spawnDirection.normalize(),1.18);
+    spawnPoint.y+=.16;
+    origin=spawnPoint;
+  }
+  const mesh=new T.Mesh(spec.geo,spec.material);
+  mesh.castShadow=true;mesh.receiveShadow=true;mesh.position.copy(origin);scene.add(mesh);
+  const body={mesh,type:spec.name,shape:spec.shape,radius:spec.shape.radius,mass:spec.mass,start:mesh.position.clone(),
+    owner:null,velocity:new T.Vector3(),angular:new T.Vector3(),offset:new T.Vector3(),
+    relativeRotation:new T.Quaternion(),shadow:arena.shadow(spec.shape.radius)};
+  objects.push(body);placeObject(body,arena.boxes);
+  return body;
+}
+function clearObjects(){
+  for(const hand of hands){if(hand.held)release(hand,false);}
+  for(const body of objects)scene.remove(body.mesh,body.shadow);
+  objects.length=0;
+}
+spawnObject(0,new T.Vector3(-.84,.32,1.15));
+spawnObject(1,new T.Vector3(0,.28,1.15));
+spawnObject(2,new T.Vector3(.84,.33,1.15));
 function release(hand,launch=true) {
   const object=hand.held;
   if(!object) return;
   object.owner=null;hand.held=null;
-  object.velocity.copy(hand.speed).multiplyScalar(launch? .55+settings.throw*.12:0).clampLength(0,23);
-  object.spin=launch?Math.min(22,object.velocity.length()*3):0;
-  object.axis.copy(up).cross(object.velocity).normalize();
-  if(object.axis.lengthSq()<.01) object.axis.set(1,0,0);
+  object.velocity.multiplyScalar(launch? .55+settings.throw*.12:0).clampLength(0,23);
+  if(launch) object.angular.clampLength(0,24); else object.angular.set(0,0,0);
 }
 function resetObjects(){
   for(const hand of hands) release(hand,false);
   for(const object of objects){
-    object.mesh.position.copy(object.start);object.mesh.quaternion.identity();object.velocity.set(0,0,0);object.spin=0;
+    object.mesh.position.copy(object.start);object.mesh.quaternion.identity();object.velocity.set(0,0,0);object.angular.set(0,0,0);
   }
 }
 function resetPlayer(){
@@ -147,6 +178,19 @@ function resize(){
 }
 addEventListener('resize',resize);
 
+const visualPresets={
+  'Fluide':{quality:3,auto:false,texturePower:6,resolution:5,shadows:false,reflections:false,bloom:false,focus:true,focusStrength:6,focusSize:4},
+  'Équilibré':{quality:7,auto:true,texturePower:8,resolution:7,shadows:true,reflections:true,bloom:true,focus:true,focusStrength:3,focusSize:6},
+  'Vitrine':{quality:10,auto:false,texturePower:10,resolution:10,shadows:true,reflections:true,bloom:true,focus:false},
+  'Benchmark':{quality:10,auto:false,texturePower:10,resolution:7,shadows:true,reflections:true,bloom:false,focus:false},
+};
+function usePreset(name){
+  Object.assign(settings,{textures:true,contrast:5,saturation:5,exposure:5,warmth:5},visualPresets[name]);
+  liveLevel=settings.quality;
+  lowCount=highCount=qualityTimer=0;
+  applyVisual();
+}
+
 const sections=[
   ['Locomotion',[
     ['Appuis Gorilla','movement'],['Collisions','collisions'],['Grip','grip'],['Glissement','slide'],
@@ -163,16 +207,16 @@ const sections=[
   ]],
 ];
 sections.push(['Focus',[['Activer le focus','focus'],['Intensité','focusStrength'],['Taille de la zone nette','focusSize']]]);
-sections.push(['Photo',[['Exposition','exposure'],['Contraste','contrast'],['Saturation','saturation'],['Chaleur','warmth']]]);
+sections.push(['Photo',[['Exposition','exposure'],['Contraste','contrast'],['Saturation','saturation'],['Chaleur','warmth'],...Object.keys(visualPresets).map(name=>['Préréglage : '+name,()=>usePreset(name)])]]);
 let reportSnapshot=null, rawFrameMs=[], lastVR=null, reportHadVR=false, contactFrames=0, trackedFrames=0, renderStats={};
 function captureReport(){
   const sorted=rawFrameMs.slice().sort((a,b)=>a-b);
   const percentile=p=>sorted.length?Number(sorted[Math.min(sorted.length-1,Math.floor((sorted.length-1)*p))].toFixed(2)):null;
   reportSnapshot={
-    game:'Gorilla Lab',version:'r6',time:new Date().toISOString(),
+    game:'Gorilla Lab',version:'r7',time:new Date().toISOString(),
     mode:reportHadVR?'VR':'PC',settings:{...settings},qualityActive:liveLevel,
     performance:{fps,frames:sorted.length,frameMs:{median:percentile(.5),p95:percentile(.95),max:percentile(1)}},
-    xr:lastVR,renderer:renderStats,locomotion:{trackedFrames,contactFrames,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
+    xr:lastVR,renderer:renderStats,objects:{total:objects.length,held:objects.filter(o=>o.owner).length},locomotion:{trackedFrames,contactFrames,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
   };
   document.querySelector('#download-report').disabled=false;
   hudDirty=true;
@@ -187,6 +231,7 @@ function downloadReport(){
 document.querySelector('#download-report').onclick=downloadReport;
 document.querySelector('#capture-report').onclick=captureReport;
 sections[1][1].push(['Capturer un rapport',captureReport]);
+sections.push(['Spawn',[...objectSpecs.map((spec,i)=>['Créer : '+spec.name,()=>spawnObject(i)]),['Tout retirer',clearObjects]]]);
 const title=document.querySelector('#section'), desktop=document.querySelector('#settings');
 const readings=document.querySelector('#readings');
 function change(key,step){
@@ -203,6 +248,7 @@ function restore(){
   for(const [,key] of sections[page][1]) if(typeof key==='string') settings[key]=defaults[key];
   if(page===0) resetPlayer();
   if(page===1) resetObjects();
+  if(page===5) clearObjects();
   if(page===2) liveLevel=settings.quality;
   applyVisual();
 }
@@ -251,11 +297,11 @@ function drawPanel(){
     c.textAlign='center';c.fillText(label,x+w/2,y+h/2+7);c.textAlign='left';
     hitAreas.push({x,y,w,h,action});
   }
-  sections.forEach(([name],i)=>item(25+i*120,61,112,44,name,()=>page=i,page===i?'#68705a':'#334b58'));
+  sections.forEach(([name],i)=>item(25+i*99,61,94,44,name,()=>page=i,page===i?'#68705a':'#334b58'));
   sections[page][1].forEach(([name,key],i)=>{
     const y=119+i*44;
     c.fillStyle='#e9e5ce';c.font='22px system-ui';c.fillText(name,30,y+26);
-    if(typeof key==='function') item(438,y,174,36,key===captureReport?'Capturer':'Réinitialiser',key);
+    if(typeof key==='function') item(438,y,174,36,key===captureReport?'Capturer':page===5?(key===clearObjects?'Vider':'Créer'):page===4?'Appliquer':'Réinitialiser',key);
     else if(typeof settings[key]==='boolean') item(438,y,174,36,settings[key]?'Actif':'Coupé',()=>change(key,1));
     else {
       item(438,y,46,36,'−',()=>change(key,-1));
@@ -380,33 +426,53 @@ function trackHands(frame,space,dt){
     const priorSurface=h.surface;
     h.surface=null;
     const grip=Boolean(source.gamepad?.buttons[1]?.pressed);
+    const q=pose.transform.orientation;
+    gripRotation.set(q.x,q.y,q.z,q.w).premultiply(spin.setFromAxisAngle(up,yaw));
     if(!menu&&grip&&!h.grip&&settings.objects){
-      const body=objects.find(o=>!o.owner&&o.mesh.position.distanceTo(h.target)<o.radius+.16);
-      if(body){h.held=body;body.owner=h;body.velocity.set(0,0,0);}
+      let body=null, best=.15;
+      for(const o of objects){
+        if(o.owner || o.mesh.position.distanceToSquared(h.target)>(o.radius+.18)**2)continue;
+        const distance=distanceToObject(h.target,o);
+        if(distance<best){best=distance;body=o;}
+      }
+      if(body){
+        h.held=body;body.owner=h;
+        inverseGrip.copy(gripRotation).invert();
+        body.offset.copy(body.mesh.position).sub(h.target).applyQuaternion(inverseGrip);
+        body.relativeRotation.multiplyQuaternions(inverseGrip,body.mesh.quaternion);
+        body.velocity.set(0,0,0);body.angular.set(0,0,0);
+      }
     }
     if(!grip&&h.grip)release(h,!menu);
     h.grip=grip;
     if(h.held){
-      h.held.mesh.position.copy(h.target);
-      solve(h.held.mesh.position,h.held.radius,activeBoxes);
-      const q=pose.transform.orientation;
-      h.held.mesh.quaternion.set(q.x,q.y,q.z,q.w).premultiply(spin.setFromAxisAngle(up,yaw));
-      h.held.velocity.copy(h.speed);
+      const object=h.held;
+      prior.copy(object.mesh.position);
+      inverseGrip.copy(object.mesh.quaternion).invert();
+      object.mesh.quaternion.multiplyQuaternions(gripRotation,object.relativeRotation);
+      object.mesh.position.copy(object.offset).applyQuaternion(gripRotation).add(h.target);
+      placeObject(object,activeBoxes);
+      object.velocity.lerp(scratch.subVectors(object.mesh.position,prior).multiplyScalar(1/Math.max(.006,dt)).clampLength(0,23),.52);
+      inverseGrip.premultiply(object.mesh.quaternion).normalize();
+      if(inverseGrip.w<0)inverseGrip.set(-inverseGrip.x,-inverseGrip.y,-inverseGrip.z,-inverseGrip.w);
+      const angle=2*Math.acos(T.MathUtils.clamp(inverseGrip.w,-1,1));
+      object.angular.lerp(scratch.set(inverseGrip.x,inverseGrip.y,inverseGrip.z).normalize().multiplyScalar(Math.min(24,angle/Math.max(.006,dt))),.52);
     }
     if(settings.movement&&!h.held){
       h.surface=handContact(h.last,h.target,.080,activeBoxes,h.contactPoint,normal);
-      if(!h.surface&&priorSurface&&activeBoxes.includes(priorSurface)){
+      const sweptSurface=h.surface;
+      if(priorSurface&&activeBoxes.includes(priorSurface)){
         scratch.subVectors(h.target,h.anchor);
-        if(scratch.dot(h.contactNormal)<.038 && scratch.lengthSq()<.29){
+        if(scratch.dot(h.contactNormal)<.035 && scratch.lengthSq()<.49 && (!h.surface||h.surface===priorSurface)){ 
           h.surface=priorSurface;
-          h.contactPoint.copy(h.anchor);
+          if(!sweptSurface)h.contactPoint.copy(h.anchor);
           normal.copy(h.contactNormal);
         }
       }
       if(h.surface){
         if(h.surface!==priorSurface || normal.dot(h.contactNormal)<.75) h.anchor.copy(h.contactPoint);
         h.contactNormal.copy(normal);
-        const slip=(1-h.surface.friction*.92)*(.12+settings.slide*.065);
+        const slip=h.surface.friction<.1 ? .48+settings.slide*.045 : settings.slide>7 ? (settings.slide-7)*.03 : 0;
         scratch.subVectors(h.contactPoint,h.anchor);
         scratch.addScaledVector(normal,-scratch.dot(normal));
         h.anchor.addScaledVector(scratch,Math.min(.97,slip));
@@ -427,15 +493,9 @@ function trackHands(frame,space,dt){
 }
 function correction(hand,friction){
   soft.subVectors(hand.anchor,hand.target);
-  const slide=1-settings.slide*.057;
-  // Keep the normal reaction on ice and reduce tangential force.
-  const v=soft.dot(normal);
-  soft.multiplyScalar(T.MathUtils.clamp(friction*slide,0,1)).addScaledVector(normal,v*(1-T.MathUtils.clamp(friction*slide,0,1)));
-  // Tangential drag requires an anchored hand while it is pressed into the surface.
-  if(Math.abs(normal.y)>.6&&friction>.12){
-    scratch.subVectors(hand.last,hand.target);scratch.y=0;
-    soft.addScaledVector(scratch,Math.min(.78,friction*slide));
-  }
+  const v=Math.max(0,soft.dot(normal));
+  const adherence=hand.surface.friction<.1 ? Math.min(.35,friction*2) : T.MathUtils.clamp(.46+settings.grip*.108,0,1);
+  soft.addScaledVector(normal,-soft.dot(normal)).multiplyScalar(adherence).addScaledVector(normal,v);
   delta.add(soft);
 }
 function character(frame,space,pose,dt){
@@ -566,7 +626,7 @@ renderer.setAnimationLoop((time,frame)=>{
   for(const object of objects){
     object.mesh.visible=settings.objects;
     if(object.mesh.position.y<-8 || Math.abs(object.mesh.position.x)>28 || Math.abs(object.mesh.position.z)>35){
-      if(!object.owner){object.mesh.position.copy(object.start);object.velocity.set(0,0,0);}
+      if(!object.owner){object.mesh.position.copy(object.start);object.velocity.set(0,0,0);object.angular.set(0,0,0);}
     }
     object.shadow.visible=settings.shadows&&liveLevel<7&&settings.objects&&object.mesh.position.y<2;
     object.shadow.position.set(object.mesh.position.x,.006,object.mesh.position.z);
