@@ -79,6 +79,7 @@ export class GorillaLocomotion {
       const previous = hand.surface;
       state.released = null;
       hand.surface = null;
+      hand.groundContact = false;
       state.releaseTime = Math.max(0, state.releaseTime - dt);
       state.eligible = hand.valid && (!hand.held||hand.hasSupport) && settings.movement !== false;
       if (!hand.valid) continue;
@@ -149,6 +150,7 @@ export class GorillaLocomotion {
         state.localNormal.copy(normal).applyQuaternion(inverse);
       }
       hand.surface = surface;
+      hand.groundContact = normal.y > .55;
       this.contacts++;
       if (state.tracked) {
         const intent = this.handMotion.subVectors(state.previousTarget, target);

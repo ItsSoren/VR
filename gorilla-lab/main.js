@@ -6,6 +6,7 @@ import {normalizeTerrain} from './terrain-edit.js';
 import {texturePresets,seamlessTexture} from './seamless-texture.js';
 import { createFlatControls } from './flat-controls.js';
 import { GorillaLocomotion } from './locomotion.js';
+import { updateGroundHaptics } from './ground-haptics.js';
 import { createToolVisual } from './tool-visual.js';
 import { avatarPalettes,createAvatarStyle } from './avatar-style.js';
 import { makeLabProps } from './lab-props.js';
@@ -52,7 +53,7 @@ const arena=buildArena(scene,renderer);
 const vrEffects=createVrEffects(renderer);
 const updateRayProbe=addRayProbe(arena.probe);
 const settings={
-  timeOfDay:1,shaderMode:1,shadowQuality:10,lightQuality:10,grip:6,slide:3,gravity:5,jump:5,weight:5,size:5,arms:5,contrast:5,saturation:5,exposure:5,warmth:5,bounce:4,throw:5,preciseHitboxes:false,quality:7,auto:true,resolution:7,texturePower:7,preset:2,lightmap:true,post:true,rayTrace:false,mapEdit:false,mapMode:1,mapShape:1,mapMaterial:1,mapSurface:1,mapTurn:1,mapTexture:1,modelGrab:true,modelFrozen:false,modelCollidable:true,modelSupport:false,terrainResolution:2,terrainAmplitude:2,terrainFrequency:3,terrainGrass:4,terrainShrub:1,terrainSeed:1,brushRadius:4,brushStrength:4,toolMode:1,toolActive:false,focus:true,focusStrength:5,focusSize:5,
+  timeOfDay:1,stepHaptics:true,shaderMode:1,shadowQuality:10,lightQuality:10,grip:6,slide:3,gravity:5,jump:5,weight:5,size:5,arms:5,contrast:5,saturation:5,exposure:5,warmth:5,bounce:4,throw:5,preciseHitboxes:false,quality:7,auto:true,resolution:7,texturePower:7,preset:2,lightmap:true,post:true,rayTrace:false,mapEdit:false,mapMode:1,mapShape:1,mapMaterial:1,mapSurface:1,mapTurn:1,mapTexture:1,modelGrab:true,modelFrozen:false,modelCollidable:true,modelSupport:false,terrainResolution:2,terrainAmplitude:2,terrainFrequency:3,terrainGrass:4,terrainShrub:1,terrainSeed:1,brushRadius:4,brushStrength:4,toolMode:1,toolActive:false,focus:true,focusStrength:5,focusSize:5,
   movement:true,collisions:true,objects:true,body:true,hands:true,textures:true,reflections:true,shadows:true,bloom:true,
 };
 const defaults={...settings};
@@ -267,7 +268,7 @@ function resetObjects(){
 function resetPlayer(){
   rig.position.copy(boot);yaw=T.MathUtils.degToRad(maps.yaw);pitch=0;rig.rotation.y=yaw;
   velocity.set(0,0,0);snap=false;grounded=false;hasPreviousHead=false;locomotion.reset();
-  for(const hand of hands){hand.valid=false;release(hand,false);}
+  for(const hand of hands){hand.valid=false;hand.hapticGrounded=false;hand.hapticCooldown=0;hand.gamepad=null;release(hand,false);}
 
 }
 resetObjects();
@@ -320,7 +321,7 @@ const sections=[
   ['Locomotion',[
     ['Appuis Gorilla','movement'],['Collisions','collisions'],['Grip','grip'],['Glissement','slide'],
     ['Gravité','gravity'],['Impulsion','jump'],['Poids','weight'],['Taille','size'],['Longueur des bras','arms'],
-    ['Retour au départ',resetPlayer],
+    ['Vibration des appuis','stepHaptics'],['Retour au départ',resetPlayer],
   ]],
   ['Objets',[
     ['Objets actifs','objects'],['Hitboxes objets','preciseHitboxes'],['Rebond','bounce'],['Force du lancer','throw'],['Réinitialiser les objets',resetObjects],
@@ -372,7 +373,7 @@ function captureReport(){
   const sorted=rawFrameMs.slice().sort((a,b)=>a-b);
   const percentile=p=>sorted.length?Number(sorted[Math.min(sorted.length-1,Math.floor((sorted.length-1)*p))].toFixed(2)):null;
   reportSnapshot={
-    game:'Gorilla Lab',version:'r26',time:new Date().toISOString(),
+    game:'Gorilla Lab',version:'r27',time:new Date().toISOString(),
     mode:reportHadVR?'VR':'PC',settings:{...settings},qualityActive:liveLevel,
     performance:{fps,frames:sorted.length,frameMs:{median:percentile(.5),p95:percentile(.95),max:percentile(1)}},
     xr:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},cloud:{role:spectator.role,connected:spectator.connected,replicas:spectator.replicaCount},targetScore:fixtures.score(),locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
@@ -1078,6 +1079,7 @@ function trackHands(frame,space,dt){
   for(const h of hands){
     const source=inputs.find(s=>s.handedness===h.side&&s.gripSpace);
     const pose=source&&frame.getPose(source.gripSpace,space);
+    h.gamepad=pose?source.gamepad:null;
     h.mesh.visible=Boolean(pose)&&settings.hands&&!settings.body;
     if(!pose){h.valid=false;h.surface=null;release(h,false);continue;}
     const p=pose.transform.position;
@@ -1185,6 +1187,7 @@ function character(frame,space,pose,dt){
     for(const box of activeBoxes)handBoxes.push(box);
     if(settings.collisions&&settings.objects)for(const body of objects)if(body.handCollider&&!body.owner)handBoxes.push(body.handCollider);
     locomotion.move({head:worldHead,dt,gravity,settings,boxes:handBoxes,velocity,movement:delta,reach:armSegmentLength()*2+.16});
+    for(const hand of hands)updateGroundHaptics(hand,settings.stepHaptics,dt);
   }else{
     velocity.y-=gravity*dt;
     const x=Number(keys.has('KeyD'))-Number(keys.has('KeyA')||keys.has('KeyQ'))+flat.movement.x;
