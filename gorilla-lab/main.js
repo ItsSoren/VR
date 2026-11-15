@@ -44,8 +44,10 @@ const velocity=new T.Vector3();
 const soft=new T.Vector3(), delta=new T.Vector3(), worldHead=new T.Vector3(), rotated=new T.Vector3(), head=new T.Vector3();
 const point=new T.Vector3(), prior=new T.Vector3(), candidate=new T.Vector3(), scratch=new T.Vector3();
 const priorPlayer=new T.Vector3(), appliedMove=new T.Vector3(), pushMemory=new T.Vector3();
-const launchVelocity=new T.Vector3(), trackingDelta=new T.Vector3();
+const launchVelocity=new T.Vector3(), trackingDelta=new T.Vector3(), handSample=new T.Vector3();
+const handTwist=new T.Quaternion(), handAxis=new T.Vector3(0,0,1);
 let launchLock=0, peakPush=0, launchCount=0, lastLaunch=null;
+let refreshOptions=[],fpsGoal=100,releaseTimer=0;
 const up=new T.Vector3(0,1,0), spin=new T.Quaternion(), normal=new T.Vector3();
 let yaw=0,bodyYaw=0,pitch=0, drop=0, standingHeight=NaN, snap=false, frameTime=0,fps=0,windowFrames=0,windowElapsed=0,qualityTimer=0,lowCount=0,highCount=0,liveLevel=7,refreshRate=72;
 let menu=false,panelHand='left',page=0,hudDirty=true,lastDraw=0;
@@ -145,7 +147,7 @@ const hands=['left','right'].map(side=>{
   const upper=new T.Mesh(upperGeometry,fur),lower=new T.Mesh(lowerGeometry,fur);
   const joint=new T.Mesh(jointGeometry,fur);
   upper.visible=lower.visible=joint.visible=false;scene.add(upper,lower,joint);
-  return {side,mesh,digits,upper,lower,joint,shoulder:new T.Vector3(),elbow:new T.Vector3(),anchor:new T.Vector3(),last:new T.Vector3(),target:new T.Vector3(),previous:new T.Vector3(),speed:new T.Vector3(),valid:false,surface:null,held:null,grip:false,trigger:false,menu:false,contactNormal:new T.Vector3(),contactPoint:new T.Vector3(),objectAnchor:new T.Vector3(),lastPhysical:new T.Vector3(),physicalSpeed:new T.Vector3()};
+  return {side,mesh,digits,upper,lower,joint,shoulder:new T.Vector3(),elbow:new T.Vector3(),anchor:new T.Vector3(),last:new T.Vector3(),target:new T.Vector3(),previous:new T.Vector3(),speed:new T.Vector3(),valid:false,surface:null,held:null,grip:false,trigger:false,menu:false,contactNormal:new T.Vector3(),contactPoint:new T.Vector3(),objectAnchor:new T.Vector3(),lastPhysical:new T.Vector3(),physicalSpeed:new T.Vector3(),controllerRotation:new T.Quaternion(),pressAge:0};
 });
 
 const objectSpecs=[
@@ -211,13 +213,13 @@ function resetObjects(){
   }
 }
 function resetPlayer(){
-  rig.position.copy(boot);yaw=pitch=0;rig.rotation.y=0;velocity.set(0,0,0);pushMemory.set(0,0,0);launchLock=0;wasBraced=false;snap=false;
+  rig.position.copy(boot);yaw=pitch=0;rig.rotation.y=0;velocity.set(0,0,0);pushMemory.set(0,0,0);launchLock=0;releaseTimer=0;wasBraced=false;snap=false;
   for(const hand of hands){hand.valid=false;hand.surface=null;release(hand,false);}
 }
 resetObjects();
 function applyVisual(){
   const full=settings.auto&&liveLevel===10;
-  const effectiveTexture=full?12:settings.texturePower;
+  const effectiveTexture=settings.texturePower;
   arena.visual(liveLevel,full||settings.shadows,full||settings.reflections,full||settings.bloom,full||settings.textures,2**(effectiveTexture-1),full||settings.lightmap);
   arena.focus(settings.focus,settings.focusStrength,settings.focusSize);
   renderer.toneMappingExposure=.58+settings.exposure*.114;
@@ -274,7 +276,7 @@ function captureReport(){
   const sorted=rawFrameMs.slice().sort((a,b)=>a-b);
   const percentile=p=>sorted.length?Number(sorted[Math.min(sorted.length-1,Math.floor((sorted.length-1)*p))].toFixed(2)):null;
   reportSnapshot={
-    game:'Gorilla Lab',version:'r15',time:new Date().toISOString(),
+    game:'Gorilla Lab',version:'r16',time:new Date().toISOString(),
     mode:reportHadVR?'VR':'PC',settings:{...settings},qualityActive:liveLevel,
     performance:{fps,frames:sorted.length,frameMs:{median:percentile(.5),p95:percentile(.95),max:percentile(1)}},
     xr:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,objects:{total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},targetScore:fixtures.score(),locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
@@ -492,7 +494,7 @@ function useToolRay(origin,direction,activate,hand){
     if(hand?.held)return;
     body.frozen=false;
     body.toolHold=true;body.toolDistance=T.MathUtils.clamp(hit.distance+body.radius*.35,1.1,5);
-    body.relativeRotation.multiplyQuaternions(toolRotation.copy(hand?.mesh.quaternion??camera.quaternion).invert(),body.mesh.quaternion);
+    body.relativeRotation.multiplyQuaternions(toolRotation.copy(hand?.controllerRotation??camera.quaternion).invert(),body.mesh.quaternion);
     body.velocity.set(0,0,0);body.angular.set(0,0,0);
     if(hand){body.owner=hand;hand.held=body;}
     else {body.owner=tool;desktopToolHold=body;}
@@ -627,9 +629,17 @@ enter.onclick=async()=>{
   try{
     enter.disabled=true;
     session=await navigator.xr.requestSession('immersive-vr',{requiredFeatures:['local-floor']});
-    renderer.xr.setFramebufferScaleFactor(.45+settings.resolution*.055);
+    renderer.xr.setFramebufferScaleFactor(settings.auto?Math.min(.72,.45+settings.resolution*.055):.45+settings.resolution*.055);
     await renderer.xr.setSession(session);
     refreshRate=session.frameRate||72;
+    refreshOptions=Array.from(session.supportedFrameRates??[]).sort((a,b)=>a-b);
+    const requested=refreshOptions.includes(120)?120:(refreshOptions.find(hz=>hz>=100)??refreshOptions.at(-1));
+    if(requested&&session.updateTargetFrameRate){
+      try{await session.updateTargetFrameRate(requested);}catch{}
+    }
+    refreshRate=session.frameRate||refreshRate;
+    fpsGoal=Math.min(100,refreshRate);
+    if(settings.auto){liveLevel=Math.min(liveLevel,4);qualityTimer=lowCount=highCount=0;}
     rawFrameMs=[];contactFrames=trackedFrames=launchCount=0;lastLaunch=null;reportHadVR=true;lastVR=null;
     standingHeight=NaN;drop=0;resetPlayer();applyVisual();
     document.body.classList.add('immersive');
@@ -661,8 +671,9 @@ function trackHands(frame,space,dt){
     const p=pose.transform.position;
     trackingDelta.set(p.x,p.y,p.z);
     if(h.valid && dt>.001){
-      h.physicalSpeed.copy(trackingDelta).sub(h.lastPhysical).multiplyScalar(1/dt).applyAxisAngle(up,yaw).clampLength(0,10);
-    }else h.physicalSpeed.set(0,0,0);
+      handSample.copy(trackingDelta).sub(h.lastPhysical).multiplyScalar(1/dt).applyAxisAngle(up,yaw).clampLength(0,10);
+      h.physicalSpeed.lerp(handSample,1-Math.exp(-dt/.014));
+    }else {h.physicalSpeed.set(0,0,0);h.pressAge=0;}
     h.lastPhysical.copy(trackingDelta);
     candidate.set(p.x,p.y-drop,p.z);
     h.target.copy(candidate).applyAxisAngle(up,yaw).add(rig.position);
@@ -676,7 +687,8 @@ function trackHands(frame,space,dt){
     const grip=Boolean(source.gamepad?.buttons[1]?.pressed);
     const q=pose.transform.orientation;
     gripRotation.set(q.x,q.y,q.z,q.w).premultiply(spin.setFromAxisAngle(up,yaw));
-    h.mesh.quaternion.copy(gripRotation);
+    h.controllerRotation.copy(gripRotation);
+    h.mesh.quaternion.copy(gripRotation).multiply(handTwist.setFromAxisAngle(handAxis,h.side==='left'?-Math.PI/2:Math.PI/2));
     animateFingers(h,source.gamepad?.buttons??[],dt);
     if(!menu&&grip&&!h.grip&&settings.objects&&!h.held){
       let body=null, best=.15;
@@ -723,6 +735,7 @@ function trackHands(frame,space,dt){
         h.last.copy(h.anchor);
       }
       h.surface=handContact(h.last,h.target,.080,handBoxes,h.contactPoint,normal);
+      if(h.surface&&releaseTimer>0&&velocity.dot(normal)>.18&&h.physicalSpeed.dot(normal)>-.30)h.surface=null;
       const sweptSurface=h.surface;
       if(priorSurface&&handBoxes.includes(priorSurface)&&!priorSurface.objectBody?.owner){
         scratch.subVectors(h.target,h.anchor);
@@ -748,8 +761,9 @@ function trackHands(frame,space,dt){
         const inward=-h.physicalSpeed.dot(normal);
         // A sharp push can launch while the hand still overlaps the contact surface.
         const lateral=Math.sqrt(Math.max(0,h.physicalSpeed.lengthSq()-inward*inward));
-        const pushThreshold=normal.y>.4?Math.max(.68,lateral*.90):Math.max(.94,lateral*.55);
-        if(inward>pushThreshold&&inward>peakPush){
+        const pushThreshold=normal.y>.4?Math.max(.74,lateral*.90):Math.max(.95,lateral*.55);
+        h.pressAge=inward>pushThreshold?h.pressAge+dt:0;
+        if((h.pressAge>.012||inward>pushThreshold*1.75)&&inward>pushThreshold&&inward>peakPush){
           peakPush=inward;
           const power=(.69+.115*settings.jump)/(.66+.068*settings.weight);
           const tangential=h.surface.friction<.1?.18:.70;
@@ -761,6 +775,7 @@ function trackHands(frame,space,dt){
         count++;
       }
     }
+    if(!h.surface)h.pressAge=0;
     h.last.copy(h.surface?h.anchor:h.target);
     const btn=Boolean(source.gamepad?.buttons[5]?.pressed||source.gamepad?.buttons[3]?.pressed&&h.side==='left');
     if(btn&&!h.menu)setMenu(h.side);
@@ -820,6 +835,7 @@ function character(frame,space,pose,dt){
   const gravity=9.81*(settings.gravity/5)*(floor?.gravity??1);
   priorPlayer.copy(rig.position);
   launchLock=Math.max(0,launchLock-dt);
+  releaseTimer=Math.max(0,releaseTimer-dt);
   let contacts=inVR?trackHands(frame,space,dt):0;
   if(inVR && hands.some(h=>h.valid))trackedFrames++;
   if(contacts)contactFrames++;
@@ -827,7 +843,8 @@ function character(frame,space,pose,dt){
   if(launched){
     velocity.copy(launchVelocity);
     pushMemory.set(0,0,0);wasBraced=false;contacts=0;
-    launchLock=.17;
+    launchLock=.10;
+    releaseTimer=.12;
     launchCount++;lastLaunch={handSpeed:peakPush,velocity:velocity.toArray(),t:performance.now()};
     for(const h of hands){h.surface=null;h.last.copy(h.target);}
     delta.copy(velocity).multiplyScalar(dt);
@@ -894,10 +911,11 @@ function updateFps(dt,inVR){
   windowFrames=0;windowElapsed=0;hudDirty=true;
   readings.textContent=fps+' FPS · qualité '+liveLevel+'/10 · '+(settings.auto?'auto':'manuel');
   if(!settings.auto||qualityTimer<3)return;
-  const target=60;
-  lowCount=fps<target-3?lowCount+1:0;
+  const target=inVR?Math.min(100,renderer.xr.getSession()?.frameRate||refreshRate):60;
+  if(inVR)fpsGoal=target;
+  lowCount=fps<target-4?lowCount+1:0;
   highCount=fps>=target-1?highCount+1:0;
-  const next=T.MathUtils.clamp(liveLevel+(lowCount>=2?-1:highCount>=2?(fps>=68?2:1):0),1,10);
+  const next=T.MathUtils.clamp(liveLevel+(lowCount>=2?(fps<target*.80?-2:-1):highCount>=4?1:0),1,10);
   if(next!==liveLevel){
     liveLevel=next;qualityTimer=lowCount=highCount=0;applyVisual();
   }
@@ -981,7 +999,7 @@ renderer.setAnimationLoop((time,frame)=>{
   }
   const rightHand=hands[1];
   tool.visible=inVR&&settings.toolActive&&rightHand.valid;
-  if(tool.visible){tool.position.copy(rightHand.mesh.position);tool.quaternion.copy(rightHand.mesh.quaternion);}
+  if(tool.visible){tool.position.copy(rightHand.mesh.position);tool.quaternion.copy(rightHand.controllerRotation);}
   if(!settings.toolActive&&desktopToolHold){desktopToolHold.owner=null;desktopToolHold=null;}
   if(!inVR&&desktopToolHold){
     camera.getWorldPosition(toolPosition);camera.getWorldDirection(toolDirection);
@@ -1000,7 +1018,7 @@ renderer.setAnimationLoop((time,frame)=>{
     const {calls,triangles,lines,points}=renderer.info.render;
     renderStats={calls,triangles,lines,points,textures:renderer.info.memory.textures};
     if(inVR)lastVR={
-      refreshHz:renderer.xr.getSession()?.frameRate??null,
+      refreshHz:renderer.xr.getSession()?.frameRate??null,targetFps:fpsGoal,supportedHz:refreshOptions.slice(),
       foveation:renderer.xr.getFoveation()??null,
       visualEffects:{post:useVrPost,bloom:useVrPost&&(settings.bloom||fullAuto),rayTrace:useVrTrace},
       eyeViewports:renderer.xr.getCamera().cameras.map(c=>({width:c.viewport?.z??null,height:c.viewport?.w??null})),
