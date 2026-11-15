@@ -2,9 +2,25 @@
 import * as T from 'three';
 
 const qInv=new T.Quaternion(), local=new T.Vector3(), closest=new T.Vector3();
+const boundsRotation=new T.Matrix4();
+function boundsFor(box){
+  if(box.heightfield||box.objectBody)return null;
+  if(box.bounds)return box.bounds;
+  const m=boundsRotation.makeRotationFromQuaternion(box.quaternion).elements;
+  const h=box.half,p=box.position;
+  const x=Math.abs(m[0])*h.x+Math.abs(m[4])*h.y+Math.abs(m[8])*h.z;
+  const y=Math.abs(m[1])*h.x+Math.abs(m[5])*h.y+Math.abs(m[9])*h.z;
+  const z=Math.abs(m[2])*h.x+Math.abs(m[6])*h.y+Math.abs(m[10])*h.z;
+  return box.bounds={minX:p.x-x,maxX:p.x+x,minY:p.y-y,maxY:p.y+y,minZ:p.z-z,maxZ:p.z+z};
+}
+function nearBox(point,radius,box){
+  const b=boundsFor(box);
+  return !b||(point.x+radius>=b.minX&&point.x-radius<=b.maxX&&point.y+radius>=b.minY&&point.y-radius<=b.maxY&&point.z+radius>=b.minZ&&point.z-radius<=b.maxZ);
+}
 export function penetration(position,radius,box,normal) {
   if(box.heightfield)return heightContact(position,radius,box,normal);
   if(box.objectBody)return objectPenetration(position,radius,box.objectBody,normal);
+  if(!nearBox(position,radius,box))return 0;
   qInv.copy(box.quaternion).invert();
   local.copy(position).sub(box.position).applyQuaternion(qInv);
   const h=box.half;
@@ -42,12 +58,17 @@ export function solve(position,radius,boxes,velocity,bounce=0,drag=0,dt=0) {
   }
   return floor;
 }
-const sample=new T.Vector3();
+const sample=new T.Vector3(), sweepCandidates=[];
 export function handContact(from,to,radius,boxes,out,hitNormal) {
   const steps=Math.min(24,Math.max(1,Math.ceil(from.distanceTo(to)/(.65*radius))));
+  sweepCandidates.length=0;
+  const x0=Math.min(from.x,to.x)-radius,x1=Math.max(from.x,to.x)+radius;
+  const y0=Math.min(from.y,to.y)-radius,y1=Math.max(from.y,to.y)+radius;
+  const z0=Math.min(from.z,to.z)-radius,z1=Math.max(from.z,to.z)+radius;
+  for(const box of boxes){const b=boundsFor(box);if(!b||x1>=b.minX&&x0<=b.maxX&&y1>=b.minY&&y0<=b.maxY&&z1>=b.minZ&&z0<=b.maxZ)sweepCandidates.push(box); }
   for(let i=1;i<=steps;i++) {
     sample.copy(from).lerp(to,i/steps);
-    for(const box of boxes) {
+    for(const box of sweepCandidates) {
       const depth=penetration(sample,radius,box,normal);
       if(depth) {
         out.copy(sample).addScaledVector(normal,depth+.001); hitNormal.copy(normal);
@@ -196,6 +217,7 @@ function shapeContact(body,box,outNormal,outPoint) {
 }
 export function placeObject(body,boxes){
   for(let pass=0;pass<2;pass++) for(const box of boxes){
+    if(!nearBox(body.mesh.position,body.radius,box))continue;
     const depth=shapeContact(body,box,normal,contact);
     if(depth>0)body.mesh.position.addScaledVector(normal,depth);
   }
@@ -203,6 +225,7 @@ export function placeObject(body,boxes){
 function againstArena(body,boxes,rebound,dt){
   let grounded=false;
   for(let pass=0;pass<2;pass++) for(const box of boxes){
+    if(!nearBox(body.mesh.position,body.radius,box))continue;
     const depth=shapeContact(body,box,normal,contact);
     if(depth<=0)continue;
     body.mesh.position.addScaledVector(normal,depth);
@@ -213,7 +236,7 @@ function againstArena(body,boxes,rebound,dt){
     if(vn>=0)continue;
     const invInertia=1/Math.max(.002,body.shape.radius**2*.45);
     angularImpulse.crossVectors(lever,normal);
-    const j=-vn*(Math.abs(vn)>.8?1+rebound:1)/(1+angularImpulse.lengthSq()*invInertia);
+    const j=-vn*(Math.abs(vn)>.8?1+Math.min(.98,rebound*(box.bounce??1)):1)/(1+angularImpulse.lengthSq()*invInertia);
     body.velocity.addScaledVector(normal,j);
     body.angular.addScaledVector(angularImpulse,j*invInertia);
     tangent.copy(angular).addScaledVector(normal,-vn);

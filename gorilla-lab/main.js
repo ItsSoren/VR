@@ -1,6 +1,8 @@
 
 import * as T from 'three';
 import { Reflector } from 'three/addons/objects/Reflector.js';
+import { connectMaps } from './custom-maps.js';
+import { makePiece, mapMaterials, surfacePresets, storageKey } from './map-format.js';
 import { createVrEffects, addRayProbe } from './vr-effects.js';
 import { addLabFixtures } from './fixtures.js';
 import { buildArena } from './arena.js';
@@ -34,7 +36,7 @@ const arena=buildArena(scene,renderer);
 const vrEffects=createVrEffects(renderer);
 const updateRayProbe=addRayProbe(arena.probe);
 const settings={
-  grip:6,slide:3,gravity:5,jump:5,weight:5,size:5,arms:5,contrast:5,saturation:5,exposure:5,warmth:5,bounce:4,throw:5,preciseHitboxes:false,quality:7,auto:true,resolution:7,texturePower:7,preset:2,lightmap:true,post:true,rayTrace:false,toolMode:1,toolActive:false,focus:false,focusStrength:5,focusSize:5,
+  grip:6,slide:3,gravity:5,jump:5,weight:5,size:5,arms:5,contrast:5,saturation:5,exposure:5,warmth:5,bounce:4,throw:5,preciseHitboxes:false,quality:7,auto:true,resolution:7,texturePower:7,preset:2,lightmap:true,post:true,rayTrace:false,mapEdit:false,mapMode:1,mapShape:1,mapMaterial:1,mapSurface:1,mapTurn:1,toolMode:1,toolActive:false,focus:false,focusStrength:5,focusSize:5,
   movement:true,collisions:true,objects:true,body:true,hands:true,textures:true,reflections:true,shadows:true,bloom:true,
 };
 const defaults={...settings};
@@ -213,7 +215,7 @@ function resetObjects(){
   }
 }
 function resetPlayer(){
-  rig.position.copy(boot);yaw=pitch=0;rig.rotation.y=0;velocity.set(0,0,0);pushMemory.set(0,0,0);launchLock=0;releaseTimer=0;wasBraced=false;snap=false;
+  rig.position.copy(boot);yaw=T.MathUtils.degToRad(maps.yaw);pitch=0;rig.rotation.y=yaw;velocity.set(0,0,0);pushMemory.set(0,0,0);launchLock=0;releaseTimer=0;wasBraced=false;snap=false;
   for(const hand of hands){hand.valid=false;hand.surface=null;release(hand,false);}
 }
 resetObjects();
@@ -271,15 +273,15 @@ const sections=[
 ];
 sections.push(['Focus',[['Activer le focus','focus'],['Intensité','focusStrength'],['Taille de la zone nette','focusSize']]]);
 sections.push(['Photo',[['Exposition','exposure'],['Contraste','contrast'],['Saturation','saturation'],['Chaleur','warmth'],['Résolution XR¹','resolution'],['Corps du singe','body'],['Mains','hands']]]);
-let reportSnapshot=null, rawFrameMs=[], lastVR=null, reportHadVR=false, contactFrames=0, trackedFrames=0, renderStats={};
+let reportSnapshot=null, rawFrameMs=[], frameSampleIndex=0, diagAt=0, lastVR=null, reportHadVR=false, contactFrames=0, trackedFrames=0, renderStats={};
 function captureReport(){
   const sorted=rawFrameMs.slice().sort((a,b)=>a-b);
   const percentile=p=>sorted.length?Number(sorted[Math.min(sorted.length-1,Math.floor((sorted.length-1)*p))].toFixed(2)):null;
   reportSnapshot={
-    game:'Gorilla Lab',version:'r16',time:new Date().toISOString(),
+    game:'Gorilla Lab',version:'r17',time:new Date().toISOString(),
     mode:reportHadVR?'VR':'PC',settings:{...settings},qualityActive:liveLevel,
     performance:{fps,frames:sorted.length,frameMs:{median:percentile(.5),p95:percentile(.95),max:percentile(1)}},
-    xr:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,objects:{total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},targetScore:fixtures.score(),locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
+    xr:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},targetScore:fixtures.score(),locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
   };
   document.querySelector('#download-report').disabled=false;
   hudDirty=true;
@@ -295,9 +297,20 @@ document.querySelector('#download-report').onclick=downloadReport;
 document.querySelector('#capture-report').onclick=captureReport;
 sections[1][1].push(['Capturer un rapport',captureReport]);
 sections.push(['Spawn',[...objectSpecs.slice(0,6).map((spec,i)=>['Créer : '+spec.name,()=>spawnObject(i)]),['Tout retirer',clearObjects],['Tool Gun','toolActive'],['Action Tool Gun','toolMode']]]);
+sections.push(['Carte',[
+  ['Éditeur VR','mapEdit'],['Action','mapMode'],['Pièce','mapShape'],['Matériau','mapMaterial'],['Surface','mapSurface'],['Rotation','mapTurn'],
+  ['Créer atelier vide',()=>{maps.blank();settings.mapEdit=true;}],['Annuler placement',()=>maps.undo()],
+  ['Enregistrer départ',()=>maps.recenter(worldHead.x,rig.position.y,worldHead.z,bodyYaw)],
+  ['Revenir à l’arène',()=>{maps.reset();settings.mapEdit=false;}],
+]]);
 const title=document.querySelector('#section'), desktop=document.querySelector('#settings');
 const readings=document.querySelector('#readings');
 function change(key,step){
+  if(key==='mapMode'||key==='mapShape'||key==='mapMaterial'||key==='mapSurface'||key==='mapTurn'){
+    const max={mapMode:4,mapShape:4,mapMaterial:mapMaterials.length,mapSurface:4,mapTurn:8}[key];
+    settings[key]=(settings[key]-1+step+max)%max+1;hudDirty=true;return;
+  }
+  if(key==='mapEdit'&&!settings.mapEdit&&!maps.active)maps.blank();
   if(key==='toolMode'){
     settings.toolMode=(settings.toolMode-1+step+toolModes.length)%toolModes.length+1;
     hudDirty=true;return;
@@ -340,7 +353,7 @@ function button(text,action){
   b.onclick=()=>{action();desktopMenu();hudDirty=true;};return b;
 }
 function toggleLabel(key){return key==='preciseHitboxes'?(settings[key]?'High':'Low'):(settings[key]?'Actif':'Coupé');}
-function settingValue(key){if(key==='toolMode')return toolModes[settings.toolMode-1]; if(key==='preset')return Object.keys(visualPresets)[settings.preset-1]; return key==="texturePower"?[2**(settings[key]-1),2**(settings[key]-1)].join("×"):settings[key];}
+function settingValue(key){if(key==='mapMode')return mapToolNames[settings.mapMode-1]; if(key==='mapShape')return mapShapeNames[settings.mapShape-1]; if(key==='mapSurface')return mapSurfaceNames[settings.mapSurface-1]; if(key==='mapMaterial')return mapMaterials[settings.mapMaterial-1]; if(key==='mapTurn')return (settings.mapTurn-1)*45+'°'; if(key==='toolMode')return toolModes[settings.toolMode-1]; if(key==='preset')return Object.keys(visualPresets)[settings.preset-1]; return key==="texturePower"?[2**(settings[key]-1),2**(settings[key]-1)].join("×"):settings[key];}
 function desktopMenu(){
   title.textContent=sections[page][0];
   desktop.replaceChildren();
@@ -391,7 +404,7 @@ function updateMirror(now,pose){
   mirrorForward.set(0,0,-1).applyQuaternion(reflectionView.quaternion);
   toMirror.subVectors(mirrorFace.position,worldHead);
   const distance=toMirror.length();
-  mirrorFace.visible=(settings.reflections||settings.auto&&liveLevel===10)&&distance<4&&toMirror.dot(mirrorNormal)<-.15&&
+  mirrorFace.visible=!maps.active&&(settings.reflections||settings.auto&&liveLevel===10)&&distance<4&&toMirror.dot(mirrorNormal)<-.15&&
     toMirror.multiplyScalar(1/Math.max(.001,distance)).dot(mirrorForward)>.66;
   if(!mirrorFace.visible){lastMirrorRender=-Infinity;return;}
   if(now-lastMirrorRender<45)return;
@@ -401,7 +414,8 @@ function updateMirror(now,pose){
 }
 const ray=new T.Raycaster(), raySource=new T.Vector3(), forward=new T.Vector3();
 const coconutPosition=new T.Vector3(), fixtureTouchPoint=new T.Vector3(), fixtureKeyPoint=new T.Vector3();
-let fixtureAim=null, toolLook=null;
+let fixtureAim=null, toolLook=null, mapLook=null;
+const beforeFixtures=new Set(scene.children);
 const fixtures=addLabFixtures(scene,arena.boxes,{
   spawn: index=>{if(!settings.objects)settings.objects=true;spawnObject(index);},
   clear: clearObjects,resetPlayer,resetObjects,
@@ -414,8 +428,31 @@ const fixtures=addLabFixtures(scene,arena.boxes,{
   textureNext:()=>{if(settings.texturePower>=12)settings.texturePower=0;change('texturePower',1);},
   hitbox:()=>change('preciseHitboxes',1), movement:()=>change('movement',1),
 });
+const mapToolNames=['Poser','Déplacer','Supprimer','Peindre'];
+const mapShapeNames=['Bloc','Rampe','Mur','Dalle'];
+const mapSurfaceNames=['Normale','Glace','Caoutchouc','Lune'];
+const maps=connectMaps({scene,arena,boot,onReset:angle=>{clearObjects();resetPlayer();yaw=T.MathUtils.degToRad(angle);},onVisual:applyVisual,
+  getLevel:()=>liveLevel,defaultObjects:[...arena.builtObjects,...scene.children.filter(n=>!beforeFixtures.has(n)),mirrorBacking],
+});
+function mapPiece(){
+  const dims=[
+    {name:'Bloc',w:1.25,h:.55,d:1.25},{name:'Rampe',w:1.75,h:.32,d:2.3,pitch:18},
+    {name:'Mur',w:1.75,h:2.2,d:.38},{name:'Dalle',w:2.1,h:.25,d:2.1},
+  ][settings.mapShape-1];
+  return makePiece({...dims,...Object.values(surfacePresets)[settings.mapSurface-1],material:settings.mapMaterial-1,yaw:(settings.mapTurn-1)*45});
+}
+function aimMap(frame,space,{source,click}){
+  const pose=frame.getPose(source.targetRaySpace,space);
+  if(!pose)return;
+  const p=pose.transform.position,q=pose.transform.orientation;
+  raySource.set(p.x,p.y-drop,p.z).applyAxisAngle(up,yaw).add(rig.position);
+  spin.set(q.x,q.y,q.z,q.w);
+  forward.set(0,0,-1).applyQuaternion(spin).applyAxisAngle(up,yaw);
+  maps.edit(raySource,forward,click,{mode:settings.mapMode,piece:mapPiece(),head:worldHead,feet:rig.position.y});
+  if(click)hudDirty=true;
+}
 function touchFixture(hand){
-  if(!hand.valid||hand.held||menu)return;
+  if(maps.active||!hand.valid||hand.held||menu)return;
   let touched=null;
   for(const key of fixtures.targets){
     key.getWorldPosition(fixtureKeyPoint);
@@ -437,6 +474,7 @@ function pluckCoconut(coco,impulse=null){
 function fixtureRay(origin,direction,activate){
   ray.set(origin,direction);
   ray.far=5.5;
+  if(maps.active)return;
   const hits=ray.intersectObjects([...fixtures.targets,...fixtures.coconuts.filter(m=>m.visible)],false);
   ray.far=Infinity;
   const hit=hits[0];
@@ -554,7 +592,7 @@ function drawPanel(){
     c.textAlign='center';c.fillText(label,x+w/2,y+h/2+7);c.textAlign='left';
     hitAreas.push({x,y,w,h,action});
   }
-  sections.forEach(([name],i)=>item(25+i*99,61,94,44,name,()=>page=i,page===i?'#68705a':'#334b58'));
+  sections.forEach(([name],i)=>item(25+i*85,61,80,44,name,()=>page=i,page===i?'#68705a':'#334b58'));
   sections[page][1].forEach(([name,key],i)=>{
     const y=113+i*40;
     c.fillStyle='#e9e5ce';c.font='22px system-ui';c.fillText(name,30,y+26);
@@ -568,7 +606,7 @@ function drawPanel(){
   });
   item(25,579,286,44,'Réglages par défaut',restore);
   item(325,579,287,44,'Fermer',()=>menu=false);
-  c.fillStyle='#c4d5d8';c.font='17px system-ui';c.fillText(reportSnapshot?'Rapport capturé. Quitte la VR pour le télécharger.':'Gâchette : choisir  ·  B/Y : panneau  ·  ¹ Prochaine session VR',25,645);
+  c.fillStyle='#c4d5d8';c.font='17px system-ui';c.fillText(page===6&&maps.status?maps.status.slice(0,64):reportSnapshot?'Rapport capturé. Quitte la VR pour le télécharger.':'Gâchette : choisir  ·  B/Y : panneau  ·  ¹ Prochaine session VR',25,645);
   panel.texture.needsUpdate=true;
 }
 function setMenu(side){
@@ -640,7 +678,7 @@ enter.onclick=async()=>{
     refreshRate=session.frameRate||refreshRate;
     fpsGoal=Math.min(100,refreshRate);
     if(settings.auto){liveLevel=Math.min(liveLevel,4);qualityTimer=lowCount=highCount=0;}
-    rawFrameMs=[];contactFrames=trackedFrames=launchCount=0;lastLaunch=null;reportHadVR=true;lastVR=null;
+    rawFrameMs=[];frameSampleIndex=0;diagAt=0;contactFrames=trackedFrames=launchCount=0;lastLaunch=null;reportHadVR=true;lastVR=null;
     standingHeight=NaN;drop=0;resetPlayer();applyVisual();
     document.body.classList.add('immersive');
   }catch(error){
@@ -654,7 +692,19 @@ renderer.xr.addEventListener('sessionend',()=>{
 });
 
 function surfaceAt(p){
-  return arena.boxes.slice(0,3).find(b=>Math.abs(p.x-b.position.x)<b.half.x&&Math.abs(p.z-b.position.z)<b.half.z);
+  if(!maps.active)for(let i=0;i<3;i++){
+    const b=arena.boxes[i];
+    if(Math.abs(p.x-b.position.x)<b.half.x&&Math.abs(p.z-b.position.z)<b.half.z)return b;
+  }
+  if(maps.active){
+    let top=-Infinity,surface;
+    for(const b of arena.boxes){
+      const height=b.position.y+b.half.y;
+      if(height<top||height>p.y+.5||Math.abs(p.x-b.position.x)>b.half.x||Math.abs(p.z-b.position.z)>b.half.z)continue;
+      top=height;surface=b;
+    }
+    return surface;
+  }
 }
 function trackHands(frame,space,dt){
   delta.set(0,0,0);
@@ -788,6 +838,7 @@ function trackHands(frame,space,dt){
     h.toolCycle=cycle;
     const trigger=Boolean(source.gamepad?.buttons[0]?.pressed);
     if(menu&&h.side!==panelHand) pendingAim={source,click:trigger&&!h.trigger};
+    else if(!menu&&h.side==='right'&&settings.mapEdit)mapLook={source,click:trigger&&!h.trigger};
     else if(!menu&&h.side==='right'&&settings.toolActive)toolLook={source,hand:h,click:trigger&&!h.trigger};
     else if(!menu&&(h.side==='right'||trigger&&!h.trigger))fixtureAim={source,click:trigger&&!h.trigger};
     h.trigger=trigger;
@@ -881,7 +932,7 @@ function character(frame,space,pose,dt){
       rig.position.add(scratch);worldHead.add(scratch);
     }
   }
-  if(rig.position.y<-9 || Math.abs(rig.position.x)>33 || rig.position.z < -57 || rig.position.z>13)resetPlayer();
+  if(maps.active?(rig.position.y<-24||Math.abs(rig.position.x)>155||Math.abs(rig.position.z)>155):(rig.position.y<-9||Math.abs(rig.position.x)>33||rig.position.z < -57||rig.position.z>13))resetPlayer();
   appliedMove.subVectors(rig.position,priorPlayer);
   if(contacts){
     const response=(.57+settings.jump*.12)/(.65+settings.weight*.07);
@@ -910,12 +961,13 @@ function updateFps(dt,inVR){
   fps=Math.round(windowFrames/windowElapsed);
   windowFrames=0;windowElapsed=0;hudDirty=true;
   readings.textContent=fps+' FPS · qualité '+liveLevel+'/10 · '+(settings.auto?'auto':'manuel');
-  if(!settings.auto||qualityTimer<3)return;
+  if(!settings.auto||qualityTimer<5)return;
+  qualityTimer=0;
   const target=inVR?Math.min(100,renderer.xr.getSession()?.frameRate||refreshRate):60;
   if(inVR)fpsGoal=target;
   lowCount=fps<target-4?lowCount+1:0;
   highCount=fps>=target-1?highCount+1:0;
-  const next=T.MathUtils.clamp(liveLevel+(lowCount>=2?(fps<target*.80?-2:-1):highCount>=4?1:0),1,10);
+  const next=T.MathUtils.clamp(liveLevel+(lowCount>=1?-1:highCount>=2?1:0),1,10);
   if(next!==liveLevel){
     liveLevel=next;qualityTimer=lowCount=highCount=0;applyVisual();
   }
@@ -945,6 +997,11 @@ function grade(material){ if(!material||graded.has(material))return;
 for(const material of arena.materials) grade(material);
 scene.traverse(object=>{ if(object.isMesh&&![panel.mesh,wrist.mesh,cursor].includes(object))grade(object.material); });
 applyVisual();
+const mapQuery=new URLSearchParams(location.search);
+if(mapQuery.has('map'))maps.loadURL(mapQuery.get('map'));
+else{
+  try{const saved=localStorage.getItem(storageKey);if(saved)maps.load(saved);}catch(error){maps.inform(error.message);}
+}
 renderer.setAnimationLoop((time,frame)=>{
   const actual=frameTime?Math.max(0,(time-frameTime)/1000):.014;
   frameTime=time;
@@ -954,7 +1011,8 @@ renderer.setAnimationLoop((time,frame)=>{
   if(inVR&&!pose)return;
   cursor.visible=false;
   activeBoxes=settings.collisions?arena.boxes:blocked;
-  pendingAim=null;fixtureAim=null;toolLook=null;
+  pendingAim=null;fixtureAim=null;toolLook=null;mapLook=null;
+  maps.clearGhost();
   panel.mesh.visible=false;
   character(frame,space,pose,dt);
   for(const object of objects){
@@ -965,17 +1023,18 @@ renderer.setAnimationLoop((time,frame)=>{
     object.shadow.visible=settings.shadows&&liveLevel<7&&settings.objects&&object.mesh.position.y<2;
     const hills=arena.boxes.find(b=>b.heightfield);
     const {x,z}=object.mesh.position;
-    const shadowY=x>=hills.xMin&&x<=hills.xMax&&z>=hills.zMin&&z<=hills.zMax?hills.height(x,z):0;
+    const shadowY=hills&&x>=hills.xMin&&x<=hills.xMax&&z>=hills.zMin&&z<=hills.zMax?hills.height(x,z):0;
     object.shadow.position.set(x,shadowY+.006,z);
   }
   for(const object of objects)object.beforePhysics.copy(object.mesh.position);
   solveObjects(objects,arena.boxes,dt,9.81*settings.gravity/5,.12+settings.bounce*.064,surfaceAt);
-  fixtures.updateTarget(objects);
+  if(!maps.active)fixtures.updateTarget(objects);
   if(inVR&&!menu)for(const hand of hands)touchFixture(hand);
   arena.probe.rotation.y+=dt*.29;
   updateFps(Math.min(.3,actual),inVR);
   panel.mesh.visible=inVR&&menu;
   if(panel.mesh.visible&&pendingAim) aim(frame,space,pendingAim.source,pendingAim.click);
+  else if(inVR&&mapLook)aimMap(frame,space,mapLook);
   else if(inVR&&toolLook)aimTool(frame,space,toolLook);
   else if(inVR&&fixtureAim)aimFixture(frame,space,fixtureAim.source,fixtureAim.click);
   else if(!inVR){
@@ -995,10 +1054,10 @@ renderer.setAnimationLoop((time,frame)=>{
     if(menu)drawPanel();
     const c=wrist.ctx;c.clearRect(0,0,416,84);c.fillStyle='#182632';c.fillRect(0,0,416,84);
     c.fillStyle='#fff0cf';c.font='bold 25px system-ui';c.fillText(fps+' FPS     Q '+liveLevel+'/10',17,32);
-    c.font='20px system-ui';c.fillText(settings.toolActive?'Tool Gun : '+toolModes[settings.toolMode-1]:'B/Y : réglages   ·   A : Tool Gun',17,66);wrist.texture.needsUpdate=true;
+    c.font='20px system-ui';c.fillText(settings.mapEdit?'Édition : '+mapToolNames[settings.mapMode-1]:settings.toolActive?'Tool Gun : '+toolModes[settings.toolMode-1]:'B/Y : réglages   ·   A : Tool Gun',17,66);wrist.texture.needsUpdate=true;
   }
   const rightHand=hands[1];
-  tool.visible=inVR&&settings.toolActive&&rightHand.valid;
+  tool.visible=inVR&&settings.toolActive&&!settings.mapEdit&&rightHand.valid;
   if(tool.visible){tool.position.copy(rightHand.mesh.position);tool.quaternion.copy(rightHand.controllerRotation);}
   if(!settings.toolActive&&desktopToolHold){desktopToolHold.owner=null;desktopToolHold=null;}
   if(!inVR&&desktopToolHold){
@@ -1013,8 +1072,10 @@ renderer.setAnimationLoop((time,frame)=>{
   updateRayProbe(useVrTrace,objects);
   if(!useVrPost||!vrEffects.render(scene,camera,{bloom:settings.bloom||fullAuto,finish:true,level:liveLevel}))renderer.render(scene,camera);
   if(inVR||!reportHadVR) {
-    rawFrameMs.push(actual*1000);
-    if(rawFrameMs.length>720)rawFrameMs.splice(0,rawFrameMs.length-720);
+    rawFrameMs[frameSampleIndex]=actual*1000;
+    frameSampleIndex=(frameSampleIndex+1)%720;
+    if(time-diagAt>350){
+    diagAt=time;
     const {calls,triangles,lines,points}=renderer.info.render;
     renderStats={calls,triangles,lines,points,textures:renderer.info.memory.textures};
     if(inVR)lastVR={
@@ -1023,6 +1084,7 @@ renderer.setAnimationLoop((time,frame)=>{
       visualEffects:{post:useVrPost,bloom:useVrPost&&(settings.bloom||fullAuto),rayTrace:useVrTrace},
       eyeViewports:renderer.xr.getCamera().cameras.map(c=>({width:c.viewport?.z??null,height:c.viewport?.w??null})),
     };
+    }
   }
 });
 

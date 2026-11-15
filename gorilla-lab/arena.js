@@ -121,6 +121,7 @@ export function buildArena(scene,renderer) {
   const focusAmount={value:0}, focusRadius={value:.24};
   const lightmap={value:null}, bakedStrength={value:0};
   function bakeLightmap(){
+    lightmap.value?.dispose();
     lightmap.value=canvasTexture(512,512,(ctx,w)=>{
       ctx.fillStyle='#ffffff';ctx.fillRect(0,0,w,w);
       const sx=w/52,sz=w/64;
@@ -179,6 +180,10 @@ export function buildArena(scene,renderer) {
   box('Mur droit',3.4,2.2,-14.8,.38,4.4,5.7,2);
   box('Palier',0,1.55,-16,2.7,.38,1.4,3);
   box('Portique haut',0,3.15,-18,7,.45,.58,2);
+  box('Tapis de départ',0,-.060,3.45,6.7,.13,4.2,13);
+  box('Allée centrale',0,-.101,-7.3,3,.21,12.2,8);
+  box('Pas de tir',16,-.096,-6.3,4.2,.20,4.7,16);
+  box('Point de montée',-7.7,-.092,-19.7,4.6,.19,2.25,5);
   const hillGeometry=new T.PlaneGeometry(12,58,16,64).rotateX(-Math.PI/2).translate(-18,0,-22);
   const hillPositions=hillGeometry.attributes.position;
   const hillSeed=Math.floor(Math.random()*1000000),phase=hillSeed*.017;
@@ -231,9 +236,12 @@ export function buildArena(scene,renderer) {
   const chrome=new T.MeshStandardMaterial({color:'#c8e6ed',metalness:1,roughness:.16});
   const probe=new T.Mesh(new T.IcosahedronGeometry(.54,2),chrome);
   probe.position.set(2.6,.68,-3.6);probe.castShadow=true;scene.add(probe);
-  sign('MATÉRIAUX / BENCHMARK',0,-8,'#ffddb0');
+  sign('02 · MATÉRIAUX / BENCHMARK',0,-8,'#ffddb0');
+  sign('01 · DÉPART',0,5.4,'#f6dca6');
+  sign('03 · LANCERS / CIBLE',16,-9,'#e6f2b7');
   sign('PALIERS / RAMPE',-7.6,-20,'#f4dca5');
-  sign('TERRAIN VALLONNÉ',-16.8,1.0,'#deefb4');
+  sign('04 · TERRAIN VALLONNÉ',-16.8,1.0,'#deefb4');
+  sign('05 · PARCOURS',0,-18.4,'#f6dca6');
   sign('PARCOURS MURAL',7.4,-20,'#f4dca5');
   sign('ARRIVÉE',3.6,-41,'#f4dca5');
   const display=palette.map((_,i)=>{
@@ -277,7 +285,7 @@ export function buildArena(scene,renderer) {
       });
     }
     const standard=level>=4;
-    for(const b of boxes) if(b.mesh) b.mesh.material=standard?tiles[b.type]:alt[b.type];
+    for(const b of boxes) if(b.mesh?.isMesh&&!b.zone) b.mesh.material=standard?tiles[b.type]:alt[b.type];
     hill.material=standard?tiles[3]:alt[3];
     for(let i=0;i<display.length;i++)display[i].material=standard?tiles[i]:alt[i];
     tiles.forEach((m,i)=>{for(const material of [m,alt[i]]) {
@@ -292,7 +300,7 @@ export function buildArena(scene,renderer) {
     dome.visible=level>=2;
     scene.background=new T.Color('#83c7ed');
   }
-  return {boxes,probe,display,visual,shadow,hillSeed,bakeLightmap,materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
+  return {boxes,probe,display,visual,shadow,hillSeed,bakeLightmap,mapMaterial:(i,level)=>level>=4?tiles[i]:alt[i],builtObjects:[...boxes.map(b=>b.mesh).filter(m=>m?.isObject3D),hill,probe,...props],materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
 }
 
 

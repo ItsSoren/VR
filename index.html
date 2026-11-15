@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="fr">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Gorilla Lab — Laboratoire WebXR</title>
-<style>
+<style>#map-access summary{cursor:pointer;margin:.65rem 0}#map-access input{max-width:100%;margin:.35rem 0}#map-access a{color:#ffe6ac}
 :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;color:#faf0da;background:#87c4e7;font:15px system-ui,sans-serif}canvas{display:block;width:100vw;height:100vh;touch-action:none}
 aside{position:fixed;left:clamp(10px,2vw,24px);top:clamp(10px,2vw,24px);width:min(342px,calc(100vw - 20px));max-height:calc(100vh - 30px);overflow:auto;padding:19px 19px 16px;background:#192934f3;border:1px solid #a1b3ac;border-radius:12px;box-shadow:0 16px 52px #17324455}
 h1{font-size:30px;letter-spacing:-.04em;margin:0}h2{font-size:17px;margin:.85rem 0 .35rem}p{line-height:1.4;margin:.55rem 0;color:#d4dfdf}small{color:#c2d0d3}button{font:inherit;padding:.35rem .62rem;background:#385363;color:#fff2d6;border:1px solid #6b8285;border-radius:5px;cursor:pointer}
@@ -13,11 +13,12 @@ button:focus-visible{outline:2px solid #ffe6a5}button:hover{background:#4d6b78}b
 <button id="vr" disabled>Entrer en VR</button><small id="status">Mode PC. Pour la VR, ouvrir en HTTPS sur le casque.</small>
 <p>VR : pousse avec les mains. Stick droit : rotation à 45°. Grip : saisir. B/Y : réglages. A : Tool Gun, clic stick droit : action suivante.</p>
 <small>PC : ZQSD, espace, glisser pour regarder, double clic pour pousser un objet. E : interagir. G : Tool Gun, T : action suivante. R : recommencer.</small>
-<nav aria-label="Réglages"><button data-page>Locomotion</button><button data-page>Objets</button><button data-page>Rendu</button><button data-page>Focus</button><button data-page>Photo</button><button data-page>Spawn</button></nav>
+<nav aria-label="Réglages"><button data-page>Locomotion</button><button data-page>Objets</button><button data-page>Rendu</button><button data-page>Focus</button><button data-page>Photo</button><button data-page>Spawn</button><button data-page>Carte</button></nav>
 <h2 id="section">Locomotion</h2><div id="settings"></div>
 <button id="restore">Réglages par défaut</button>
-<p><button id="capture-report">Capturer le rapport</button> <button id="download-report" disabled>JSON</button></p><p><small>La résolution XR s’applique à la prochaine entrée en VR.</small></p>
-</aside><script defer src="./game-lab-r16.js"></script></body></html>
+<p><button id="capture-report">Capturer le rapport</button> <button id="download-report" disabled>JSON</button></p><details id="map-access"><summary>Maps et éditeur PC</summary><p><a href="./editor.html">Ouvrir l’atelier sur PC</a></p><label>Importer un fichier <input id="map-file" type="file" accept=".json,application/json"></label><label>URL de map <input id="map-url" type="url" placeholder="https://…/map.gorilla.json"></label><button id="map-load-url">Charger URL</button> <button id="map-export">Exporter JSON</button> <button id="map-reset">Arène</button><p id="map-note" role="status"></p></details><p><small>La résolution XR s’applique à la prochaine entrée en VR.</small></p>
+</aside><script defer src="./game-lab-r17.js"></script></body></html>
+
 
 
 
