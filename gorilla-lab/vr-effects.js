@@ -5,20 +5,20 @@ export function createVrEffects(renderer) {
   const passScene=new T.Scene(), camera=new T.PerspectiveCamera();
   camera.matrixAutoUpdate=false;
   const settings={
-    source:{value:null},pixel:{value:new T.Vector2(1,1)},bloom:{value:0},finish:{value:0},exposure:{value:1},
+    source:{value:null},pixel:{value:new T.Vector2(1,1)},bloom:{value:0},exposure:{value:1},
   };
   const material=new T.ShaderMaterial({
     uniforms:settings,depthTest:false,depthWrite:false,toneMapped:false,
     vertexShader:
       'varying vec2 vUv; void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}',
     fragmentShader:
-      'varying vec2 vUv; uniform sampler2D source; uniform vec2 pixel; uniform float bloom,finish,exposure;'+
-      'vec3 hot(vec2 p){vec3 c=texture2D(source,clamp(p,0.,1.)).rgb; return c*smoothstep(.65,1.5,max(max(c.r,c.g),c.b));}'+
+      'varying vec2 vUv; uniform sampler2D source; uniform vec2 pixel; uniform float bloom,exposure;'+
+      'vec3 hot(vec2 p){vec3 c=texture2D(source,clamp(p,0.,1.)).rgb; return c*smoothstep(.85,1.42,max(max(c.r,c.g),c.b));}'+
       'vec3 aces(vec3 x){ return clamp((x*(2.51*x+.03))/(x*(2.43*x+.59)+.14),0.,1.); }'+
       'void main(){vec3 c=texture2D(source,vUv).rgb;'+
-      'if(bloom>.001){vec2 d=pixel*4.;vec3 g=hot(vUv+vec2(d.x,0.))+hot(vUv-vec2(d.x,0.))+hot(vUv+vec2(0.,d.y))+hot(vUv-vec2(0.,d.y));'+
+      'if(bloom>.001){vec2 d=pixel*3.;vec3 g=hot(vUv+vec2(d.x,0.))+hot(vUv-vec2(d.x,0.))+hot(vUv+vec2(0.,d.y))+hot(vUv-vec2(0.,d.y));'+
       'g+=.65*(hot(vUv+d*1.7)+hot(vUv-d*1.7)+hot(vUv+vec2(d.x,-d.y)*1.7)+hot(vUv+vec2(-d.x,d.y)*1.7)); c+=g*bloom/6.6;}'+
-      'float edge=smoothstep(.34,.72,length(vUv-.5)); c=aces(c*exposure)*(1.-edge*finish*.18);'+
+      'c=aces(c*exposure);'+
       'gl_FragColor=vec4(pow(max(c,vec3(0.)),vec3(1./2.2)),1.);}',
   });
   const quad=new T.Mesh(new T.PlaneGeometry(2,2),material);
@@ -34,12 +34,11 @@ export function createVrEffects(renderer) {
     settings.pixel.value.set(1/target.width,1/target.height);
     material.uniformsNeedUpdate=true;
   };
-  function render(scene,base,{bloom,finish,level}){
+  function render(scene,base,{bloom}){
     renderer.xr.updateCamera(base);
     eyes=renderer.xr.getCamera().cameras;
     if(eyes.length===0||eyes.some(eye=>!eye.viewport?.z||!eye.viewport?.w))return false;
-    settings.bloom.value=bloom?.36:0;
-    settings.finish.value=finish?1:0;
+    settings.bloom.value=bloom?.18:0;
     settings.exposure.value=renderer.toneMappingExposure;
     const original=renderer.getRenderTarget(),xrEnabled=renderer.xr.enabled;
     const shadowUpdate=renderer.shadowMap.autoUpdate,autoReset=renderer.info.autoReset;
@@ -47,12 +46,12 @@ export function createVrEffects(renderer) {
     try{
       renderer.xr.enabled=false;
       for(let i=0;i<eyes.length;i++){
-        const eye=eyes[i], scale=level>=10?1:level>=8?.80:.65;
-        const width=Math.max(32,Math.round(eye.viewport.z*scale));
-        const height=Math.max(32,Math.round(eye.viewport.w*scale));
+        const eye=eyes[i];
+        const width=Math.max(32,Math.round(eye.viewport.z));
+        const height=Math.max(32,Math.round(eye.viewport.w));
         let target=targets[i];
         if(!target){
-          target=targets[i]=new T.WebGLRenderTarget(width,height,{type:half?T.HalfFloatType:T.UnsignedByteType,depthBuffer:true,stencilBuffer:false});
+          target=targets[i]=new T.WebGLRenderTarget(width,height,{type:half?T.HalfFloatType:T.UnsignedByteType,minFilter:T.NearestFilter,magFilter:T.NearestFilter,depthBuffer:true,stencilBuffer:false});
         }else if(target.width!==width||target.height!==height)target.setSize(width,height);
         camera.matrix.copy(eye.matrixWorld);camera.matrixWorld.copy(eye.matrixWorld);
         camera.matrixWorldInverse.copy(eye.matrixWorldInverse);
@@ -84,15 +83,16 @@ export function addRayProbe(mesh){
   const mat=mesh.material;
   mat.onBeforeCompile=shader=>{
     shader.uniforms.uLabTrace=rayEnabled;
+    shader.uniforms.uLabProbeCenter={value:mesh.position};
     shader.uniforms.uLabPrimitives=primitives;
     shader.vertexShader='varying vec3 vRayWorld;\n'+shader.vertexShader;
     shader.vertexShader=shader.vertexShader.replace('#include <worldpos_vertex>','#include <worldpos_vertex>\nvRayWorld=(modelMatrix*vec4(transformed,1.)).xyz;');
     shader.fragmentShader=
-      'uniform float uLabTrace; uniform vec4 uLabPrimitives[7]; varying vec3 vRayWorld;\n'+shader.fragmentShader;
+      'uniform float uLabTrace; uniform vec3 uLabProbeCenter; uniform vec4 uLabPrimitives[7]; varying vec3 vRayWorld;\n'+shader.fragmentShader;
     shader.fragmentShader=shader.fragmentShader.replace('#include <opaque_fragment>',[
       'if(uLabTrace>.5){',
       '  vec3 origin=vRayWorld;',
-      '  vec3 n=normalize(origin-vec3(2.6,.68,-3.6));',
+      '  vec3 n=normalize(origin-uLabProbeCenter);',
       '  vec3 r=reflect(normalize(origin-cameraPosition),n);',
       '  origin+=n*.01;',
       '  vec3 traced=mix(vec3(.84,.89,.89),vec3(.19,.49,.83),clamp(r.y*1.3+.18,0.,1.));',
@@ -113,7 +113,7 @@ export function addRayProbe(mesh){
       '#include <opaque_fragment>',
     ].join('\n'));
   };
-  mat.customProgramCacheKey=()=> 'gorilla-lab-ray-probe-v1';
+  mat.customProgramCacheKey=()=> 'gorilla-lab-ray-probe-v2';
   return function update(enabled,objects){
     rayEnabled.value=enabled?1:0;
     if(!enabled)return;

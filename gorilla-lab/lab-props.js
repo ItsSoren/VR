@@ -265,7 +265,133 @@ function cup() {
   return prop('cup', 'Tasse', .39, collision, [part(ceramic, 0xffffff, true), part(handle, 0xf0dfc2)], glaze, .37);
 }
 
-export function makeLabProps() {
-  return [phone(), baguette(), wheel(), cup()];
+function flashlight() {
+  const casing = revolve([
+    [0, -.143], [.027, -.143], [.032, -.138], [.032, -.124], [.028, -.122],
+    [.028, -.103], [.029, -.045], [.029, .019], [.033, .042], [.043, .061],
+    [.052, .079], [.053, .116], [.051, .133], [.044, .133], [.040, .123],
+  ], 16);
+  const finish = makeTexture((u, v, x, y) => {
+    const noise = 9 * grain(x, y);
+    const ribs = 11 * Math.cos(u * TAU * 24);
+    if (v > .23 && v < .28 || v > .72 && v < .78) return [225 + noise, 128 + noise, 43 + noise];
+    if (v > .33 && v < .51) {
+      const grip = 40 + .6 * ribs + 8 * Math.cos(v * TAU * 48 + u * TAU * 13) + noise;
+      return [grip, grip * 1.08, grip * 1.13];
+    }
+    const metal = 63 + ribs + noise + 14 * Math.cos(u * TAU * 4);
+    return [metal, metal * 1.13, metal * 1.24];
+  });
+  const models = [
+    part(casing, 0xffffff, true),
+    part(new T.RingGeometry(.021, .043, 16).rotateX(-Math.PI / 2).translate(0, .123, 0), 0x90a0ad),
+    part(new T.CircleGeometry(.021, 16).rotateX(-Math.PI / 2).translate(0, .122, 0), 0x354659),
+    part(new T.CircleGeometry(.012, 12).rotateX(-Math.PI / 2).translate(0, .1225, 0), 0xcfeef4),
+    part(new T.CylinderGeometry(.012, .013, .007, 12).rotateX(Math.PI / 2).translate(0, .035, .030), 0x1e272f),
+    part(new T.CircleGeometry(.008, 12).translate(0, .035, .0336), 0xee8b32),
+  ];
+  const collision = convexRings([[.033, -.143], [.054, .133]], 6);
+  return prop('flashlight', 'Lampe torche', .31, collision, models, finish, .46, .28);
 }
 
+function sodaCan() {
+  const can = revolve([
+    [0, -.106], [.039, -.107], [.057, -.112], [.063, -.108], [.068, -.095],
+    [.069, -.059], [.069, -.020], [.069, .020], [.069, .059], [.068, .086],
+    [.060, .099], [.059, .109], [.054, .109], [.052, .101], [0, .101],
+  ], 20);
+  const lettering = ['1110101110111', '1000100010001', '1100100100010', '1000101000100', '1000101110111'];
+  const print = makeTexture((u, v, x, y) => {
+    const noise = 10 * grain(x, y);
+    if (v < .21 || v > .74) return [162 + noise, 174 + noise, 181 + noise];
+    const front = (u + .20) % .5;
+    const column = Math.floor((front - .098) * 64);
+    const row = Math.floor((.61 - v) * 43);
+    const ribbon = v - (.375 + .055 * Math.cos(TAU * u * 2));
+    if (lettering[row]?.[column] === '1' || Math.abs(ribbon) < .018 || Math.abs(ribbon + .040) < .007) {
+      return [244 + noise, 224 + noise, 169 + noise];
+    }
+    const shade = 20 * Math.cos(TAU * u * 2) + noise;
+    return [173 + shade, 27 + shade * .28, 55 + shade * .50];
+  });
+  const models = [
+    part(can, 0xffffff, true),
+    part(new T.CircleGeometry(.012, 10).scale(1, 1.42, 1).rotateX(-Math.PI / 2)
+      .translate(0, .1014, .024), 0x502a34),
+    part(new T.RingGeometry(.0068, .012, 10).scale(1, 1.49, 1).rotateX(-Math.PI / 2)
+      .translate(0, .106, -.009), 0xdce3e8),
+    part(new T.CircleGeometry(.0042, 8).rotateX(-Math.PI / 2).translate(0, .1063, .001), 0x788892),
+  ];
+  const collision = convexRings([[.069, -.112], [.069, .109]], 6);
+  return prop('soda', 'Canette de soda', .35, collision, models, print, .42, .27);
+}
+
+function trafficCone() {
+  const trunk = revolve([
+    [.134, -.177], [.131, -.150], [.119, -.112], [.107, -.061], [.096, -.017],
+    [.085, .032], [.074, .081], [.064, .127], [.054, .170], [.049, .198],
+    [.045, .206], [.034, .204], [.030, .192], [.033, .148],
+  ], 16);
+  const reflectiveTape = makeTexture((u, v, x, y) => {
+    const noise = 15 * grain(x, y);
+    const sides = 8 * Math.cos(u * TAU * 4);
+    const tape = v > .321 && v < .435 || v > .536 && v < .635;
+    if (tape) {
+      const pattern = x % 4 === 0 || (x + 2 * y) % 7 === 0 ? 14 : 0;
+      return [240 + noise - pattern, 236 + noise - pattern, 216 + noise - pattern];
+    }
+    return [206 + noise + sides, 67 + noise + sides, 16 + noise * .7];
+  });
+  const models = [
+    part(trunk, 0xffffff, true),
+    part(roundedBlock(.320, .320, .031, .023, .005).rotateX(Math.PI / 2).translate(0, -.188, 0), 0x312d2a),
+    part(new T.CircleGeometry(.035, 12).rotateX(-Math.PI / 2).translate(0, .148, 0), 0x70220e),
+  ];
+  const collision = convexRings([[.232, -.2085], [.224, -.174], [.067, .206]], 4).rotateY(Math.PI / 4);
+  return prop('cone', 'Cône de chantier', .58, collision, models, reflectiveTape, .78);
+}
+
+function handheldRadio() {
+  const panel = makeTexture((u, v, x, y) => {
+    const noise = 8 * grain(x, y);
+    const speaker = v > .19 && v < .49 && u > .15 && u < .85;
+    if (speaker) {
+      const hole = Math.hypot((u * 12) % 1 - .5, (v * 21) % 1 - .5) < .32;
+      return hole ? [11, 17, 20] : [49 + noise, 57 + noise, 61 + noise];
+    }
+    if (v > .60 && v < .86 && u > .12 && u < .88) {
+      const screen = v > .628 && v < .832 && u > .16 && u < .84;
+      if (!screen) return [13, 22, 24];
+      const bars = u > .26 && u < .70 && v > .68 && v < .70 + .08 * u && (u * 21) % 1 > .3;
+      const signal = v > .793 && v < .813 && u > .22 && u < .41;
+      return bars || signal ? [43, 66, 54] : [157 + noise, 191 + noise, 139 + noise];
+    }
+    const line = u > .21 && u < .79 && v > .112 && v < .134;
+    return line ? [223, 178, 93] : [39 + noise, 49 + noise, 54 + noise];
+  });
+  const antenna = revolve([
+    [0, .095], [.019, .095], [.019, .110], [.013, .116], [.010, .153], [.008, .159], [0, .159],
+  ], 10).translate(-.045, 0, 0);
+  const models = [
+    part(roundedBlock(.138, .220, .061, .016, .004), 0xe1a843),
+    part(roundedBlock(.121, .206, .004, .016, .002).translate(0, -.006, .034), 0x202a30),
+    part(new T.PlaneGeometry(.106, .174).translate(0, -.004, .0395), 0xffffff, true),
+    part(antenna, 0x262f38),
+    part(new T.CylinderGeometry(.014, .017, .016, 10).translate(.040, .117, .001), 0x26333a),
+    part(new T.BoxGeometry(.008, .047, .027).translate(-.072, .014, -.002), 0x2e373e),
+    part(new T.BoxGeometry(.006, .020, .019).translate(-.072, -.043, -.002), 0x3c474e),
+    part(new T.CircleGeometry(.004, 8).translate(.040, .066, .0397), 0xf15c40),
+    part(new T.CircleGeometry(.004, 8).translate(-.040, .066, .0397), 0x78977c),
+    part(roundedBlock(.045, .074, .011, .008, .001).translate(0, -.021, -.038), 0x232d33),
+  ];
+  const hull = [[-.076, .075, -.049, .039, -.114], [-.076, .075, -.039, .039, .108],
+    [-.056, -.034, -.010, .010, .159]].flatMap(([left, right, rear, front, y]) => [
+    new T.Vector3(left, y, rear), new T.Vector3(right, y, rear),
+    new T.Vector3(right, y, front), new T.Vector3(left, y, front),
+  ]);
+  return prop('radio', 'Talkie-walkie', .43, new ConvexGeometry(hull), models, panel, .61, .08);
+}
+
+export function makeLabProps() {
+  return [phone(), baguette(), wheel(), cup(), flashlight(), sodaCan(), trafficCone(), handheldRadio()];
+}

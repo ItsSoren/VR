@@ -3,15 +3,19 @@ import * as T from 'three';
 
 const qInv=new T.Quaternion(), local=new T.Vector3(), closest=new T.Vector3();
 const boundsRotation=new T.Matrix4();
+const boxBounds=new WeakMap();
 function boundsFor(box){
   if(box.heightfield||box.objectBody)return null;
-  if(box.bounds)return box.bounds;
+  const cached=boxBounds.get(box);
+  if(cached?.position.equals(box.position)&&cached.quaternion.equals(box.quaternion)&&cached.half.equals(box.half))return cached.bounds;
   const m=boundsRotation.makeRotationFromQuaternion(box.quaternion).elements;
   const h=box.half,p=box.position;
   const x=Math.abs(m[0])*h.x+Math.abs(m[4])*h.y+Math.abs(m[8])*h.z;
   const y=Math.abs(m[1])*h.x+Math.abs(m[5])*h.y+Math.abs(m[9])*h.z;
   const z=Math.abs(m[2])*h.x+Math.abs(m[6])*h.y+Math.abs(m[10])*h.z;
-  return box.bounds={minX:p.x-x,maxX:p.x+x,minY:p.y-y,maxY:p.y+y,minZ:p.z-z,maxZ:p.z+z};
+  const bounds={minX:p.x-x,maxX:p.x+x,minY:p.y-y,maxY:p.y+y,minZ:p.z-z,maxZ:p.z+z};
+  boxBounds.set(box,{bounds,position:p.clone(),quaternion:box.quaternion.clone(),half:h.clone()});
+  return bounds;
 }
 function nearBox(point,radius,box){
   const b=boundsFor(box);
@@ -40,7 +44,7 @@ export function penetration(position,radius,box,normal) {
   return radius+Math.min(x,y,z);
 }
 
-const normal=new T.Vector3(), tangent=new T.Vector3(), correction=new T.Vector3();
+const normal=new T.Vector3(), tangent=new T.Vector3();
 export function solve(position,radius,boxes,velocity,bounce=0,drag=0,dt=0) {
   let floor=false;
   for(let pass=0;pass<3;pass++) {
@@ -80,8 +84,7 @@ export function handContact(from,to,radius,boxes,out,hitNormal) {
 }
 
 
-const probePoint=new T.Vector3(), contact=new T.Vector3(), lever=new T.Vector3();
-const angular=new T.Vector3(), supportAxis=new T.Vector3(), angularImpulse=new T.Vector3();
+const probePoint=new T.Vector3(), contact=new T.Vector3(), supportAxis=new T.Vector3();
 const triangle=new T.Triangle(), nearestPoint=new T.Vector3();
 export function colliderFor(geometry,sphereRadius=0) {
   const positions=geometry.attributes.position;
@@ -98,12 +101,21 @@ export function colliderFor(geometry,sphereRadius=0) {
     if(n.lengthSq()>.1)faces.push({a,b,c,n});
   }
   const radius=sphereRadius||Math.max(...vertices.map(v=>v.length()));
+  const {x,y,z}=new T.Box3().setFromPoints(vertices).getSize(new T.Vector3());
+  // Use the solid sphere tensor or approximate a hull's tensor with its local bounds.
+  const sphereInertia=Math.max(.0001,sphereRadius**2*.4);
+  const inverseInertia=sphereRadius?new T.Vector3().setScalar(1/sphereInertia):new T.Vector3(
+    12/Math.max(.001,y*y+z*z),
+    12/Math.max(.001,x*x+z*z),
+    12/Math.max(.001,x*x+y*y)
+  );
+  const thickness=sphereRadius?2*sphereRadius:Math.min(x,y,z);
   const unique=list=>{
     const result=[];
     for(const direction of list)if(direction.lengthSq()>.5&&!result.some(n=>Math.abs(n.dot(direction))>.9999))result.push(direction);
     return result;
   };
-  return {vertices,faces,sphereRadius,radius,
+  return {vertices,faces,sphereRadius,radius,inverseInertia,thickness,
     normals:sphereRadius?[]:unique(faces.map(f=>f.n)),
     edges:sphereRadius?[]:unique(faces.flatMap(f=>[
       new T.Vector3().subVectors(f.b,f.a).normalize(),
@@ -160,6 +172,12 @@ export function boxCollider(half) {
 }
 function sat(a,b,out) {
   const d=separating.subVectors(a.mesh.position,b.mesh.position);
+  if(a.shape.sphereRadius&&b.shape.sphereRadius){
+    const distance=d.length();
+    if(distance>1e-8)out.copy(d).divideScalar(distance);
+    else out.set(1,0,0);
+    return Math.max(0,a.shape.sphereRadius+b.shape.sphereRadius-distance);
+  }
   let best=Infinity;
   function axisTest(axis){
     if(axis.lengthSq()<.00001)return true;
@@ -198,26 +216,34 @@ function sat(a,b,out) {
   }
   return Number.isFinite(best)?best:0;
 }
-const lastShapePoint=new T.Vector3();
-function shapeContact(body,box,outNormal,outPoint) {
-  if(!body.precise||body.shape.sphereRadius||!box.shape||box.heightfield)return vertexContact(body,box,outNormal,outPoint);
+const boxFace=new T.Vector3();
+function singleFaceContact(body,box,outNormal){
   qInv.copy(box.quaternion).invert();
   local.copy(body.mesh.position).sub(box.position).applyQuaternion(qInv);
-  if(local.distanceToSquared(closest.copy(local).clamp(box.min,box.half))>body.radius**2)return 0;
-  const depth=sat(body,box,outNormal);
-  if(!depth)return 0;
-  let lowest=Infinity,count=0;
-  for(const vertex of body.shape.vertices){
-    lastShapePoint.copy(vertex).applyQuaternion(body.mesh.quaternion).add(body.mesh.position);
-    const value=lastShapePoint.dot(outNormal);
-    if(value<lowest-.003){lowest=value;count=1;outPoint.copy(lastShapePoint);}
-    else if(value<lowest+.003)outPoint.lerp(lastShapePoint,1/(++count));
+  let axis=-1;
+  for(let i=0;i<3;i++){
+    if(box.half.getComponent(i)-Math.abs(local.getComponent(i))>=body.radius)continue;
+    if(axis>=0)return null;
+    axis=i;
   }
+  if(axis<0)return null;
+  const position=local.getComponent(axis), half=box.half.getComponent(axis);
+  outNormal.set(0,0,0).setComponent(axis,1).applyQuaternion(box.quaternion);
+  const positive=half+support(body,boxFace.copy(outNormal).negate())-position;
+  const negative=half+support(body,outNormal)+position;
+  if(negative<positive)outNormal.negate();
+  return Math.max(0,Math.min(positive,negative));
+}
+
+function shapeContact(body,box,outNormal,outPoint) {
+  if(body.shape.sphereRadius||box.heightfield||!box.shape)return vertexContact(body,box,outNormal,outPoint??contact);
+  // A hull within two of the box slabs can only contact the third slab's faces.
+  const depth=singleFaceContact(body,box,outNormal)??sat(body,box,outNormal);
+  if(depth>0&&outPoint)contactPoint(body,box,outNormal,outPoint);
   return depth;
 }
 const palmHull=colliderFor(new T.OctahedronGeometry(1,0).scale(.055,.033,.075));
 const palmBody={mesh:{position:new T.Vector3(),quaternion:new T.Quaternion()},shape:palmHull,radius:palmHull.radius,precise:true};
-const palmPoint=new T.Vector3();
 export function palmContact(from,to,rotation,boxes,out,hitNormal){
   const steps=Math.min(48,Math.max(1,Math.ceil(from.distanceTo(to)/.021)));
   const r=palmHull.radius;
@@ -236,7 +262,7 @@ export function palmContact(from,to,rotation,boxes,out,hitNormal){
     for(const box of sweepCandidates){
       const object=box.objectBody;
       if(object&&(object.owner||center.distanceToSquared(object.mesh.position)>(r+object.radius)**2))continue;
-      const depth=object?sat(palmBody,object,normal):shapeContact(palmBody,box,normal,palmPoint);
+      const depth=object?sat(palmBody,object,normal):shapeContact(palmBody,box,normal);
       if(depth>0){
         out.copy(center).addScaledVector(normal,depth+.0005);
         hitNormal.copy(normal);
@@ -248,44 +274,53 @@ export function palmContact(from,to,rotation,boxes,out,hitNormal){
 }
 
 export function placeObject(body,boxes){
-  for(let pass=0;pass<2;pass++) for(const box of boxes){
-    if(!nearBox(body.mesh.position,body.radius,box))continue;
-    const depth=shapeContact(body,box,normal,contact);
-    if(depth>0)body.mesh.position.addScaledVector(normal,depth);
+  for(let pass=0;pass<4;pass++){
+    let moved=false;
+    for(const box of boxes){
+      if(!nearBox(body.mesh.position,body.radius,box))continue;
+      const depth=shapeContact(body,box,normal);
+      if(depth<=1e-6)continue;
+      body.mesh.position.addScaledVector(normal,depth);
+      moved=true;
+    }
+    if(!moved)break;
   }
 }
-function againstArena(body,boxes,rebound,dt){
-  let grounded=false;
-  for(let pass=0;pass<2;pass++) for(const box of boxes){
-    if(!nearBox(body.mesh.position,body.radius,box))continue;
-    const depth=shapeContact(body,box,normal,contact);
-    if(depth<=0)continue;
-    body.mesh.position.addScaledVector(normal,depth);
-    grounded ||= normal.y>.57;
-    lever.copy(contact).sub(body.mesh.position);
-    angular.crossVectors(body.angular,lever).add(body.velocity);
-    const vn=angular.dot(normal);
-    if(vn>=0)continue;
-    const invInertia=1/Math.max(.002,body.shape.radius**2*.45);
-    angularImpulse.crossVectors(lever,normal);
-    const j=-vn*(Math.abs(vn)>.8?1+Math.min(.98,rebound*(box.bounce??1)):1)/(1+angularImpulse.lengthSq()*invInertia);
-    body.velocity.addScaledVector(normal,j);
-    body.angular.addScaledVector(angularImpulse,j*invInertia);
-    tangent.copy(angular).addScaledVector(normal,-vn);
-    if(tangent.lengthSq()>.000001){
-      const speed=tangent.length();
-      tangent.multiplyScalar(1/speed);
-      angularImpulse.crossVectors(lever,tangent);
-      const friction=Math.min(j*box.friction*.62,speed/(1+angularImpulse.lengthSq()*invInertia));
-      body.velocity.addScaledVector(tangent,-friction);
-      body.angular.addScaledVector(angularImpulse,-friction*invInertia);
-    }
+
+const kinematicStart=new T.Vector3(), kinematicStep=new T.Vector3(), kinematicSpin=new T.Vector3();
+const kinematicRotation=new T.Quaternion(), turn=new T.Quaternion(), turnStep=new T.Quaternion();
+function rotationDelta(from,to,out){
+  out.copy(from).invert().premultiply(to).normalize();
+  if(out.w<0)out.set(-out.x,-out.y,-out.z,-out.w);
+  return 2*Math.atan2(Math.hypot(out.x,out.y,out.z),out.w);
+}
+
+export function moveKinematic(body,targetPosition,targetRotation,boxes,dt){
+  const {mesh,shape}=body;
+  kinematicStart.copy(mesh.position);
+  kinematicRotation.copy(mesh.quaternion);
+  kinematicStep.subVectors(targetPosition,kinematicStart);
+  const angle=rotationDelta(kinematicRotation,targetRotation,turn);
+  const travel=kinematicStep.length()+angle*shape.radius;
+  const stride=travelLimit(shape);
+  const count=Math.max(1,Math.min(MAX_SUBSTEPS,Math.ceil(travel/stride)));
+  const fraction=travel>0?Math.min(1,count*stride/travel):1;
+  const radiansPerStep=angle*fraction/count;
+  kinematicSpin.set(turn.x,turn.y,turn.z).normalize();
+  turnStep.setFromAxisAngle(kinematicSpin,radiansPerStep);
+  kinematicStep.multiplyScalar(fraction/count);
+  // Apply each successive controller increment from the last valid pose, preserving
+  // motion along the surface when another component of the motion is blocked.
+  for(let i=0;i<count;i++){
+    mesh.position.add(kinematicStep);
+    mesh.quaternion.premultiply(turnStep).normalize();
+    placeObject(body,boxes);
   }
-  if(grounded){
-    body.angular.multiplyScalar(Math.exp(-dt*(body.shape.sphereRadius?.22:2.1)));
-    if(body.shape.sphereRadius){body.velocity.x*=Math.exp(-dt*.21);body.velocity.z*=Math.exp(-dt*.21);}
-    else if(body.velocity.lengthSq()<.004&&body.angular.lengthSq()<.018){body.velocity.set(0,0,0);body.angular.set(0,0,0);}
-  }
+  const elapsed=Math.max(.006,dt||0);
+  body.velocity.lerp(kinematicStep.subVectors(mesh.position,kinematicStart).divideScalar(elapsed).clampLength(0,23),.52);
+  const movedAngle=rotationDelta(kinematicRotation,mesh.quaternion,turn);
+  kinematicSpin.set(turn.x,turn.y,turn.z).normalize().multiplyScalar(Math.min(24,movedAngle/elapsed));
+  body.angular.lerp(kinematicSpin,.52);
 }
 function support(body,direction){
   if(body.shape.sphereRadius)return body.shape.sphereRadius;
@@ -295,42 +330,248 @@ function support(body,direction){
   for(const vertex of body.shape.vertices)extent=Math.max(extent,vertex.dot(supportAxis));
   return extent;
 }
+
+const featureU=new T.Vector3(), featureV=new T.Vector3(), featureNormal=new T.Vector3();
+const featurePoint=new T.Vector3(), featureA={}, featureB={};
+function contactFeature(body,axis,sign,out){
+  const {mesh,shape}=body;
+  const extent=support(body,featureNormal.copy(axis).multiplyScalar(sign));
+  out.plane=mesh.position.dot(axis)+sign*extent;
+  if(shape.sphereRadius){
+    out.minU=out.maxU=mesh.position.dot(featureU);
+    out.minV=out.maxV=mesh.position.dot(featureV);
+    return;
+  }
+  out.minU=out.minV=Infinity;
+  out.maxU=out.maxV=-Infinity;
+  for(const vertex of shape.vertices){
+    if(vertex.dot(supportAxis)<extent-.0015)continue;
+    featurePoint.copy(vertex).applyQuaternion(mesh.quaternion).add(mesh.position);
+    const u=featurePoint.dot(featureU), v=featurePoint.dot(featureV);
+    out.minU=Math.min(out.minU,u);
+    out.maxU=Math.max(out.maxU,u);
+    out.minV=Math.min(out.minV,v);
+    out.maxV=Math.max(out.maxV,v);
+  }
+}
+
+function contactPoint(a,b,axis,out){
+  // Use the overlapping part of the opposing faces or edges, so a corner hit
+  // applies its impulse at the corner while a flat landing stays balanced.
+  if(Math.abs(axis.y)<.8)featureU.set(-axis.z,0,axis.x).normalize();
+  else featureU.set(axis.y,-axis.x,0).normalize();
+  featureV.crossVectors(axis,featureU);
+  contactFeature(a,axis,-1,featureA);
+  contactFeature(b,axis,1,featureB);
+  const u=(Math.max(featureA.minU,featureB.minU)+Math.min(featureA.maxU,featureB.maxU))*.5;
+  const v=(Math.max(featureA.minV,featureB.minV)+Math.min(featureA.maxV,featureB.maxV))*.5;
+  out.copy(axis).multiplyScalar((featureA.plane+featureB.plane)*.5)
+    .addScaledVector(featureU,u).addScaledVector(featureV,v);
+}
+
+const bodyBoundsPoint=new T.Vector3();
+function updateBodyBounds(state){
+  const {mesh,shape}=state.body, {bounds}=state;
+  if(shape.sphereRadius){
+    bounds.min.copy(mesh.position).addScalar(-shape.sphereRadius);
+    bounds.max.copy(mesh.position).addScalar(shape.sphereRadius);
+  }else{
+    bounds.makeEmpty();
+    for(const vertex of shape.vertices){
+      bodyBoundsPoint.copy(vertex).applyQuaternion(mesh.quaternion).add(mesh.position);
+      bounds.expandByPoint(bodyBoundsPoint);
+    }
+  }
+}
+
+function overlapsArena(bounds,box,b){
+  const {min,max}=bounds;
+  if(box.heightfield)return min.x<=box.xMax&&max.x>=box.xMin&&min.z<=box.zMax&&max.z>=box.zMin;
+  return !b||max.x>=b.minX&&min.x<=b.maxX&&max.y>=b.minY&&min.y<=b.maxY&&max.z>=b.minZ&&min.z<=b.maxZ;
+}
+
+function isDynamic(body){
+  return !body.owner&&!body.frozen;
+}
+
+const leverA=new T.Vector3(), leverB=new T.Vector3();
+const relativeVelocity=new T.Vector3(), secondVelocity=new T.Vector3();
+const torque=new T.Vector3(), rotatedTorque=new T.Vector3(), spinAxis=new T.Vector3();
+function pointVelocity(state,lever,out){
+  return state&&(state.inverseMass>0||state.held)
+    ?out.crossVectors(state.body.angular,lever).add(state.body.velocity)
+    :out.set(0,0,0);
+}
+
+function inverseInertia(state,lever,axis,out){
+  const {mesh,shape}=state.body;
+  qInv.copy(mesh.quaternion).invert();
+  torque.crossVectors(lever,axis);
+  return out.copy(torque).applyQuaternion(qInv).multiply(shape.inverseInertia)
+    .applyQuaternion(mesh.quaternion).multiplyScalar(state.inverseMass);
+}
+
+function impulseResponse(state,lever,axis){
+  if(!state?.inverseMass)return 0;
+  inverseInertia(state,lever,axis,rotatedTorque);
+  return state.inverseMass+torque.dot(rotatedTorque);
+}
+
+function applyImpulse(state,lever,axis,amount){
+  if(!state?.inverseMass)return;
+  state.body.velocity.addScaledVector(axis,amount*state.inverseMass);
+  state.body.angular.addScaledVector(inverseInertia(state,lever,axis,rotatedTorque),amount);
+}
+
+function frictionOf(body){
+  return body.friction??body.spec?.friction??.78;
+}
+
+function resolveContact(a,b,box,depth,rebound){
+  const {body}=a;
+  const other=b?.body;
+  const friction=other?Math.sqrt(frictionOf(body)*frictionOf(other)):Math.min(frictionOf(body),box.friction??.78);
+  leverA.subVectors(contact,body.mesh.position);
+  if(other)leverB.subVectors(contact,other.mesh.position);
+  pointVelocity(a,leverA,relativeVelocity).sub(pointVelocity(b,leverB,secondVelocity));
+  const inwardSpeed=relativeVelocity.dot(normal);
+  let changed=false;
+  if(inwardSpeed<-1e-5){
+    const bounce=inwardSpeed<-.8?T.MathUtils.clamp(rebound*(box?.bounce??1),0,.98):0;
+    const impulse=-inwardSpeed*(1+bounce)/(impulseResponse(a,leverA,normal)+impulseResponse(b,leverB,normal));
+    applyImpulse(a,leverA,normal,impulse);
+    applyImpulse(b,leverB,normal,-impulse);
+
+    pointVelocity(a,leverA,relativeVelocity).sub(pointVelocity(b,leverB,secondVelocity));
+    tangent.copy(relativeVelocity).addScaledVector(normal,-relativeVelocity.dot(normal));
+    const tangentSpeed=tangent.length();
+    if(tangentSpeed>1e-5&&friction>0){
+      tangent.divideScalar(tangentSpeed);
+      const drag=Math.min(impulse*friction,
+        tangentSpeed/(impulseResponse(a,leverA,tangent)+impulseResponse(b,leverB,tangent)));
+      applyImpulse(a,leverA,tangent,-drag);
+      applyImpulse(b,leverB,tangent,drag);
+    }
+    changed=true;
+  }
+
+  const correction=depth-.00015;
+  if(correction>1e-6){
+    const inverseMass=a.inverseMass+(b?.inverseMass??0);
+    if(a.inverseMass){
+      body.mesh.position.addScaledVector(normal,correction*a.inverseMass/inverseMass);
+      updateBodyBounds(a);
+    }
+    if(b?.inverseMass){
+      other.mesh.position.addScaledVector(normal,-correction*b.inverseMass/inverseMass);
+      updateBodyBounds(b);
+    }
+    changed=true;
+  }
+
+  if(a.inverseMass&&normal.y>.57&&inwardSpeed<.2){
+    a.groundFriction=Math.max(a.groundFriction,friction);
+    a.groundY=Math.max(a.groundY,normal.y);
+  }
+  if(b?.inverseMass&&normal.y<-.57&&inwardSpeed<.2){
+    b.groundFriction=Math.max(b.groundFriction,friction);
+    b.groundY=Math.max(b.groundY,-normal.y);
+  }
+  return changed;
+}
+
+function slowRolling(state,dt){
+  const {body,groundFriction}=state;
+  if(!groundFriction)return;
+  const {velocity,angular,shape}=body;
+  if(shape.sphereRadius){
+    const resistance=Math.exp(-dt*groundFriction*.6);
+    velocity.x*=resistance;
+    velocity.z*=resistance;
+    angular.multiplyScalar(resistance);
+    if(state.groundY>.999&&velocity.lengthSq()<.000144&&angular.lengthSq()<.01){
+      velocity.set(0,0,0);
+      angular.set(0,0,0);
+    }
+  }else{
+    angular.multiplyScalar(Math.exp(-dt*groundFriction*2.5));
+    if(velocity.lengthSq()<.0016&&angular.lengthSq()<.012){
+      velocity.set(0,0,0);
+      angular.set(0,0,0);
+    }
+  }
+}
+
+const MAX_SUBSTEPS=96, SOLVER_PASSES=5;
+function travelLimit(shape){
+  return Math.max(.008,shape.thickness*.35);
+}
+
 export function solveObjects(objects,boxes,dt,gravity,rebound,surfaceAt) {
-  const count=Math.max(1,Math.ceil(dt/.006));
+  if(!Number.isFinite(dt)||dt<0)return;
+  const states=[], arena=boxes.map(box=>({box,bounds:boundsFor(box)}));
+  let count=Math.max(1,Math.ceil(dt/.006));
+  for(const body of objects){
+    if(body.mesh.visible===false)continue;
+    const dynamic=isDynamic(body);
+    if(dynamic){
+      // Keep travel below a fraction of the smallest collider dimension, including rotation.
+      const angularSpeed=Math.min(body.angular.length(),30);
+      const speed=body.velocity.length()+angularSpeed*body.shape.radius+Math.abs(gravity)*dt;
+      count=Math.max(count,Math.ceil(speed*dt/travelLimit(body.shape)));
+    }
+    const state={body,inverseMass:dynamic?1/body.mass:0,held:body.owner&&!body.frozen,
+      bounds:new T.Box3(),groundFriction:0,groundY:0,sweepStart:0,sweepEnd:0};
+    updateBodyBounds(state);
+    states.push(state);
+  }
+  count=Math.min(MAX_SUBSTEPS,count);
   const step=dt/count;
-  for(let k=0;k<count;k++) {
-    for(const body of objects) {
-      if(body.owner || body.frozen || !body.mesh.visible) continue;
-      body.velocity.y-=gravity*step*(surfaceAt(body.mesh.position)?.gravity??1);
-      body.mesh.position.addScaledVector(body.velocity,step);
-      const speed=body.angular.length();
-      if(speed>.0001)body.mesh.rotateOnWorldAxis(angular.copy(body.angular).multiplyScalar(1/speed),Math.min(speed,30)*step);
-      againstArena(body,boxes,rebound,step);
+  for(let k=0;k<count;k++){
+    for(const state of states){
+      if(!state.inverseMass)continue;
+      const {body}=state;
+      const {mesh,velocity,angular}=body;
+      state.groundFriction=0;
+      state.groundY=0;
+      velocity.y-=gravity*step*(surfaceAt?.(mesh.position)?.gravity??1);
+      mesh.position.addScaledVector(velocity,step);
+      const speed=angular.length();
+      if(speed>1e-5)mesh.rotateOnWorldAxis(spinAxis.copy(angular).divideScalar(speed),Math.min(speed,30)*step);
+      updateBodyBounds(state);
     }
-    const ordered=objects.filter(o=>o.mesh.visible).sort((a,b)=>a.mesh.position.x-b.mesh.position.x);
-    const largest=ordered.reduce((max,body)=>Math.max(max,body.radius),0);
-    for(let i=0;i<ordered.length;i++) for(let j=i+1;j<ordered.length;j++) {
-      const a=ordered[i], b=ordered[j];
-      if(b.mesh.position.x-a.mesh.position.x>a.radius+largest)break;
-      if((a.owner||a.frozen)&&(b.owner||b.frozen))continue;
-      correction.subVectors(b.mesh.position,a.mesh.position);
-      const d=correction.length();
-      if(d>=a.radius+b.radius||d<.0001)continue;
-      correction.multiplyScalar(1/d);
-      const precise=a.precise||b.precise;
-      const overlap=precise?sat(a,b,normal):support(a,correction)+support(b,angular.copy(correction).negate())-d;
-      if(precise)correction.copy(normal).negate();
-      if(overlap<=0)continue;
-      const ia=a.owner||a.frozen?0:1/a.mass,ib=b.owner||b.frozen?0:1/b.mass,total=ia+ib;
-      a.mesh.position.addScaledVector(correction,-overlap*ia/total);
-      b.mesh.position.addScaledVector(correction,overlap*ib/total);
-      const relative=tangent.subVectors(b.velocity,a.velocity).dot(correction);
-      if(relative<0){
-        const impulse=-relative*(1+rebound)/total;
-        a.velocity.addScaledVector(correction,-impulse*ia);
-        b.velocity.addScaledVector(correction,impulse*ib);
+    for(let pass=0;pass<SOLVER_PASSES;pass++){
+      let changed=false;
+      for(const state of states){
+        if(!state.inverseMass)continue;
+        for(const {box,bounds} of arena){
+          if(!overlapsArena(state.bounds,box,bounds))continue;
+          const depth=shapeContact(state.body,box,normal,contact);
+          if(depth>0)changed=resolveContact(state,null,box,depth,rebound)||changed;
+        }
       }
+
+      // A sweep over world AABBs also rejects thin or rotated shapes whose bounding spheres overlap.
+      for(const state of states){
+        state.sweepStart=state.bounds.min.x;
+        state.sweepEnd=state.bounds.max.x;
+      }
+      states.sort((a,b)=>a.sweepStart-b.sweepStart);
+      for(let i=0;i<states.length;i++){
+        const a=states[i];
+        for(let j=i+1;j<states.length;j++){
+          const b=states[j];
+          if(b.sweepStart>a.sweepEnd)break;
+          if((!a.inverseMass&&!b.inverseMass)||!a.bounds.intersectsBox(b.bounds))continue;
+          const depth=sat(a.body,b.body,normal);
+          if(depth<=0)continue;
+          contactPoint(a.body,b.body,normal,contact);
+          changed=resolveContact(a,b,null,depth,rebound)||changed;
+        }
+      }
+      if(!changed)break;
     }
+    for(const state of states)if(state.inverseMass)slowRolling(state,step);
   }
 }
 
@@ -361,7 +602,7 @@ export function playerObjectContact(position,radius,object,velocity){
   const inward=velocity.dot(normal);
   if(inward<0){
     velocity.addScaledVector(normal,-inward);
-    if(Math.abs(normal.y)<.6)object.velocity.addScaledVector(normal,-Math.min(2.8,-inward*.24));
+    if(Math.abs(normal.y)<.6&&isDynamic(object))object.velocity.addScaledVector(normal,-Math.min(2.8,-inward*.24));
   }
   return true;
 }

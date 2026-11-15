@@ -1,5 +1,6 @@
 
 import * as T from 'three';
+import {tiledBox} from './texture-geometry.js';
 import {boxCollider} from './physics.js';
 import {mapCode} from './cloud-link.js';
 import {parseMap,makePiece,snapPlacement,maxPieces,maxMapBytes,storageKey,downloadMap} from './map-format.js';
@@ -29,19 +30,19 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
         if(texture.image.width>2048||texture.image.height>2048){material.map=null;texture.dispose();material.needsUpdate=true;inform('Une texture a été ignorée : maximum 2048 px.');}
       },undefined,()=>{material.map=null;material.needsUpdate=true;});
       material.map.colorSpace=T.SRGBColorSpace;
+      material.map.wrapS=material.map.wrapT=T.RepeatWrapping;
     }
     return {material,custom:true,ownTexture:Boolean(model.texture)};
   }
   function removeRow(row){
-    group.remove(row.mesh);
+    group.remove(row.mesh);row.mesh.geometry.dispose();
     if(row.custom){if(row.ownTexture)row.mesh.material.map?.dispose();row.mesh.material.dispose();}
   }
   function makeRow(piece,index){
     const {material,custom,ownTexture}=card(piece);
-    const mesh=new T.Mesh(slab,material);
+    const mesh=new T.Mesh(tiledBox(piece.w,piece.h,piece.d),material);
     mesh.position.set(piece.x,piece.y,piece.z);
     mesh.rotation.set(T.MathUtils.degToRad(piece.pitch),T.MathUtils.degToRad(piece.yaw),0,'YXZ');
-    mesh.scale.set(piece.w,piece.h,piece.d);
     mesh.castShadow=mesh.receiveShadow=true;
     mesh.userData.mapIndex=index;
     group.add(mesh);
@@ -49,6 +50,17 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     const collider={mesh,position:mesh.position,quaternion:mesh.quaternion,half,min:half.clone().negate(),
       shape:boxCollider(half),friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:true,type:piece.material};
     return {mesh,collider,custom,ownTexture};
+  }
+  function refreshMaterials(){
+    for(const row of meshRows){
+      const model=map?.pieces[row.mesh.userData.mapIndex];
+      if(!model||row.ownTexture)continue;
+      const base=arena.mapMaterial(model.material,getLevel());
+      if(!row.custom)row.mesh.material=base;
+      else if(row.mesh.material.map!==base.map){
+        row.mesh.material.map=base.map;row.mesh.material.needsUpdate=true;
+      }
+    }
   }
   function rebuild(){
     for(const row of meshRows)removeRow(row);
@@ -105,6 +117,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     if(mode===2||mode===3||mode===4){
       if(!hit)return;
       const index=hit.object.userData.mapIndex;
+      const selectedPiece=map.pieces[index];
       if(click&&mode===2){selection=index;moving=index;inform('Pièce saisie. Mode Poser pour la déplacer.');}
       if(click&&mode===3){
         if(map.pieces.length===1)return inform('Garde au moins une pièce dans la map.');
@@ -115,7 +128,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
         rebuild();inform('Surface modifiée.');
       }
       if(hit){
-        ghost.position.copy(hit.object.position);ghost.rotation.copy(hit.object.rotation);ghost.scale.copy(hit.object.scale).multiplyScalar(1.006);ghost.visible=true;
+        ghost.position.copy(hit.object.position);ghost.rotation.copy(hit.object.rotation);ghost.scale.set(selectedPiece.w,selectedPiece.h,selectedPiece.d).multiplyScalar(1.006);ghost.visible=true;
         ghost.material.color.set(mode===3?'#ff8271':'#ffe2a2');
       }
       return;
@@ -162,7 +175,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   document.querySelector('#map-load-url').onclick=()=>loadURL(url.value);
   document.querySelector('#map-export').onclick=save;
   document.querySelector('#map-reset').onclick=reset;
-  return {load,loadURL,reset,blank,undo,save,edit,recenter,inform,
+  return {refreshMaterials,load,loadURL,reset,blank,undo,save,edit,recenter,inform,
     clearGhost(){ghost.visible=false;},get active(){return Boolean(map);},get status(){return status;},get yaw(){return map?.spawn.yaw??0;},
     get nodes(){return map?.pieces.length??0;},get name(){return map?.name??null;},get signature(){return signature;},
   };

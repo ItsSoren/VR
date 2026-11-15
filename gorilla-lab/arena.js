@@ -1,6 +1,8 @@
 
 import * as T from 'three';
 import {boxCollider} from './physics.js';
+import {tiledBox} from './texture-geometry.js';
+import {createLabSky} from './sky-texture.js';
 import {labBounds,labFloors,labMaterialSample,labProbe,labStructures,labZones} from './lab-layout.js';
 
 function canvasTexture(w,h,paint) {
@@ -10,18 +12,7 @@ function canvasTexture(w,h,paint) {
   return map;
 }
 export function buildArena(scene,renderer) {
-  const sky=canvasTexture(512,256,(ctx,w,h)=>{
-    const gradient=ctx.createLinearGradient(0,20,0,h*.57);
-    gradient.addColorStop(0,'#2376bf');gradient.addColorStop(.65,'#72bff1');gradient.addColorStop(1,'#f4e5c8');
-    ctx.fillStyle=gradient;ctx.fillRect(0,0,w,h);
-    for(let i=0;i<58;i++){
-      const x=(i*173.833)%w,y=73+(i*23.45)%48;
-      ctx.fillStyle='rgba(255,254,235,'+(.014+(i%6)*.014)+')';
-      for(const dx of [-w,0,w]){
-        ctx.beginPath();ctx.ellipse(x+dx,y,14+(i%8)*7,3+(i%4)*2,0,0,Math.PI*2);ctx.fill();
-      }
-    }
-  });
+  const {day:sky,night:nightSky}=createLabSky();
   const dome=new T.Mesh(new T.SphereGeometry(180,40,20),new T.MeshBasicMaterial({map:sky,side:T.BackSide,fog:false,toneMapped:false}));
   scene.add(dome);
   const haloTexture=canvasTexture(128,128,(ctx,w)=>{
@@ -51,7 +42,7 @@ export function buildArena(scene,renderer) {
   const moods=[
     {sky:'#ffffff',fog:'#a6d4ea',fill:'#daeaff',ground:'#88724c',hemi:2.25,sun:'#fff0d0',power:3,xyz:[-14,25,-16],glow:1},
     {sky:'#e39b85',fog:'#ec986e',fill:'#d8b6dc',ground:'#b37762',hemi:1.15,sun:'#ff9c51',power:3.25,xyz:[-25,7,-18],glow:.93},
-    {sky:'#26386c',fog:'#202f55',fill:'#9ab8ff',ground:'#5b5065',hemi:.55,sun:'#b2caff',power:.75,xyz:[22,20,-18],glow:.42},
+    {sky:'#ffffff',fog:'#0b1020',fill:'#708edc',ground:'#292e44',hemi:.21,sun:'#879eff',power:.27,xyz:[22,20,-18],glow:.19},
   ];
   let mood=0;
   function setTimeOfDay(index){
@@ -63,10 +54,11 @@ export function buildArena(scene,renderer) {
     sun.position.copy(sun.target.position).add(lightOffset);
     halo.position.copy(lightOffset).normalize().multiplyScalar(94);
     halo.material.color.set(light.sun);halo.material.opacity=light.glow;
+    dome.material.map=mood===2?nightSky:sky;
     dome.material.color.set(light.sky);
     scene.fog.color.set(light.fog);
     scene.background.set(light.fog);
-    scene.environmentIntensity=baseReflection*[1,.56,.22][mood];
+    scene.environmentIntensity=baseReflection*[1,.56,.09][mood];
   }
   function centerShadows(point){
     if(!sun.castShadow)return;
@@ -96,8 +88,9 @@ export function buildArena(scene,renderer) {
     ['Mosaique','#455d62','#f4d2a4',.52,.16,1],
     ['Benchmark','#141414','#efefef',.86,0,1],
   ];
-  const tiles=palette.map(([name,color,accent,roughness,metalness,opacity],index)=>{
-    const tex=canvasTexture(512,512,(ctx,w)=>{
+  function drawTile(ctx,index,detailSize){
+      const [,color,accent]=palette[index],w=512;
+      ctx.save();ctx.scale(detailSize/512,detailSize/512);
       ctx.fillStyle=color;ctx.fillRect(0,0,w,w);
       let seed=index+19;
       function rng(){seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;}
@@ -138,9 +131,13 @@ export function buildArena(scene,renderer) {
         ctx.fillStyle=rng()>.5?accent:'#222324';
         ctx.fillRect(rng()*w,rng()*w,1+rng()*4,1+rng()*3);
       }
-    });
+      ctx.restore();
+  }
+  const detailedTiles=new Set([0,2,4,5,8,15,16]);
+  const tiles=palette.map(([name,color,accent,roughness,metalness,opacity],index)=>{
+    const size=detailedTiles.has(index)?512:256;
+    const tex=canvasTexture(size,size,ctx=>drawTile(ctx,index,size));
     tex.wrapS=tex.wrapT=T.RepeatWrapping;
-    if(index<4)tex.repeat.set(index===1?2:4,index===1?2:4);
     const material=new T.MeshStandardMaterial({map:tex,roughness,metalness,flatShading:true,opacity,
       transparent:opacity<1,depthWrite:opacity===1});
     material.name=name;
@@ -193,8 +190,8 @@ export function buildArena(scene,renderer) {
     material.customProgramCacheKey=()=> 'gorilla-lab-focus-lightmap-v2';
   }
   const boxes=[], props=[];
-  function box(name,x,y,z,w,h,d,type=0,angle=0,friction=1,gravity=1) {
-    const mesh=new T.Mesh(new T.BoxGeometry(w,h,d),tiles[type]);
+  function box(name,x,y,z,w,h,d,type=0,angle=0,friction=1,gravity=1,showTexture=false) {
+    const mesh=new T.Mesh(showTexture?new T.BoxGeometry(w,h,d):tiledBox(w,h,d),tiles[type]);
     mesh.position.set(x,y,z);
     mesh.rotation.x=angle;
     mesh.receiveShadow=true;mesh.castShadow=true;
@@ -217,6 +214,8 @@ export function buildArena(scene,renderer) {
   const hillWidth=hillRight-hillX,hillDepth=hillBack-hillZ,hillCols=16,hillRows=64;
   const hillGeometry=new T.PlaneGeometry(hillWidth,hillDepth,hillCols,hillRows).rotateX(-Math.PI/2)
     .translate(hillX+hillWidth/2,0,hillZ+hillDepth/2);
+  const hillUV=hillGeometry.attributes.uv;
+  for(let i=0;i<hillUV.count;i++)hillUV.setXY(i,hillUV.getX(i)*hillWidth/2.6,hillUV.getY(i)*hillDepth/2.6);
   const hillPositions=hillGeometry.attributes.position;
   let hillSeed;
   function setHillSeed(seed){
@@ -271,7 +270,7 @@ export function buildArena(scene,renderer) {
   probe.position.set(labProbe.x,labProbe.y,labProbe.z);probe.castShadow=true;scene.add(probe);
   const display=palette.map((_,i)=>{
     const {x,z}=labMaterialSample(i);
-    return box('Échantillon '+palette[i][0],x,.325,z,.65,.65,.65,i).mesh;
+    return box('Échantillon '+palette[i][0],x,.325,z,.65,.65,.65,i,0,1,1,true).mesh;
   });
   const shadowGeo=new T.CircleGeometry(1,12).rotateX(-Math.PI/2);
   const shadowMaterial=new T.MeshBasicMaterial({color:0x564b38,transparent:true,opacity:.13,depthWrite:false});
@@ -294,21 +293,13 @@ export function buildArena(scene,renderer) {
       textureSize=size;
       tiles.forEach((m,i)=>{
         const tex=m.userData.texture??m.map;
+        const targetSize=detailedTiles.has(i)?size:Math.min(256,size);
+        if(tex.image.width===targetSize)return;
         const image=document.createElement('canvas');
-        image.width=image.height=size;
+        image.width=image.height=targetSize;
         const ctx=image.getContext('2d');
-        ctx.drawImage(originals[i],0,0,size,size);
-        if(size>512){
-          let seed=i+188;
-          for(let p=0;p<size*13;p++){
-            seed=(Math.imul(seed,1664525)+1013904223)>>>0;
-            const x=seed%size;
-            seed=(Math.imul(seed,1664525)+1013904223)>>>0;
-            const y=seed%size;
-            ctx.fillStyle=(seed&256)?'rgba(255,249,225,.085)':'rgba(25,33,40,.08)';
-            ctx.fillRect(x,y,1+(seed>>>20)%3,1);
-          }
-        }
+        if(targetSize>512)drawTile(ctx,i,targetSize);
+        else ctx.drawImage(originals[i],0,0,targetSize,targetSize);
         const resized=new T.CanvasTexture(image);
         resized.colorSpace=tex.colorSpace;resized.wrapS=tex.wrapS;resized.wrapT=tex.wrapT;resized.repeat.copy(tex.repeat);
         for(const material of [m,alt[i]]){material.userData.texture=resized;material.map=resized;material.needsUpdate=true;}
