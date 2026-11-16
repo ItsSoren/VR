@@ -7,15 +7,19 @@ export function createBlasterSystem({scene,rig,camera,arena,objects,spectator}){
   let blasterInFlight=0;
   const shotRay=new T.Raycaster(),shotsAgainst=[],shotObjects=new Map();
   // Le tir interroge les surfaces visuelles. Seule la simulation locale de référence pousse les objets.
-  const blaster=createArcadeBlaster(scene,{impact(origin,direction,length){
+  const blaster=createArcadeBlaster(scene,{
+    onShot:(position,quaternion)=>spectator.sendShot(position,quaternion),
+    impact(origin,direction,length,authoritative){
     shotRay.set(origin,direction);shotRay.far=length;
     const hit=shotRay.intersectObjects(shotsAgainst,false)[0];
     if(!hit)return null;
     const body=shotObjects.get(hit.object);
-    if(body&&!body.owner&&!body.frozen)body.velocity.addScaledVector(direction,Math.min(4,2.6/body.mass));
+    if(authoritative&&body&&!body.owner&&!body.frozen)body.velocity.addScaledVector(direction,Math.min(4,2.6/body.mass));
     return hit.distance;
   }});
-  const blasterAim={position:new T.Vector3(),quaternion:new T.Quaternion(),direction:new T.Vector3(),modelPosition:new T.Vector3()};
+  const blasterAim={position:new T.Vector3(),quaternion:new T.Quaternion(),modelPosition:new T.Vector3()};
+  const visibleGun={position:blasterAim.modelPosition,quaternion:blasterAim.quaternion};
+  let gun=null;
   function update({frame,space,inVR,enabled,remoteWorld,dt,yaw,drop,rightHand,flatFiring}){
     let aim=null,firing=false;
     if(enabled){
@@ -28,17 +32,16 @@ export function createBlasterSystem({scene,rig,camera,arena,objects,spectator}){
           aim.position.set(p.x,p.y-drop,p.z).applyAxisAngle(up,yaw).add(rig.position);
           aim.modelPosition.copy(rightHand.valid?rightHand.mesh.position:aim.position);
           aim.quaternion.set(q.x,q.y,q.z,q.w).premultiply(spin.setFromAxisAngle(up,yaw));
-          aim.direction.set(0,0,-1).applyQuaternion(aim.quaternion);
           firing=Boolean(input.gamepad?.buttons[0]?.pressed);
         }
       }else{
         aim=blasterAim;
         camera.getWorldPosition(aim.position);camera.getWorldQuaternion(aim.quaternion);
-        aim.direction.set(0,0,-1).applyQuaternion(aim.quaternion);
         aim.modelPosition.set(.16,-.17,-.43).applyQuaternion(aim.quaternion).add(aim.position);
         firing=flatFiring;
       }
     }
+    gun=aim?visibleGun:null;
     shotsAgainst.length=0;shotObjects.clear();
     if(aim||blasterInFlight){
       for(const box of arena.boxes)if(box.mesh?.isMesh&&box.mesh.visible)shotsAgainst.push(box.mesh);
@@ -54,7 +57,12 @@ export function createBlasterSystem({scene,rig,camera,arena,objects,spectator}){
 
   return {
     update,
-    reset(){blaster.reset();blasterInFlight=0;},
+    receiveShot({position,quaternion},authoritative){
+      blaster.replay(position,new T.Quaternion().copy(quaternion),authoritative);
+      blasterInFlight=1.3;
+    },
+    reset(){blaster.reset();blasterInFlight=0;gun=null;},
+    get gun(){return gun;},
     get shotsFired(){return blaster.shotsFired;},
   };
 }

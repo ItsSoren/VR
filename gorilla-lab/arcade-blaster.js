@@ -1,11 +1,11 @@
 import * as T from 'three';
 
-const shotInterval=.1, speed=45, range=55, maxShots=24, maxSparks=96;
+const shotInterval=.1, speed=45, range=55, maxShots=128, maxSparks=96;
 const tracerPalette=[new T.Color('#ffdc4d'),new T.Color('#ff5d35'),new T.Color('#bfc4c8')];
 const axis=new T.Vector3(0,0,-1);
 
 // impact reçoit le segment parcouru pendant cette image et renvoie la distance du premier obstacle.
-export function createArcadeBlaster(scene,{impact}){
+export function createBlasterModel(){
   const mesh=new T.Group(), bore=new T.MeshStandardMaterial({color:'#596974',roughness:.38,metalness:.60});
   const shell=new T.MeshStandardMaterial({color:'#29323e',roughness:.68});
   const accent=new T.MeshBasicMaterial({color:'#ffd563',toneMapped:false});
@@ -17,6 +17,11 @@ export function createArcadeBlaster(scene,{impact}){
   part(new T.BoxGeometry(.042,.080,.055),bore,.035,-.025,-.022,-.22);
   part(new T.CylinderGeometry(.020,.024,.071,8).rotateX(Math.PI/2),bore,.035,.028,-.161);
   part(new T.BoxGeometry(.024,.010,.025),accent,.035,.061,-.133);
+  return mesh;
+}
+
+export function createArcadeBlaster(scene,{impact,onShot}){
+  const mesh=createBlasterModel();
   const flash=new T.Mesh(new T.IcosahedronGeometry(.045,0),new T.MeshBasicMaterial({color:'#ffb339',transparent:true,depthWrite:false,toneMapped:false}));
   flash.position.set(.035,.028,-.208);mesh.add(flash);
   scene.add(mesh);mesh.visible=false;
@@ -38,7 +43,7 @@ export function createArcadeBlaster(scene,{impact}){
     transparent:true,opacity:.77,depthWrite:false,blending:T.AdditiveBlending}));
   sparks.frustumCulled=false;sparks.visible=false;scene.add(sparks);
   // Les deux pools réutilisent leurs emplacements, même si la gâchette reste enfoncée.
-  const shots=Array.from({length:maxShots},()=>({p:new T.Vector3(),d:new T.Vector3(),distance:0,active:false}));
+  const shots=Array.from({length:maxShots},()=>({p:new T.Vector3(),d:new T.Vector3(),distance:0,active:false,authoritative:false}));
   const particles=Array.from({length:maxSparks},()=>({p:new T.Vector3(),v:new T.Vector3(),life:0}));
   const muzzle=new T.Vector3(),scratch=new T.Vector3(),side=new T.Vector3();
   let nextShot=0,nextSpark=0,total=0,delay=0,glow=0,wasFiring=false;
@@ -51,16 +56,23 @@ export function createArcadeBlaster(scene,{impact}){
       spark.life=.12+Math.random()*.21;
     }
   }
-  function fire(aim){
+  function startShot(position,quaternion,authoritative){
     const shot=shots[nextShot++%maxShots];
-    // Keep the trajectory on the sightline even though the gun model sits to one side.
-    muzzle.copy(aim.position);
-    shot.p.copy(muzzle);shot.d.copy(aim.direction).normalize();
-    if(shot.d.lengthSq()<.5)shot.d.copy(axis).applyQuaternion(aim.quaternion);
-    shot.distance=0;shot.active=true;
-    scratch.set(.035,.028,-.208).applyQuaternion(mesh.quaternion).add(mesh.position);
-    burst(scratch,shot.d,4,2.2);
+    shot.p.copy(position);shot.d.copy(axis).applyQuaternion(quaternion);
+    shot.distance=0;shot.active=true;shot.authoritative=authoritative;
+    return shot;
+  }
+  function fire(aim){
+    const shot=startShot(aim.position,aim.quaternion,true);
+    muzzle.set(.035,.028,-.208).applyQuaternion(mesh.quaternion).add(mesh.position);
+    burst(muzzle,shot.d,4,2.2);
     glow=.055;total++;
+    onShot?.(aim.position,aim.quaternion);
+  }
+  function replay(position,quaternion,authoritative){
+    const shot=startShot(position,quaternion,authoritative);
+    burst(shot.p,shot.d,4,2.2);
+    traces.visible=true;
   }
   function update({dt,aim,firing}){
     if(!aim&&!mesh.visible&&!traces.visible&&!sparks.visible)return;
@@ -84,7 +96,7 @@ export function createArcadeBlaster(scene,{impact}){
     for(const shot of shots){
       if(!shot.active)continue;
       const maxDistance=Math.min(speed*dt,range-shot.distance);
-      const hit=maxDistance>0?impact?.(shot.p,shot.d,maxDistance):null;
+      const hit=maxDistance>0?impact?.(shot.p,shot.d,maxDistance,shot.authoritative):null;
       const travel=hit==null?maxDistance:Math.max(0,Math.min(maxDistance,hit));
       shot.p.addScaledVector(shot.d,travel);shot.distance+=travel;
       if(hit!=null){side.copy(shot.d).negate();burst(shot.p,side,8,4.2);}
@@ -118,5 +130,5 @@ export function createArcadeBlaster(scene,{impact}){
     delay=glow=0;wasFiring=false;mesh.visible=flash.visible=traces.visible=sparks.visible=false;
     geometry.setDrawRange(0,0);sparkGeometry.setDrawRange(0,0);
   }
-  return {update,reset,get shotsFired(){return total;}};
+  return {update,reset,replay,get shotsFired(){return total;}};
 }

@@ -5,6 +5,8 @@ const names={vr:'☁ GorillaVR',pc:'☁ GorillaPC'};
 const playerNames=Array.from({length:8},(_,i)=>'☁ GorillaPlayer'+i);
 const roles=new Map([[names.vr,'vr'],[names.pc,'pc'],...playerNames.map(name=>[name,'player'])]);
 const maxObjectType=53, freshness=4400, maxValueLength=64000;
+// TurboWarp regroupe les mises à jour : un seul paquet toutes les 100 ms par client actif.
+const playerInterval=100, spectatorInterval=200, repeatShotsFor=450, maxShotEvents=6;
 const digits=(n,width)=>Math.round(n).toString().padStart(width,'0');
 export function roomCode(value){return String(value).trim().toUpperCase().replace(/[\s-]/g,'');}
 export function mapCode(value){
@@ -29,13 +31,15 @@ export function decodePose(value,now=Date.now()){
 }
 
 // Le relais transporte des états et des intentions. L’hôte garde l’autorité sur la physique.
-export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},onAction=()=>{},
+export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},onAction=()=>{},onShot=()=>{},
     Socket=globalThis.WebSocket,now=Date.now,monotonicNow=now===Date.now?()=>performance.now():now,random=Math.random}={}){
   const senders=new Map();
   const clockStart=monotonicNow(),wallStart=now();
   let socket=null,role=null,code='',id=0,channel='',lastSend=-Infinity,remote=null,openedAt=0,startedAt=0;
   let retryAt=Infinity,retries=0,state='offline',localReady=false,localMap=-1;
   let actionNumber=0,pendingActions=[],collisionAt=Infinity;
+  let shotNumber=0,pendingShots=[];
+  let networkStats={sent:0,received:0,bytesSent:0,bytesReceived:0,bufferedBytes:0};
   function status(next,message){state=next;onStatus(message);}
   function waitLabel(){return 'Salon '+code+' · '+(role==='vr'?'en attente de joueurs ou du spectateur':'en attente du joueur VR');}
   function peerPoses(){return [...senders.values()].map(sender=>sender.pose).filter(Boolean);}
@@ -64,7 +68,7 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
   }
   function leave(){
     closeSocket();
-    role=null;code='';retryAt=Infinity;localReady=false;localMap=-1;pendingActions=[];
+    role=null;code='';retryAt=Infinity;localReady=false;localMap=-1;pendingActions=[];pendingShots=[];
     disconnectPeers(true);
     status('offline','Hors ligne');
   }
@@ -88,7 +92,7 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
     let sender=senders.get(data.id);
     if(!sender){
       if(senders.size>=64)return;
-      sender={lastTime:-Infinity,lastAction:0,lastArrival:time,pose:null,candidate:null};
+      sender={lastTime:-Infinity,lastAction:0,lastShot:0,shotWindow:-Infinity,shotCount:0,lastArrival:time,pose:null,candidate:null};
       senders.set(data.id,sender);
     }
     if(data.time<=sender.lastTime)return;
@@ -98,7 +102,7 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
       sender.candidate=null;
     }
     sender.lastTime=data.time;sender.lastArrival=time;
-    const pose={...data,ready:data.ready??true,protocol:data.ready===undefined?3:4,role:peerRole,channel:name,received:now(),arrival:time};
+    const pose={...data,ready:data.ready??true,protocol:data.protocol??(data.ready===undefined?3:4),role:peerRole,channel:name,received:now(),arrival:time};
     const candidate=sender.candidate;
     // A retained value cannot prove a modern client is still broadcasting. Legacy
     // packets can be used immediately if their timestamp is close to the local clock.
@@ -110,9 +114,21 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
     sender.candidate=null;
     if(!sender.pose&&candidate?.objects&&candidate.ready&&candidate.map===pose.map&&!pose.objects)pose.objects=candidate.objects;
     sender.pose=pose;
+    networkStats.received++;networkStats.bytesReceived+=packet.value.length;
     onPeer(pose);
     selectRemote();
-    if(role!=='vr'||peerRole!=='player'||!localReady||!pose.ready||pose.map!==localMap||data.actionTarget!==id)return;
+    if(!localReady||!pose.ready||pose.map!==localMap)return;
+    // Le relais peut sauter un état. Chaque tir est répété quelques paquets, puis dédupliqué.
+    if(time-sender.shotWindow>=1000){sender.shotWindow=time;sender.shotCount=0;}
+    for(const {seq,position,quaternion} of pose.shots??[]){
+      if(seq<=sender.lastShot)continue;
+      sender.lastShot=seq;
+      if(sender.shotCount>=14||
+        (position.x-pose.x)**2+(position.y-pose.y)**2+(position.z-pose.z)**2>7**2)continue;
+      sender.shotCount++;
+      onShot({position,quaternion},pose);
+    }
+    if(role!=='vr'||peerRole!=='player'||data.actionTarget!==id)return;
     for(const {seq,action} of data.actions){
       if(seq<=sender.lastAction)continue;
       sender.lastAction=seq;
@@ -150,7 +166,7 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
     ws.onclose=event=>{
       if(socket!==ws)return;
       const closeCode=event.code;
-      closeSocket();disconnectPeers(false);pendingActions=[];
+      closeSocket();disconnectPeers(false);pendingActions=[];pendingShots=[];
       if([1001,1005,1006,1011,1012,1013,1014,4003].includes(closeCode)){retry(closeCode);return;}
       role=null;code='';
       const detail={4000:'requête invalide',4002:'identifiant refusé',4004:'salon indisponible',4005:'connexion refusée',4006:'client non identifié'}[closeCode];
@@ -169,18 +185,29 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
     disconnectPeers(true);
     id=Math.floor(1000000+random()*8999999);
     role=nextRole;code=normalized;channel=names[role]??playerNames[id%playerNames.length];
-    actionNumber=0;retries=0;retryAt=collisionAt=Infinity;
+    actionNumber=shotNumber=0;pendingShots=[];
+    networkStats={sent:0,received:0,bytesSent:0,bytesReceived:0,bufferedBytes:0};
+    retries=0;retryAt=collisionAt=Infinity;
     if(openSocket())return true;
     role=null;code='';status('error','WebSocket indisponible.');
     return false;
   }
   function sendAction(action,map){
-    if(role!=='player'||state!=='open'||!remote?.ready||remote.protocol<4||remote.map!==map||!encodeAction(action)||actionNumber>=99_999_999)return false;
+    const minimumProtocol=action.hand||action.type==='world'?5:4;
+    if(role!=='player'||state!=='open'||!remote?.ready||remote.protocol<minimumProtocol||remote.map!==map||!encodeAction(action)||actionNumber>=99_999_999)return false;
     const time=monotonicNow();
     pendingActions=pendingActions.filter(entry=>entry.expires>=time&&entry.target===remote.id&&entry.map===map);
     if(pendingActions.length>=8)return false;
     pendingActions.push({action:{...action},seq:++actionNumber,expires:time+1800,target:remote.id,map});
     return true;
+  }
+  function queueShot(position,quaternion,map){
+    if(!role||role==='pc'||state!=='open'||shotNumber>=99_999_999)return;
+    const point=packPoint(position),rotation=packQuat(quaternion);
+    if(!point||!rotation)return;
+    const time=monotonicNow();
+    pendingShots=pendingShots.filter(s=>s.expires>=time&&s.map===map).slice(-(maxShotEvents-1));
+    pendingShots.push({record:digits(++shotNumber,8)+point+rotation,expires:time+repeatShotsFor,map});
   }
   function tick(data){
     const time=monotonicNow();
@@ -191,7 +218,9 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
       if(!openSocket())retry(1006);
     }
     if(socket&&socket.readyState===0&&time-startedAt>10_000){closeSocket();retry(1006);}
-    if(!data||!role||socket?.readyState!==1||socket.bufferedAmount>4096||time-openedAt<350||time-lastSend<100)return false;
+    networkStats.bufferedBytes=socket?.bufferedAmount??0;
+    const interval=role==='pc'?spectatorInterval:playerInterval;
+    if(!data||!role||socket?.readyState!==1||networkStats.bufferedBytes>4096||time-openedAt<350||time-lastSend<interval)return false;
     if(role==='player'){
       const active=peerPoses().filter(p=>p.role==='player');
       const incumbent=active.find(p=>p.channel===channel);
@@ -208,21 +237,25 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
     const pose=encodePose({...data,time:wallTime,id});
     if(!pose)return false;
     pendingActions=pendingActions.filter(entry=>entry.expires>=time&&entry.target===remote?.id&&entry.map===data.map);
-    const modern=data.ready!==undefined||data.avatar?.tool||role==='player';
-    const value=encodeAvatar(pose,data.avatar,data.objectFeed?.(time),modern?{
-      ready:data.ready!==false,actions:pendingActions,actionTarget:pendingActions[0]?.target??0,
-    }:null);
+    pendingShots=pendingShots.filter(s=>s.expires>=time&&s.map===data.map);
+    const delta=networkStats.bufferedBytes===0?data.objectFeed?.(time):null;
+    const avatar=typeof data.avatar==='function'?data.avatar():data.avatar;
+    const value=encodeAvatar(pose,avatar,delta,{
+      version:5,ready:data.ready!==false,actions:pendingActions,actionTarget:pendingActions[0]?.target??0,
+      shots:pendingShots,score:data.score,
+    });
     lastSend=time;
     socket.send(JSON.stringify({method:'set',name:channel,value})+'\n');
+    networkStats.sent++;networkStats.bytesSent+=value.length;
     return true;
   }
-  return {join,leave,tick,sendAction,get role(){return role;},get code(){return code;},get state(){return state;},
+  return {join,leave,tick,sendAction,queueShot,get stats(){return {...networkStats};},get role(){return role;},get code(){return code;},get state(){return state;},
     get remote(){return remote;},get peers(){return peerPoses();}};
 }
 
 
 
-const pointSize=15, quatSize=12, objectSize=44, actionSize=15;
+const pointSize=15, quatSize=12, objectSize=44, actionSize=15, shotSize=35;
 const packPoint=p=>p&&[p.x,p.y,p.z].every(n=>Number.isFinite(n)&&Math.abs(n)<=180)
   ?[p.x,p.y,p.z].map(n=>digits(n*100+20000,5)).join(''):null;
 function unpackPoint(s,i){
@@ -271,16 +304,25 @@ function encodeAction(action){
   if(!action)return null;
   const {type,typeId,objectId,mode}=action;
   if(type==='spawn')return Number.isInteger(typeId)&&typeId>=0&&typeId<=maxObjectType?'10'+digits(typeId,5):null;
+  if(type==='world'){
+    const maxType=mode===1?2:mode===2?4:-1;
+    return Number.isInteger(typeId)&&typeId>=0&&typeId<=maxType?'5'+mode+digits(typeId,5):null;
+  }
   if(!Number.isInteger(objectId)||objectId<1||objectId>=100000)return null;
   if(type==='tool')return Number.isInteger(mode)&&mode>=1&&mode<=7?'2'+mode+digits(objectId,5):null;
-  if(type==='hold'||type==='release')return (type==='hold'?'30':'40')+digits(objectId,5);
+  const hand=action.hand??0;
+  if((type==='hold'||type==='release')&&[0,1,2].includes(hand))return (type==='hold'?'3':'4')+hand+digits(objectId,5);
   return null;
 }
 function decodeAction(value){
   const kind=value[0],mode=Number(value[1]),objectId=Number(value.slice(2));
-  const type=['','spawn','tool','hold','release'][kind];
+  const type=['','spawn','tool','hold','release','world'][kind];
   if(!type)return null;
-  const action=type==='spawn'?{type,typeId:objectId}:type==='tool'?{type,mode,objectId}:{type,objectId};
+  let action={type,objectId};
+  if(type==='spawn')action={type,typeId:objectId};
+  else if(type==='world')action={type,mode,typeId:objectId};
+  else if(type==='tool')action.mode=mode;
+  else if(mode)action.hand=mode;
   return encodeAction(action)===value?action:null;
 }
 function packTool(tool){
@@ -295,8 +337,14 @@ export function encodeAvatar(pose,avatar,delta,meta=null){
     return pose+'3'+packed+(delta?(delta.full?'2':'1')+records:'0');
   }
   const actions=(meta.actions??[]).map(({seq,action})=>digits(seq,8)+encodeAction(action)).join('');
-  const head=pose+'4'+Number(meta.ready)+Number(Boolean(packed))+(packed??'')+packTool(packed?avatar.tool:null)+
-    digits(meta.actionTarget??0,7)+digits(actions.length/actionSize,1)+actions;
+  const extended=meta.version===5;
+  const gunPosition=extended&&packPoint(avatar?.gun?.position),gunRotation=extended&&packQuat(avatar?.gun?.quaternion);
+  const gun=packed&&gunPosition&&gunRotation?'1'+gunPosition+gunRotation:'0';
+  const shots=meta.shots??[];
+  const extra=extended?gun+digits(shots.length,1)+shots.map(s=>s.record).join('')+
+    digits(Math.max(0,Math.min(999999,meta.score??0)),6):'';
+  const head=pose+(extended?'5':'4')+Number(meta.ready)+Number(Boolean(packed))+(packed??'')+packTool(packed?avatar.tool:null)+
+    digits(meta.actionTarget??0,7)+digits(actions.length/actionSize,1)+actions+extra;
   if(head.length+1+records.length>maxValueLength){delta=null;records='';}
   return head+(delta?(delta.full?'2':'1'):'0')+records;
 }
@@ -320,7 +368,8 @@ export function decodeAvatar(value,now){
   const legacy=value[46]==='2';
   const stride=legacy?43:objectSize;
   let header=legacy?125:133;
-  if(value[46]==='4'){
+  if(value[46]==='4'||value[46]==='5'){
+    pose.protocol=Number(value[46]);
     if(value.length<59||!/[01]/.test(value[47])||!/[01]/.test(value[48]))return null;
     pose.ready=value[47]==='1';
     let i=49;
@@ -350,6 +399,27 @@ export function decodeAvatar(value,now){
       if(!action||seq<=lastSeq)return null;
       pose.actions.push({seq,action});lastSeq=seq;
     }
+    if(pose.protocol===5){
+      if(value[i]==='1'){
+        if(!pose.avatar||value.length<i+28)return null;
+        const position=unpackPoint(value,i+1),quaternion=unpackQuat(value,i+16);
+        if(!position||!quaternion)return null;
+        pose.avatar.gun={position,quaternion};
+        i+=28;
+      }else if(value[i]==='0')i++;
+      else return null;
+      const count=Number(value[i++]);
+      if(!Number.isInteger(count)||count>maxShotEvents||value.length<i+count*shotSize+7)return null;
+      pose.shots=[];
+      let previous=0;
+      for(let end=i+count*shotSize;i<end;i+=shotSize){
+        const seq=Number(value.slice(i,i+8)),position=unpackPoint(value,i+8),quaternion=unpackQuat(value,i+23);
+        if(seq<=previous||!position||!quaternion)return null;
+        pose.shots.push({seq,position,quaternion});previous=seq;
+      }
+      pose.score=Number(value.slice(i,i+6));
+      header=i+7;
+    }
   }else{
     if((!legacy&&value[46]!=='3')||value.length<header)return null;
     if(!(pose.avatar=unpackAvatar(value,47,legacy)))return null;
@@ -374,7 +444,7 @@ export function decodeAvatar(value,now){
 }
 // Les deltas évitent de renvoyer tous les objets. Les états complets permettent de rattraper un message perdu.
 export function createObjectFeed(){
-  const previous=new Map();
+  const previous=new Map(),recent=new Map();
   let last=-Infinity,fullAt=-Infinity;
   function capture(now,bodies){
     if(now-last<200)return null;
@@ -387,15 +457,20 @@ export function createObjectFeed(){
       const record=encodeObjectState(body);
       if(!record)continue;
       keep.add(body.netId);
-      if(full||previous.get(body.netId)!==record)records.push(record);
+      if(previous.get(body.netId)!==record)recent.set(body.netId,{record,until:now+420});
+      if(full)records.push(record);
       previous.set(body.netId,record);
     }
     for(const id of previous.keys())if(!keep.has(id)){
-      if(!full)records.push(objectRemoval(id));
+      recent.set(id,{record:objectRemoval(id),until:now+420});
       previous.delete(id);
+    }
+    for(const [id,entry] of recent){
+      if(entry.until<now)recent.delete(id);
+      else if(!full)records.push(entry.record);
     }
     return (full||records.length)?{full,records}:null;
   }
-  return {capture,reset(){previous.clear();last=fullAt=-Infinity;}};
+  return {capture,reset(){previous.clear();recent.clear();last=fullAt=-Infinity;}};
 }
 

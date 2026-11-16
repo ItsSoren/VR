@@ -9,7 +9,7 @@ export function createSettings(mobileScreen){
     collisions:true, objects:true, body:true,
     hands:true,
     // Rendu
-    timeOfDay:1, viewFov:70, shaderMode:1,
+    timeOfDay:1, viewFov:70, vrFov:100, shaderMode:1,
     shadowQuality:10, lightQuality:10, contrast:5,
     saturation:5, exposure:5, warmth:5,
     quality:mobileScreen?2:7, auto:true, resolution:7,

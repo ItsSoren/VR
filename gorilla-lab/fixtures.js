@@ -174,7 +174,7 @@ export function addLabFixtures(scene,boxes,actions) {
     }
   }
   drawScore();
-  return {targets,coconuts,redraw,updateTarget,score:()=>score};
+  return {targets,coconuts,redraw,updateTarget,score:()=>score,setScore(value){score=value;drawScore();}};
 }
 
 

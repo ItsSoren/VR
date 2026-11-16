@@ -1,12 +1,13 @@
 
 import * as T from 'three';
+import { vrFovShader } from './vr-fov.js';
 
 // Chaque œil dispose de sa propre cible de rendu, à la taille native de son viewport XR.
 export function createVrEffects(renderer) {
   const passScene=new T.Scene(), camera=new T.PerspectiveCamera();
   camera.matrixAutoUpdate=false;
   const settings={
-    source:{value:null},pixel:{value:new T.Vector2(1,1)},bloom:{value:0},exposure:{value:1},
+    source:{value:null},pixel:{value:new T.Vector2(1,1)},bloom:{value:0},exposure:{value:1},visibleField:{value:1},
   };
   const material=new T.ShaderMaterial({
     uniforms:settings,depthTest:false,depthWrite:false,toneMapped:false,
@@ -14,13 +15,14 @@ export function createVrEffects(renderer) {
       'varying vec2 vUv; void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}',
     fragmentShader:
       'varying vec2 vUv; uniform sampler2D source; uniform vec2 pixel; uniform float bloom,exposure;'+
+      vrFovShader+
       'vec3 hot(vec2 p){vec3 c=texture2D(source,clamp(p,0.,1.)).rgb; return c*smoothstep(.85,1.42,max(max(c.r,c.g),c.b));}'+
       'vec3 aces(vec3 x){ return clamp((x*(2.51*x+.03))/(x*(2.43*x+.59)+.14),0.,1.); }'+
       'void main(){vec3 c=texture2D(source,vUv).rgb;'+
       'if(bloom>.001){vec2 d=pixel*3.;vec3 g=hot(vUv+vec2(d.x,0.))+hot(vUv-vec2(d.x,0.))+hot(vUv+vec2(0.,d.y))+hot(vUv-vec2(0.,d.y));'+
       'g+=.65*(hot(vUv+d*1.7)+hot(vUv-d*1.7)+hot(vUv+vec2(d.x,-d.y)*1.7)+hot(vUv+vec2(-d.x,d.y)*1.7)); c+=g*bloom/6.6;}'+
       'c=aces(c*exposure);'+
-      'gl_FragColor=vec4(pow(max(c,vec3(0.)),vec3(1./2.2)),1.);}',
+      'gl_FragColor=vec4(pow(max(c,vec3(0.)),vec3(1./2.2))*(1.-vrFovShade(vUv)),1.);}',
   });
   const quad=new T.Mesh(new T.PlaneGeometry(2,2),material);
   quad.frustumCulled=false;
@@ -35,11 +37,12 @@ export function createVrEffects(renderer) {
     settings.pixel.value.set(1/target.width,1/target.height);
     material.uniformsNeedUpdate=true;
   };
-  function render(scene,base,{bloom}){
+  function render(scene,base,{bloom,visibleField}){
     renderer.xr.updateCamera(base);
     eyes=renderer.xr.getCamera().cameras;
     if(eyes.length===0||eyes.some(eye=>!eye.viewport?.z||!eye.viewport?.w))return false;
     settings.bloom.value=bloom?.18:0;
+    settings.visibleField.value=visibleField;
     settings.exposure.value=renderer.toneMappingExposure;
     // La composition manipule l’état global du moteur. Le bloc finally le rétablit même en cas d’erreur.
     const original=renderer.getRenderTarget(),xrEnabled=renderer.xr.enabled;

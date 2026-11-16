@@ -1,3 +1,4 @@
+import {createCloudClient,createObjectFeed,decodeAvatar} from '../gorilla-lab/cloud-link.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
@@ -91,4 +92,112 @@ test('a quick key tap survives release until the next game frame',()=>{
   assert.ok(!keys.pressed.has('KeyX'));
   keys.down('KeyZ');assert.ok(keys.held.has('KeyZ'));
   keys.up('KeyZ');assert.ok(!keys.held.has('KeyZ'));
+});
+
+test('TurboWarp prioritizes avatars and recovers skipped shot and object updates',()=>{
+  const wall=1_780_000_000_000,links=[],queue=[];
+  let at=0,dropShot=false,dropRest=false,actionAt=-1,shotAt=-1;
+  const actionLog=[],shots=[],objects=new Map(),poses=new Map();
+  const playerSent=[],spectatorSent=[],authoritativeFeed=createObjectFeed();
+  const body={netId:1,netType:0,mesh:new T.Mesh(),velocity:new T.Vector3(),angular:new T.Vector3()};
+  const observerMap=7;
+  class Relay {
+    constructor(){this.readyState=1;this.bufferedAmount=0;links.push(this);}
+    send(message){
+      const packet=JSON.parse(message);
+      if(packet.method!=='set')return;
+      const decoded=decodeAvatar(packet.value,null);
+      assert.ok(decoded);
+      if(packet.name.startsWith('☁ GorillaPlayer')){
+        playerSent.push(at);
+        if(dropShot&&decoded.shots.length){dropShot=false;return;}
+      }
+      if(packet.name==='☁ GorillaPC')spectatorSent.push(at);
+      if(packet.name==='☁ GorillaVR'&&dropRest&&decoded.objects?.records[0]?.position?.x===4){
+        dropRest=false;return;
+      }
+      queue.push({from:this,message,at:at+36});
+    }
+    close(){this.readyState=3;}
+  }
+  const options={Socket:Relay,now:()=>wall+at,monotonicNow:()=>at};
+  const host=createCloudClient({...options,random:()=>.12,
+    onShot(shot,peer){shots.push({shot,peer});shotAt=at;},
+    onAction(action){actionLog.push(action);actionAt=at;},
+  });
+  const guest=createCloudClient({...options,random:()=>.23});
+  const watcher=createCloudClient({...options,random:()=>.34,
+    onPeer(pose){
+      if(!pose)return;
+      poses.set(pose.role,pose);
+      if(pose.role!=='vr'||!pose.objects)return;
+      if(pose.objects.full)objects.clear();
+      for(const record of pose.objects.records){
+        if(record.removed)objects.delete(record.id);
+        else objects.set(record.id,record);
+      }
+    },
+  });
+  const clients=[host,guest,watcher];
+  clients.forEach((client,i)=>assert.ok(client.join('TEST01',['vr','player','pc'][i])));
+  links.forEach(socket=>socket.onopen());
+  const position=new T.Vector3(0,1,0),quaternion=new T.Quaternion();
+  const hand={position,quaternion,pressure:[0,1,.5]};
+  const avatar={head:quaternion,hands:[null,hand],color:3,gun:{position,quaternion}};
+  const player={x:0,y:1,z:0,yaw:0,map:7,ready:true,avatar};
+  function run(until){
+    for(;at<=until;at++){
+      while(queue[0]?.at<=at){
+        const {from,message}=queue.shift();
+        for(const socket of links)if(socket!==from)socket.onmessage({data:message});
+      }
+      if(at%10!==0)continue;
+      host.tick({...player,score:3,objectFeed:t=>authoritativeFeed.capture(t,[body])});
+      guest.tick(player);
+      watcher.tick({...player,map:observerMap,avatar:null});
+    }
+  }
+  run(625);
+  assert.equal(guest.remote.protocol,5);
+  assert.equal(poses.get('player').avatar.hands[1].pressure[1],1);
+  assert.equal(poses.get('player').avatar.gun.position.y,1);
+  assert.equal(poses.get('vr').score,3);
+  assert.equal(objects.get(1).position.x,0);
+  const action={type:'hold',objectId:1,hand:2};
+  assert.ok(guest.sendAction(action,7));
+  guest.queueShot(position,quaternion,7);
+  run(690);
+  assert.deepEqual(actionLog,[action]);
+  assert.equal(shots.length,1);
+  assert.ok(actionAt-626<100&&shotAt-626<100);
+
+  dropShot=true;
+  guest.queueShot(position,quaternion,7);
+  dropRest=true;
+  body.mesh.position.x=4;
+  run(1360);
+  assert.equal(shots.length,2,'the repeated shot reaches the host exactly once');
+  assert.equal(actionLog.length,1,'retransmitted actions do not run twice');
+  assert.equal(objects.get(1).position.x,4,'a dropped rest state still reaches spectators');
+  assert.ok(playerSent.slice(1).every((t,i)=>t-playerSent[i]===100));
+  assert.ok(spectatorSent.slice(1).every((t,i)=>t-spectatorSent[i]===200));
+
+  const captured=host.stats.sent;
+  links[0].bufferedAmount=5000;
+  run(1500);
+  assert.equal(host.stats.sent,captured);
+  assert.equal(host.stats.bufferedBytes,5000);
+  links[0].bufferedAmount=0;
+  run(1700);
+  assert.ok(host.stats.sent>captured);
+});
+
+test('replayed traces share the projectile pool and only authority can apply impacts',()=>{
+  const scene=new T.Scene(),impacts=[];
+  const gun=createArcadeBlaster(scene,{impact(_position,_direction,_length,authority){impacts.push(authority);return .01;}});
+  gun.replay(new T.Vector3(),new T.Quaternion(),false);
+  gun.replay(new T.Vector3(),new T.Quaternion(),true);
+  gun.update({dt:.01,aim:null,firing:false});
+  assert.deepEqual(impacts,[false,true]);
+  assert.equal(gun.shotsFired,0);
 });

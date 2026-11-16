@@ -2,6 +2,7 @@ import * as T from 'three';
 import {createAvatarStyle} from './avatar-style.js';
 import {createHandSkin} from './hand-skin.js';
 import {createBodySkin} from './body-skin.js';
+import {createBlasterModel} from './arcade-blaster.js';
 import {createToolVisual} from './tool-visual.js';
 import {createCloudClient,mapCode,roomCode,createObjectFeed} from './cloud-link.js';
 
@@ -40,16 +41,18 @@ function makeAvatar(){
   const body=skin.mesh;
   model.add(head,body);
   const tool=createToolVisual(toolRoot);
+  let gun=null;
   const handPoint=new T.Vector3(),handPoses=[null,null],look=new T.Vector3();
   const relative=new T.Quaternion(),torsoRelative=new T.Quaternion(),goal=new T.Quaternion();
   const toolState={mode:0,position:new T.Vector3(),quaternion:new T.Quaternion(),end:new T.Vector3()};
   function draw(pose,time,dt){
-    const data=pose.avatar,smooth=1-Math.exp(-dt*20);
+    const data=pose.avatar,smooth=1-Math.exp(-dt*32);
     if(!data){
       body.position.set(0,-.46,0);body.rotation.x=0;
       handPoses.fill(null);
       skin.pose(handPoses,.42,.97,.68,true);
       tool.hide();toolState.mode=0;
+      if(gun)gun.visible=false;
       return;
     }
     relative.copy(model.quaternion).invert();
@@ -74,6 +77,13 @@ function makeAvatar(){
       h.skin.pose(h.pressure,false);
     }
     skin.pose(handPoses,data.armSpan*.5,.97,stretch,true);
+    if(data.gun){
+      if(!gun){gun=createBlasterModel();gun.visible=false;toolRoot.add(gun);}
+      const a=gun.visible?smooth:1;
+      gun.position.lerp(data.gun.position,a);
+      gun.quaternion.slerp(goal.copy(data.gun.quaternion),a);
+      gun.visible=true;
+    }else if(gun)gun.visible=false;
     const toolData=data.tool;
     if(!toolData){tool.hide();toolState.mode=0;return;}
     const a=toolState.mode?smooth:1;
@@ -101,10 +111,10 @@ function disposeArt(root){
   for(const material of materials)material.dispose();
 }
 
-export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,applyCoconuts,onAction}){
+export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,applyCoconuts,applyScore,onAction,onShot}){
   const peers=new Map(),replicas=new Map(),feed=createObjectFeed();
   let replicaHost=0,replicaMap=-1,replicaLight=-1,replicaCoconuts=-1;
-  let cachedMap='',cachedId=0,lastDelta=null,deltaUntil=0;
+  let cachedMap='',cachedId=0,replicaScore=-1;
   function localMap(){
     const name=currentMap();
     if(name!==cachedMap){cachedMap=name;cachedId=mapCode(name);}
@@ -120,6 +130,7 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     replicaHost=0;replicaMap=-1;
     if(replicaLight!==-1){replicaLight=-1;applyLight?.(null);}
     if(replicaCoconuts!==-1){replicaCoconuts=-1;applyCoconuts?.(null);}
+    if(replicaScore!==-1){replicaScore=-1;applyScore?.(0);}
   }
   function setReplicaAppearance(replica,record){
     if(replica.color===record.color&&replica.style===record.style)return;
@@ -144,6 +155,7 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     if(replicaHost!==pose.id||replicaMap!==pose.map){clearReplicas();replicaHost=pose.id;replicaMap=pose.map;}
     if(pose.avatar&&pose.avatar.light!==replicaLight){replicaLight=pose.avatar.light;applyLight?.(replicaLight);}
     if(pose.avatar&&pose.avatar.coconuts!==replicaCoconuts){replicaCoconuts=pose.avatar.coconuts;applyCoconuts?.(replicaCoconuts);}
+    if(pose.score!==undefined&&pose.score!==replicaScore){replicaScore=pose.score;applyScore?.(replicaScore);}
     if(!pose.objects)return;
     const present=pose.objects.full?new Set():null;
     for(const record of pose.objects.records){
@@ -189,7 +201,7 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
 
   const $=id=>document.querySelector(id);
   const status=$('#cloud-status'),room=$('#cloud-room'),modeButton=$('#cloud-camera');
-  let cameraMode=0,networkCaption='Hors ligne',copyUntil=0;
+  let statusAt=-Infinity,cameraMode=0,networkCaption='Hors ligne',copyUntil=0;
   function setCamera(mode){
     cameraMode=mode;
     modeButton.textContent='Caméra : '+cameraModes[mode];
@@ -207,19 +219,24 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
         return;
       }
       let entry=peers.get(pose.id);
-      if(!entry){entry={art:null,motion:new T.Vector3()};peers.set(pose.id,entry);}
+      if(!entry){entry={art:null,motion:new T.Vector3(),handMotion:[new T.Vector3(),new T.Vector3()]};peers.set(pose.id,entry);}
       const prior=entry.pose;
       entry.motion.set(0,0,0);
+      for(const motion of entry.handMotion)motion.set(0,0,0);
       if(prior&&prior.map===pose.map){
         const seconds=(pose.time-prior.time)/1000;
         if(seconds>=.055&&seconds<=.65){
           entry.motion.set(pose.x-prior.x,pose.y-prior.y,pose.z-prior.z).multiplyScalar(1/seconds);
           if(entry.motion.lengthSq()>=18**2)entry.motion.set(0,0,0);
+          for(let i=0;i<2;i++){
+            const before=prior.avatar?.hands[i],after=pose.avatar?.hands[i];
+            if(before&&after)entry.handMotion[i].copy(after.position).sub(before.position).multiplyScalar(1/seconds).clampLength(0,23);
+          }
         }
       }
       entry.pose=pose;
     },
-    onAction,
+    onAction,onShot,
   });
   const roomFromURL=roomCode(new URLSearchParams(location.search).get('room')??'');
   room.value=/^[A-Z0-9]{5,12}$/.test(roomFromURL)?roomFromURL:Math.random().toString(36).slice(2,8).padEnd(6,'0').toUpperCase();
@@ -229,7 +246,7 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     if(!client.join(code,role))return;
     room.value=code;
     if(role!=='vr')$('#game').focus();
-    feed.reset();lastDelta=null;setCamera(0);
+    feed.reset();setCamera(0);
     seedArena(mapCode(code));cachedMap='';
   }
   $('#cloud-vr').onclick=()=>connect('vr');
@@ -277,10 +294,10 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
         if(entry.art.toolRoot)scene.add(entry.art.toolRoot);
       }
       const {model,toolRoot}=entry.art;
-      const prediction=Math.min(.19,Math.max(0,(now-pose.arrival)/1000+.036));
+      const prediction=Math.min(.12,Math.max(0,(now-pose.arrival)/1000+.025));
       target.copy(pose).addScaledVector(entry.motion,prediction);
       if(!model.visible||model.position.distanceToSquared(target)>64)model.position.copy(target);
-      else model.position.lerp(target,1-Math.exp(-dt*11));
+      else model.position.lerp(target,1-Math.exp(-dt*34));
       model.rotation.y=pose.yaw;
       model.visible=true;if(toolRoot)toolRoot.visible=true;
       entry.art.draw(pose,time,dt);
@@ -296,7 +313,7 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
       if(!localReady)caption=prefix+(client.role==='vr'?'sélectionne « Entrer en VR » pour ouvrir la partie':'quitte la session VR pour utiliser ce rôle');
       else if(client.role!=='vr'&&host&&host.map!==localMap())caption=prefix+'le joueur VR utilise une autre carte. Chargez la même carte.';
       else if(client.role!=='vr'&&host&&!host.ready)caption=prefix+'casque connecté · en attente du démarrage VR';
-      else if(client.role==='player'&&host&&host.protocol<4)caption=prefix+'mets à jour le jeu sur le casque pour jouer ensemble';
+      else if(client.role==='player'&&host&&host.protocol<5)caption=prefix+'charge la R31 sur le casque pour synchroniser la partie';
       else if(client.role!=='vr'&&readyHere(host))caption=prefix+'joueur VR connecté';
       else if(client.role==='vr'){
         const local=readyPeers.filter(readyHere);
@@ -309,9 +326,9 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     if(status.textContent!==caption)status.textContent=caption;
   }
   function update(frame){
-    const {inVR,time,dt,position,yaw,camera,rig,keys,avatar,bodies}=frame;
+    const {inVR,time,dt,position,yaw,camera,rig,keys,avatar,bodies,score}=frame;
     if(!client.role){clearReplicas();return;}
-    const ready=client.role==='vr'?inVR:!inVR,now=performance.now();
+    const ready=client.role==='vr'?inVR:client.role==='player'||!inVR,now=performance.now();
     const map=localMap(),host=client.role!=='vr'?client.remote:null;
     const showWorld=ready&&readyHere(host);
     if(!showWorld&&replicaMap!==-1)clearReplicas();
@@ -335,16 +352,14 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
         position.copy(rig.position);
       }else fly(frame);
     }
-    client.tick({x:position.x,y:position.y,z:position.z,yaw,map,ready,avatar:ready?avatar:null,
-      objectFeed:ready&&client.role==='vr'&&bodies?t=>{
-        const delta=feed.capture(t,bodies);
-        if(delta){lastDelta=delta;deltaUntil=t+200;}
-        return t<deltaUntil?lastDelta:null;
-      }:null});
-    updateStatus(ready,now);
+    client.tick({x:position.x,y:position.y,z:position.z,yaw,map,ready,avatar:ready&&client.role!=='pc'?avatar:null,score,
+      objectFeed:ready&&client.role==='vr'&&bodies?t=>feed.capture(t,bodies):null});
+    if(now-statusAt>=150){statusAt=now;updateStatus(ready,now);}
   }
   function getPeer(id){const pose=peers.get(id)?.pose;return readyHere(pose)?pose:null;}
-  return {update,getPeer,sendAction(action){return client.sendAction(action,localMap());},
+  return {update,getPeer,handMotion(id,index){return peers.get(id)?.handMotion[index];},sendAction(action){return client.sendAction(action,localMap());},
+    sendShot(position,quaternion){client.queueShot(position,quaternion,localMap());},
+    get stats(){return client.stats;},
     get role(){return client.role;},get connected(){return readyHere(client.remote);},
     get remoteSpectator(){return client.peers.find(p=>p.role==='pc'&&readyHere(p))??null;},
     get remoteLight(){return replicaLight===-1?null:replicaLight;},get replicaCount(){return replicas.size;},

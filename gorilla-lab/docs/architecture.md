@@ -91,13 +91,22 @@ sequenceDiagram
 
 [cloud-link.js](../cloud-link.js) s'occupe du transport, du format des messages et des identifiants. [cloud-view.js](../cloud-view.js) s'occupe de la caméra, des répliques et de l'affichage de l'état du salon. Le transport utilise des mises à jour groupées et périodiques. Un code de salon sert à retrouver une session. Il ne fait pas office de compte ou de mot de passe. Pour partager une carte et des objets personnalisés, charge la même carte et la même collection sur les appareils du salon.
 
-## Où intervenir dans la R30
+### Cadence et état partagé
+
+L’hôte choisit **Héberger en VR**. Les invités choisissent **Rejoindre en joueur**, puis peuvent jouer au clavier, au tactile ou entrer en VR. Le spectateur envoie sa caméra à 5 Hz. Les joueurs visent 10 Hz pour la tête, les mains, les doigts et les armes. Les tirs et les demandes d’interaction utilisent le même paquet avec un numéro de séquence pour récupérer un paquet sauté et ignorer les doublons. Les objets mobiles, leur tenue en main, leur rotation, leur matière, leur couleur et leur suppression passent à 5 Hz avec des états complets périodiques. L’hôte applique la physique des tirs et partage aussi l’ambiance, les noix de coco et le score de la cible.
+
+[Turbowarp regroupe les mises à jour et peut en sauter](https://docs.turbowarp.org/cloud-variables#updates-are-buffered). Dépasser 10 envois par seconde ne réduit pas ce délai. L’extrapolation de la position est bornée à 120 ms et peut lisser une pose entre deux messages. Les effets de son propre tir restent immédiats. Le délai réseau réel varie avec le relais, le trajet réseau et les images du navigateur. Le rapport exporté contient le nombre de paquets et de caractères envoyés et reçus, ainsi que la taille de la file WebSocket au dernier relevé.
+
+Tous les appareils du salon doivent charger la R31 et la même carte. Les éditions de carte se partagent par export ou par URL. Les options de confort et de qualité restent locales.
+
+## Où intervenir dans la R31
 
 | Pour modifier… | Fichier |
 | --- | --- |
 | Les valeurs par défaut, les préréglages ou les noms de modes | [game-settings.js](../game-settings.js) |
 | Les gestes tactiles et la distinction entre appui bref et touche maintenue | [flat-controls.js](../flat-controls.js) |
 | La résolution du canvas sur mobile et PC | [screen-render.js](../screen-render.js) |
+| Le masque de champ visible par œil, avec ou sans Post FX | [vr-fov.js](../vr-fov.js), [vr-effects.js](../vr-effects.js) |
 | Les commandes de tir, la visée et les collisions avec le monde | [blaster-system.js](../blaster-system.js) |
 | La cadence, le mouvement, les traînées et les particules | [arcade-blaster.js](../arcade-blaster.js) |
 | L’ordre des systèmes et le lien avec la scène | [main.js](../main.js) |

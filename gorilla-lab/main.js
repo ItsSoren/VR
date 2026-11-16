@@ -22,6 +22,7 @@ import { labObjectSlots,labMirror,labSpawn } from './lab-layout.js';
 import { connectMaps } from './custom-maps.js';
 import { makePiece, mapMaterials, surfacePresets, storageKey, materialColors } from './map-format.js';
 import { createVrEffects, addRayProbe } from './vr-effects.js';
+import { createVrFovMask } from './vr-fov.js';
 import { addLabFixtures } from './fixtures.js';
 import { buildArena } from './arena.js';
 import { solve,palmContact,handContact,solveObjects,moveKinematic,colliderFor,distanceToObject,placeObject,boxCollider,playerObjectContact } from './physics.js';
@@ -56,6 +57,8 @@ const camera=new T.PerspectiveCamera(70,1,.035,210);
 rig.add(eye);eye.add(camera);scene.add(rig);
 const arena=buildArena(scene,renderer);
 const vrEffects=createVrEffects(renderer);
+const vrFovMask=createVrFovMask();
+scene.add(vrFovMask);
 const updateRayProbe=addRayProbe(arena.probe);
 const settings=createSettings(mobileScreen);
 const defaults={...settings};
@@ -335,7 +338,7 @@ const sections=[
   ['Rendu',[]],
 ];
 const renderGroups=[
-  ['Image',[['Shader','shaderMode'],['Ambiance','timeOfDay'],['Champ de vision écran','viewFov'],['Exposition','exposure'],['Contraste','contrast'],
+  ['Image',[['Shader','shaderMode'],['Ambiance','timeOfDay'],['FOV PC / mobile','viewFov'],['FOV VR','vrFov'],['Exposition','exposure'],['Contraste','contrast'],
     ['Saturation','saturation'],['Chaleur','warmth'],['Corps du singe','body'],['Mains','hands']]],
   ['Lumière',[['Ombres','shadows'],['Qualité des ombres','shadowQuality'],['Qualité des lumières','lightQuality'],
     ['Carte de lumière','lightmap'],['Reflets','reflections'],['Bloom du soleil','bloom']]],
@@ -379,10 +382,10 @@ function captureReport(){
   const sorted=rawFrameMs.slice().sort((a,b)=>a-b);
   const percentile=p=>sorted.length?Number(sorted[Math.min(sorted.length-1,Math.floor((sorted.length-1)*p))].toFixed(2)):null;
   reportSnapshot={
-    game:'Gorilla Lab',version:'r30',time:new Date().toISOString(),
+    game:'Gorilla Lab',version:'r31',time:new Date().toISOString(),
     mode:reportHadVR?'VR':'PC',settings:{...settings},qualityActive:liveLevel,
     performance:{fps,frames:sorted.length,frameMs:{median:percentile(.5),p95:percentile(.95),max:percentile(1)}},
-    xr:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},cloud:{role:spectator.role,connected:spectator.connected,replicas:spectator.replicaCount},targetScore:fixtures.score(),locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
+    xr:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},cloud:{role:spectator.role,connected:spectator.connected,replicas:spectator.replicaCount,...spectator.stats},targetScore:fixtures.score(),locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
   };
   document.querySelector('#download-report').disabled=false;
   hudDirty=true;
@@ -422,12 +425,19 @@ function change(key,step){
     settings.viewFov=T.MathUtils.clamp(settings.viewFov+5*step,50,105);
     resize();hudDirty=true;return;
   }
+  if(key==='vrFov'){
+    settings.vrFov=T.MathUtils.clamp(settings.vrFov+5*step,55,100);
+    hudDirty=true;return;
+  }
   if(key==='shaderMode'){
     settings.shaderMode=(settings.shaderMode-1+step+shaderNames.length)%shaderNames.length+1;
     shaderMode.value=settings.shaderMode-1;hudDirty=true;return;
   }
   if(key==='timeOfDay'){
-    settings.timeOfDay=(settings.timeOfDay-1+step+3)%3+1;
+    if(spectator.role==='player'){
+      const next=((spectator.remoteLight??settings.timeOfDay-1)+step+3)%3;
+      spectator.sendAction({type:'world',mode:1,typeId:next});
+    }else settings.timeOfDay=(settings.timeOfDay-1+step+3)%3+1;
     applyVisual();return;
   }
   const mapValues={mapMode:9,mapShape:5,mapMaterial:mapMaterials.length,mapSurface:4,mapTurn:8,mapTexture:texturePresets.length+1,terrainResolution:4};
@@ -487,6 +497,7 @@ function button(text,action){
 function toggleLabel(key){return key==='preciseHitboxes'?(settings[key]?'High':'Low'):(settings[key]?'Actif':'Coupé');}
 function settingValue(key){
   if(key==='viewFov')return settings.viewFov+'°';
+  if(key==='vrFov')return settings.vrFov===100?'Natif':settings.vrFov+' %';
   if(key==='mapTexture')return settings[key]===1?'Aucune':texturePresets[settings[key]-2];
   if(key==='terrainResolution')return [8,16,32,48][settings[key]-1]+'²';
   if(key==='shaderMode')return shaderNames[settings.shaderMode-1];
@@ -494,7 +505,7 @@ function settingValue(key){
     const chosen=settings[key],active=key==='shadowQuality'?shadowLevel():lightLevel();
     return active===chosen?chosen+'/10':chosen+'/10 · '+active+(settings.auto?' auto':' mobile');
   }
-  if(key==='timeOfDay')return ['Jour','Coucher de soleil','Nuit'][settings.timeOfDay-1]; if(key==='mapMode')return mapToolNames[settings.mapMode-1]; if(key==='mapShape')return mapShapeNames[settings.mapShape-1]; if(key==='mapSurface')return mapSurfaceNames[settings.mapSurface-1]; if(key==='mapMaterial')return mapMaterials[settings.mapMaterial-1]; if(key==='mapTurn')return (settings.mapTurn-1)*45+'°'; if(key==='toolMode')return toolModes[settings.toolMode-1]; if(key==='preset')return Object.keys(visualPresets)[settings.preset-1]; return key==="texturePower"?[2**(settings[key]-1),2**(settings[key]-1)].join("×"):settings[key];}
+  if(key==='timeOfDay')return ['Jour','Coucher de soleil','Nuit'][spectator.remoteLight??settings.timeOfDay-1]; if(key==='mapMode')return mapToolNames[settings.mapMode-1]; if(key==='mapShape')return mapShapeNames[settings.mapShape-1]; if(key==='mapSurface')return mapSurfaceNames[settings.mapSurface-1]; if(key==='mapMaterial')return mapMaterials[settings.mapMaterial-1]; if(key==='mapTurn')return (settings.mapTurn-1)*45+'°'; if(key==='toolMode')return toolModes[settings.toolMode-1]; if(key==='preset')return Object.keys(visualPresets)[settings.preset-1]; return key==="texturePower"?[2**(settings[key]-1),2**(settings[key]-1)].join("×"):settings[key];}
 function menuGroups(){return page===2?renderGroups:page===3?spawnGroups:mapGroups;}
 function currentGroup(){return page===2?renderPage:page===3?spawnPage:mapPage;}
 function selectGroup(index){if(page===2)renderPage=index;else if(page===3)spawnPage=index;else mapPage=index;}
@@ -605,7 +616,9 @@ const spectator=addSpectator({scene,currentMap:()=>(maps.signature||'arena-r25-'
     return mesh;
   },
   onAction:handleNetworkAction,
-  applyLight:mode=>arena.setTimeOfDay(mode??settings.timeOfDay-1),
+  onShot:shot=>blaster.receiveShot(shot,spectator.role==='vr'),
+  applyLight:mode=>{arena.setTimeOfDay(mode??settings.timeOfDay-1);hudDirty=true;if(!renderer.xr.isPresenting)desktopMenu();},
+  applyScore:value=>fixtures.setScore(value),
   applyCoconuts:mask=>fixtures.coconuts.forEach((coco,i)=>{coco.visible=Boolean((mask??31)&1<<i);}),
 });
 function saveVRModel(asHead){
@@ -661,7 +674,7 @@ function aimMap(frame,space,{source,click}){
   if(click)hudDirty=true;
 }
 function touchFixture(hand){
-  if(maps.active||!hand.valid||hand.held||menu)return;
+  if(maps.active||spectator.role==='player'||!hand.valid||hand.held||menu)return;
   let touched=null;
   for(const key of fixtures.targets){
     key.getWorldPosition(fixtureKeyPoint);
@@ -691,6 +704,7 @@ function fixtureRay(origin,direction,activate){
   cursor.visible=true;cursor.position.copy(hit.point).addScaledVector(direction,-.012);
   if(!activate)return;
   if(hit.object.userData.action)hit.object.userData.action(hit.uv);
+  else if(spectator.role==='player')spectator.sendAction({type:'world',mode:2,typeId:fixtures.coconuts.indexOf(hit.object)});
   else pluckCoconut(hit.object,direction);
   desktopMenu();
 }
@@ -724,28 +738,53 @@ function requestSpawn(index){
   }else spawnObject(index);
 }
 function handleNetworkAction(action,peer){
-  if(!settings.objects||!peer)return;
+  if(!peer)return;
+  if(action.type==='world'){
+    if(action.mode===1){settings.timeOfDay=action.typeId+1;applyVisual();}
+    else if(!maps.active){
+      const coco=fixtures.coconuts[action.typeId];
+      if(coco?.visible&&coco.getWorldPosition(coconutPosition).distanceToSquared(peer)<=5.8**2&&
+          !handContact(spawnOrigin.copy(peer),coconutPosition,.01,activeBoxes,spawnHit,spawnNormal))pluckCoconut(coco);
+    }
+    return;
+  }
   if(action.type==='spawn'){
-    if(spawnTypes.includes(action.typeId))spawnObject(action.typeId,null,peer);
+    if(spawnTypes.includes(action.typeId)){settings.objects=true;spawnObject(action.typeId,null,peer);}
     return;
   }
   const body=objects.find(o=>o.netId===action.objectId);
   if(!body)return;
-  let actor=remoteActors.get(peer.id);
-  if(!actor){actor={held:null,controllerRotation:new T.Quaternion()};remoteActors.set(peer.id,actor);}
+  const hand=action.hand??0,actorId=peer.id*3+hand;
+  const mode=action.type==='hold'?1:action.mode;
+  let actor=remoteActors.get(actorId);
+  if(!actor&&mode===1){
+    actor={peerId:peer.id,hand,held:null,controllerRotation:new T.Quaternion()};
+    remoteActors.set(actorId,actor);
+  }
   if(action.type==='release'){
-    if(actor.held===body)release(actor,true);
+    if(actor?.held===body){
+      const motion=hand?spectator.handMotion(peer.id,hand-1):null;
+      if(motion)body.velocity.copy(motion);
+      release(actor,true);
+    }
     return;
   }
-  const distance=Math.hypot(body.mesh.position.x-peer.x,body.mesh.position.y-peer.y,body.mesh.position.z-peer.z);
-  if(distance>10)return;
-  const origin=spawnOrigin.set(peer.x,peer.y,peer.z);
-  if(handContact(origin,body.mesh.position,.01,activeBoxes,spawnHit,spawnNormal))return;
-  const mode=action.type==='hold'?1:action.mode;
-  if(mode===1&&actor.held)return;
-  const rotation=peer.avatar?.tool?.quaternion??peer.avatar?.head;
-  if(rotation)actor.controllerRotation.copy(rotation);
+  if(!settings.objects||mode===1&&actor.held)return;
+  const handPose=hand?peer.avatar?.hands[hand-1]:null;
+  if(hand&&!handPose)return;
+  const origin=spawnOrigin.copy(handPose?.position??(action.type==='tool'?peer.avatar?.tool?.position:null)??peer);
+  const distance=hand?distanceToObject(origin,body):origin.distanceTo(body.mesh.position);
+  if(distance>(hand ? .34 : 10)||handContact(origin,body.mesh.position,.01,activeBoxes,spawnHit,spawnNormal))return;
+  if(actor){
+    const rotation=handPose?.quaternion??peer.avatar?.tool?.quaternion??peer.avatar?.head;
+    if(rotation)actor.controllerRotation.copy(rotation);
+  }
   manipulateBody(body,mode,actor,T.MathUtils.clamp(distance,1.1,5));
+  if(hand&&actor?.held===body){
+    body.toolHold=false;
+    inverseGrip.copy(actor.controllerRotation).invert();
+    body.offset.copy(body.mesh.position).sub(origin).applyQuaternion(inverseGrip);
+  }
 }
 function updateHeldBodies(dt){
   if(renderer.xr.isPresenting){
@@ -754,13 +793,14 @@ function updateHeldBodies(dt){
     }
   }
   for(const [id,actor] of remoteActors){
-    const peer=spectator.getPeer?.(id);
-    if(!peer){release(actor,false);remoteActors.delete(id);continue;}
+    const peer=spectator.getPeer(actor.peerId);
+    const handPose=actor.hand?peer?.avatar?.hands[actor.hand-1]:null;
+    if(!peer||actor.hand&&!handPose){release(actor,false);remoteActors.delete(id);continue;}
     const body=actor.held;
     if(!body)continue;
-    const aim=peer.avatar?.head??peer.avatar?.tool?.quaternion;
+    const aim=handPose?.quaternion??peer.avatar?.tool?.quaternion??peer.avatar?.head;
     if(aim)actor.controllerRotation.copy(aim);
-    spawnOrigin.set(peer.x,peer.y,peer.z);
+    spawnOrigin.copy(handPose?.position??peer.avatar?.tool?.position??peer);
     spawnDirection.set(0,0,-1).applyQuaternion(actor.controllerRotation);
     driveHeldObject(body,spawnOrigin,spawnDirection,actor.controllerRotation,dt);
   }
@@ -1030,6 +1070,7 @@ function replicaBlockers(){
     const spec=objectSpecs[type],shape=settings.preciseHitboxes?spec.shape:(spec.lowShape??spec.shape);
     const collider=mesh.userData.playerCollider??={mesh,blocksPlayer:true,frozen:true};
     collider.shape=shape;collider.radius=shape.radius;collider.precise=settings.preciseHitboxes;
+    collider.handCollider??={objectBody:collider,friction:.96,gravity:1};
     remoteBlockers.push(collider);
   });
   return remoteBlockers;
@@ -1094,6 +1135,29 @@ function surfaceAt(p){
   }
 }
 // Convertit les poses du repère du casque dans le monde avant les tests de saisie et d’appui.
+function trackRemoteGrip(hand,grip){
+  const side=hand.side==='left'?1:2;
+  if(!grip&&hand.remoteHeld){
+    spectator.sendAction({type:'release',objectId:hand.remoteHeld,hand:side});
+    hand.remoteHeld=0;
+  }
+  if(menu||!grip||hand.grip||!settings.objects)return;
+  let closest=null,distance=.15;
+  spectator.forEachReplica(mesh=>{
+    if(mesh.userData.held)return;
+    const spec=objectSpecs[mesh.userData.netType];
+    if(!spec||spec.properties?.grabbable===false||mesh.position.distanceToSquared(hand.target)>(spec.shape.radius+.18)**2)return;
+    const separation=distanceToObject(hand.target,{mesh,shape:spec.shape,radius:spec.shape.radius});
+    if(separation<distance){closest=mesh;distance=separation;}
+  });
+  if(closest){
+    const objectId=closest.userData.netId;
+    if(spectator.sendAction({type:'hold',objectId,hand:side}))hand.remoteHeld=objectId;
+  }else if(!maps.active){
+    const typeId=fixtures.coconuts.findIndex(coco=>coco.visible&&coco.getWorldPosition(coconutPosition).distanceToSquared(hand.target)<.26**2);
+    if(typeId>=0)spectator.sendAction({type:'world',mode:2,typeId});
+  }
+}
 function trackHands(frame,space,dt){
   const inputs=[...frame.session.inputSources];
   for(const h of hands){
@@ -1101,7 +1165,10 @@ function trackHands(frame,space,dt){
     const pose=source&&frame.getPose(source.gripSpace,space);
     h.gamepad=pose?source.gamepad:null;
     h.mesh.visible=Boolean(pose)&&settings.hands&&!settings.body;
-    if(!pose){h.valid=false;h.surface=null;release(h,false);continue;}
+    if(!pose){
+      if(spectator.role==='player')trackRemoteGrip(h,false);
+      h.valid=false;h.surface=null;release(h,false);continue;
+    }
     const p=pose.transform.position;
     candidate.set(p.x,p.y-drop,p.z);
     h.target.copy(candidate).applyAxisAngle(up,yaw).add(rig.position);
@@ -1112,7 +1179,8 @@ function trackHands(frame,space,dt){
     h.controllerRotation.copy(gripRotation);
     h.mesh.quaternion.copy(gripRotation).multiply(handTwist.setFromAxisAngle(handAxis,h.side==='left'?Math.PI/2:-Math.PI/2));
     animateFingers(h,source.gamepad?.buttons??[],dt);
-    if(!menu&&grip&&!h.grip&&settings.objects&&!h.held){
+    if(spectator.role==='player')trackRemoteGrip(h,grip);
+    else if(!menu&&grip&&!h.grip&&settings.objects&&!h.held){
       let body=null, best=.15;
       const coco=fixtures.coconuts.find(m=>m.visible&&m.getWorldPosition(coconutPosition).distanceToSquared(h.target)<.26**2);
       if(coco)body=pluckCoconut(coco);
@@ -1200,12 +1268,13 @@ function character(frame,space,pose,dt){
   const floor=surfaceAt(worldHead);
   const gravity=9.81*(settings.gravity/5)*(floor?.gravity??1);
   priorPlayer.copy(rig.position);
+  const blockers=spectator.role==='player'?replicaBlockers():objects;
   if(inVR){
     trackHands(frame,space,dt);
     if(hands.some(h=>h.valid))trackedFrames++;
     handBoxes.length=0;
     for(const box of activeBoxes)handBoxes.push(box);
-    if(settings.collisions&&settings.objects)for(const body of objects)if(body.handCollider&&!body.owner)handBoxes.push(body.handCollider);
+    if(settings.collisions&&settings.objects)for(const body of blockers)if(body.handCollider&&!body.owner)handBoxes.push(body.handCollider);
     locomotion.move({head:worldHead,dt,gravity,settings,boxes:handBoxes,velocity,movement:delta,reach:armSegmentLength()*2+.16});
     for(const hand of hands)updateGroundHaptics(hand,settings.stepHaptics,dt);
   }else{
@@ -1230,7 +1299,6 @@ function character(frame,space,pose,dt){
   worldHead.copy(head).applyAxisAngle(up,yaw).add(rig.position);
   grounded=false;
   if(settings.collisions){
-    const blockers=spectator.role==='player'?replicaBlockers():objects;
     bodyCollisionBack.set(0,0,1).applyAxisAngle(up,bodyYaw);
     const lookDown=inVR?-headForward.y:Math.max(0,-Math.sin(pitch));
     const leanOffset=inVR?.17+T.MathUtils.smoothstep(lookDown,.15,.90)*.21:.08;
@@ -1346,6 +1414,15 @@ if(mapQuery.has('map'))maps.loadURL(mapQuery.get('map'));
 else{
   try{const saved=localStorage.getItem(storageKey);if(saved)maps.load(saved);}catch(error){maps.inform(error.message);}
 }
+function captureNetworkAvatar(){
+  const inVR=renderer.xr.isPresenting;
+  return {
+    head:avatarHead.quaternion,hands:inVR?hands.map(h=>h.valid?{position:h.mesh.position,quaternion:h.mesh.quaternion,pressure:h.pressure}:null):[null,toolState.mode?desktopHand:null],
+    height:head.y,armSpan:armSegmentLength()*2,light:settings.timeOfDay-1,
+    color:avatarColor,coconuts:fixtures.coconuts.reduce((mask,coco,i)=>mask|(Number(coco.visible)<<i),0),
+    tool:toolState.mode?toolState:null,gun:blaster.gun,
+  };
+}
 // Une image enchaîne les entrées, la simulation locale, la réception des états distants et le rendu.
 renderer.setAnimationLoop((time,frame)=>{
   const actual=frameTime?Math.max(0,(time-frameTime)/1000):.014;
@@ -1368,7 +1445,7 @@ renderer.setAnimationLoop((time,frame)=>{
   const spectating=!inVR&&spectator.role==='pc';
   // En spectateur ou joueur invité, les objets reçus sont dessinés comme répliques du monde VR.
   const remoteWorld=spectating||spectator.role==='player';
-  if(spectator.role!=='player')remoteHeld=0;
+  if(spectator.role!=='player'){remoteHeld=0;for(const h of hands)h.remoteHeld=0;}
   if(!remoteWorld){updateHeldBodies(dt);maintainSpectatorCamera();}
 
   for(const object of objects){
@@ -1392,7 +1469,7 @@ renderer.setAnimationLoop((time,frame)=>{
     solveObjects(objects,arena.boxes,dt,9.81*settings.gravity/5,.12+settings.bounce*.064,surfaceAt);
     if(!maps.active)fixtures.updateTarget(objects);
   }
-  if(inVR&&!menu)for(const hand of hands)touchFixture(hand);
+  if(inVR&&!menu&&!remoteWorld)for(const hand of hands)touchFixture(hand);
   arena.probe.rotation.y+=dt*.29;
   updateFps(Math.min(.3,actual),inVR);
   panel.mesh.visible=inVR&&menu;
@@ -1428,18 +1505,12 @@ renderer.setAnimationLoop((time,frame)=>{
       c.font='20px system-ui';c.fillText(settings.mapEdit?'Édition : '+mapToolNames[settings.mapMode-1]:settings.blasterActive?'Pistolet : maintenir la gâchette':settings.toolActive?'Tool Gun : '+toolModes[settings.toolMode-1]:'B/Y : réglages   ·   A : Tool Gun',17,66);wrist.texture.needsUpdate=true;
     }
   }
-  const networkAvatar=(!spectating&&(spectator.role==='player'||inVR&&spectator.role==='vr'))?{
-    head:avatarHead.quaternion,hands:inVR?hands.map(h=>h.valid?{position:h.mesh.position,quaternion:h.mesh.quaternion,pressure:h.pressure}:null):[null,toolState.mode?desktopHand:null],
-    height:head.y,armSpan:armSegmentLength()*2,light:settings.timeOfDay-1,
-    color:avatarColor,coconuts:fixtures.coconuts.reduce((mask,coco,i)=>mask|(Number(coco.visible)<<i),0),
-    tool:toolState.mode?toolState:null,
-  }:null;
-  spectator.update({inVR,time,dt,position:worldHead,yaw:spectating?yaw:bodyYaw,pitch,camera,rig,keys,actions,flat,avatar:networkAvatar,
-    bodies:settings.objects?objects:noBodies});
   blaster.update({frame,space,inVR,remoteWorld,dt,yaw,drop,rightHand:hands[1],
     enabled:settings.blasterActive&&!spectating&&!menu&&!settings.mapEdit,
     flatFiring:blasterTrigger.held||keys.has('KeyJ'),
   });
+  spectator.update({inVR,time,dt,position:worldHead,yaw:spectating?yaw:bodyYaw,pitch,camera,rig,keys,actions,flat,avatar:captureNetworkAvatar,
+    bodies:settings.objects?objects:noBodies,score:fixtures.score()});
   actions.clear();
   updatePropLights(remoteWorld);
   arena.centerShadows(lightView);
@@ -1451,7 +1522,12 @@ renderer.setAnimationLoop((time,frame)=>{
   const useVrPost=inVR&&settings.post;
   const useVrTrace=inVR&&settings.rayTrace;
   updateRayProbe(useVrTrace,objects);
-  if(!useVrPost||!vrEffects.render(scene,camera,{bloom:settings.bloom}))renderer.render(scene,camera);
+  const visibleField=settings.vrFov/100;
+  if(!useVrPost||!vrEffects.render(scene,camera,{bloom:settings.bloom,visibleField})){
+    vrFovMask.material.uniforms.visibleField.value=visibleField;
+    vrFovMask.visible=inVR&&visibleField<1;
+    try{renderer.render(scene,camera);}finally{vrFovMask.visible=false;}
+  }
   if(inVR||!reportHadVR) {
     rawFrameMs[frameSampleIndex]=actual*1000;
     frameSampleIndex=(frameSampleIndex+1)%720;
