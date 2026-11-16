@@ -98,3 +98,20 @@ Dans [arcade-blaster.js](../arcade-blaster.js), `createArcadeBlaster(scene, { im
 **Exercice**. Change la couleur du trait, puis teste le tir en visant un mur mince et un objet proche. Pour ajouter un mode rafale, garde un compteur de tirs dans ce mode et laisse les projectiles et les impacts au module. Garde aussi le nombre d'effets borné. Un **pool** réserve des emplacements et recycle ceux dont l'effet est terminé.
 
 Pour une nouvelle arme, garde la traduction des entrées, la visée et les réactions du monde dans [blaster-system.js](../blaster-system.js). Modifie les paramètres des projectiles et les effets dans [arcade-blaster.js](../arcade-blaster.js). Les valeurs initiales du menu vivent dans [game-settings.js](../game-settings.js).
+
+## Poignées 3D et raccourcis en R36
+
+| Touche | Outil | Geste |
+| --- | --- | --- |
+| V / Échap | Sélection | Clique une pièce ou déplace-la librement au sol. |
+| G | Déplacement | Tire une flèche. La translation suit le pas de grille, y compris en hauteur. |
+| R | Rotation | Tire un anneau coloré. Les angles avancent de 5° en 5°. |
+| S | Taille | Tire un cube coloré pour changer une dimension. |
+| C | Caméra | Tourne autour de la carte à la souris ou au doigt. |
+| Ctrl+Z | Annuler | Annule une transformation entière, même après un glissement continu. |
+
+Sélectionne une pièce dans la 3D, le plan ou la liste filtrée. Elle reste sélectionnée quand tu changes d’outil. Le terrain sculpté accepte le déplacement et le redimensionnement en X/Z. Utilise **Sculpter** pour changer le relief. Le volume de collision du terrain repose sur une hauteur unique par paire X/Z.
+
+`editor.js` relie les poignées de Three.js au modèle de carte. Les champs et le plan suivent pendant le glissement, puis `sync()` reconstruit les UV et le terrain et sauvegarde le brouillon. `map-format.js` vérifie les trois angles et exporte le roulis (`roll`). Les anciennes cartes sans ce champ sont lues avec un roulis de zéro. `custom-maps.js` applique le même ordre YXZ au maillage de jeu et à sa collision.
+
+La densité d’herbe va de zéro à environ cinq touffes par mètre carré à 100 %, dans la limite de 3 200 touffes par pièce. Les touffes restent instanciées afin de partager leur géométrie.

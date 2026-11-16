@@ -74,6 +74,8 @@ try{
 const steps=createStepSound();
 for(const event of ['pointerdown','keydown'])addEventListener(event,steps.unlock,{passive:true});
 const debugView=createDebugView(scene);
+// The preceding frame's foot contact guides keyboard/joystick movement.
+const walkingSupport={normal:new T.Vector3(),surface:null};
 const bodyProxies=[.18,.17,.105].map(radius=>({radius,position:new T.Vector3()}));
 const boot=new T.Vector3(labSpawn.x,labSpawn.y,labSpawn.z);
 rig.position.copy(boot);
@@ -273,7 +275,7 @@ function resetObjects(){
 function resetPlayer(){
   blaster.reset();
   rig.position.copy(boot);yaw=T.MathUtils.degToRad(maps.yaw);pitch=0;rig.rotation.y=yaw;
-  velocity.set(0,0,0);snap=false;grounded=false;hasPreviousHead=false;locomotion.reset();steps.reset();torsoTilt.set(0,0);
+  velocity.set(0,0,0);snap=false;grounded=false;walkingSupport.normal.set(0,0,0);walkingSupport.surface=null;hasPreviousHead=false;locomotion.reset();steps.reset();torsoTilt.set(0,0);
   for(const hand of hands){hand.valid=false;hand.hapticGrounded=false;hand.hapticCooldown=0;hand.gamepad=null;release(hand,false);}
 
 }
@@ -1366,8 +1368,18 @@ function character(frame,space,pose,dt,inputDt=dt){
     const a=1-Math.exp(-dt*(floor?.friction<.1?2:grounded?13:4));
     velocity.x=T.MathUtils.lerp(velocity.x,scratch.x,a);velocity.z=T.MathUtils.lerp(velocity.z,scratch.z,a);
     const jump=flat.consumeJump()||actions.delete('Space');
-    if(jump&&grounded)velocity.y=3.1+settings.jump*.18;
+    const takeoff=jump&&grounded;
+    const n=walkingSupport.normal;
+    const stickToGround=!takeoff&&grounded&&n.y>=.62&&(walkingSupport.surface?.friction??0)>=.45;
+    if(takeoff)velocity.y=3.1+settings.jump*.18;
+    else if(stickToGround){
+      // Follow the support plane at the requested horizontal speed.
+      velocity.y=-(velocity.x*n.x+velocity.z*n.z)/n.y;
+    }
     delta.copy(velocity).multiplyScalar(dt);
+    // Bias into the surface along its normal. A vertical bias alone injects
+    // a downhill step on every collision correction, even with no input.
+    if(stickToGround)delta.addScaledVector(n,-gravity*dt*dt);
   }
 
   if(settings.collisions&&hasPreviousHead){
@@ -1378,6 +1390,7 @@ function character(frame,space,pose,dt,inputDt=dt){
   rig.position.add(delta);
   worldHead.copy(head).applyAxisAngle(up,yaw).add(rig.position);
   grounded=false;
+  walkingSupport.normal.set(0,0,0);walkingSupport.surface=null;
   if(settings.collisions){
     // Le solveur conserve trois sphères, avec un décalage horizontal piloté par le torse.
     bodyCollisionBack.set(0,-1,0).applyQuaternion(monkey.quaternion);
@@ -1389,7 +1402,7 @@ function character(frame,space,pose,dt,inputDt=dt){
       point.set(worldHead.x,rig.position.y+height,worldHead.z);
       if(i<2)point.addScaledVector(bodyCollisionBack,Math.max(0,head.y-height));
       prior.copy(point);
-      grounded=solve(point,radius,arena.boxes,velocity,0,3+settings.grip,dt)||grounded;
+      grounded=solve(point,radius,arena.boxes,velocity,0,3+settings.grip,dt,i===0?walkingSupport:null)||grounded;
       if(settings.objects)for(const object of blockers){
         if(object.blocksPlayer&&!object.owner&&playerObjectContact(point,radius,object,velocity,playerNormal)&&playerNormal.y>.6)grounded=true;
       }

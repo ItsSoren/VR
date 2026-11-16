@@ -46,14 +46,18 @@ export function penetration(position,radius,box,normal) {
 }
 
 const normal=new T.Vector3(), tangent=new T.Vector3();
-export function solve(position,radius,boxes,velocity,bounce=0,drag=0,dt=0) {
+export function solve(position,radius,boxes,velocity,bounce=0,drag=0,dt=0,support=null) {
   let floor=false;
   for(let pass=0;pass<3;pass++) {
     for(const box of boxes) {
       const depth=penetration(position,radius,box,normal);
       if(!depth) continue;
       position.addScaledVector(normal,depth+.0001);
-      if(normal.y>.65) floor=true;
+      // Walking support is separate from hand contact, which also accepts vertical walls.
+      if(normal.y>=.62){
+        floor=true;
+        if(support&&normal.y>support.normal.y){support.normal.copy(normal);support.surface=box;}
+      }
       if(!velocity) continue;
       const vn=velocity.dot(normal);
       if(vn<0) velocity.addScaledVector(normal,-vn*(Math.abs(vn)<.55?1:1+bounce));
@@ -580,11 +584,15 @@ export function solveObjects(objects,boxes,dt,gravity,rebound,surfaceAt) {
 function heightContact(p,radius,field,out) {
   if(p.x<field.xMin||p.x>field.xMax||p.z<field.zMin||p.z>field.zMax)return 0;
   const h=field.height(p.x,p.z);
-  if(p.y-h>=radius*1.6)return 0;
-  const eps=.045;
-  const dx=(field.height(p.x+eps,p.z)-field.height(p.x-eps,p.z))/(2*eps);
-  const dz=(field.height(p.x,p.z+eps)-field.height(p.x,p.z-eps))/(2*eps);
-  out.set(-dx,1,-dz).normalize();
+  // Test signed distance to the supporting triangle, not vertical distance.
+  // A palm can touch a steep face while sitting well above its height at the same X/Z.
+  if(field.normalAt)field.normalAt(p.x,p.z,out);
+  else{
+    const eps=.045;
+    const dx=(field.height(p.x+eps,p.z)-field.height(p.x-eps,p.z))/(2*eps);
+    const dz=(field.height(p.x,p.z+eps)-field.height(p.x,p.z-eps))/(2*eps);
+    out.set(-dx,1,-dz).normalize();
+  }
   return Math.max(0,radius-(p.y-h)*out.y);
 }
 

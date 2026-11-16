@@ -70,7 +70,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     const {material,custom,ownTexture}=card(piece);
     const mesh=new T.Mesh(piece.terrain?terrainGeometry(piece):tiledBox(piece.w,piece.h,piece.d),material);
     mesh.position.set(piece.x,piece.y,piece.z);
-    mesh.rotation.set(T.MathUtils.degToRad(piece.pitch),T.MathUtils.degToRad(piece.yaw),0,'YXZ');
+    mesh.rotation.set(T.MathUtils.degToRad(piece.pitch),T.MathUtils.degToRad(piece.yaw),T.MathUtils.degToRad(piece.roll??0),'YXZ');
     mesh.castShadow=mesh.receiveShadow=true;
     mesh.userData.mapIndex=index;
     group.add(mesh);
@@ -199,7 +199,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     const next=shape.terrain?{...shape,x:Math.round(hit.point.x*2)/2,y:hit.point.y,z:Math.round(hit.point.z*2)/2,pitch:0,yaw:0}:snapPlacement(hit.point,rotatedNormal,shape);
     if(!next)return;
     ghost.position.set(next.x,next.y,next.z);
-    ghost.rotation.set(T.MathUtils.degToRad(next.pitch),T.MathUtils.degToRad(next.yaw),0,'YXZ');
+    ghost.rotation.set(T.MathUtils.degToRad(next.pitch),T.MathUtils.degToRad(next.yaw),T.MathUtils.degToRad(next.roll??0),'YXZ');
     ghost.scale.set(next.w,next.h,next.d);ghost.updateMatrixWorld(true);ghost.visible=true;
     const bounds=new T.Box3().setFromObject(ghost);
     const playerBox=new T.Box3(new T.Vector3(head.x-.26,feet+.01,head.z-.26),new T.Vector3(head.x+.26,head.y+.19,head.z+.26));

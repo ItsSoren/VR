@@ -130,15 +130,16 @@ export class GorillaLocomotion {
       normal.copy(this.hitNormal);
       const friction = surface.friction ?? .8;
       const grip = Math.min(1, Math.max(0, friction * (.75 + settings.grip * .09)));
-      // The surface normal controls how much friction resists sliding against gravity.
-      const slope = 1 - Math.max(0, normal.y);
-      const slip = Math.min(.97, Math.max(0, 1 - grip + slope * .24 + (settings.slide - 3) * .035));
+      // Ordinary inclines keep a planted palm. Near-vertical contacts can still
+      // slide slowly with low grip; ice keeps its own low adhesion at any angle.
+      const wall = Math.max(0, 1 - Math.abs(normal.y) / .28);
+      const slip = Math.min(.97, Math.max(0, 1 - grip + wall * .24 + (settings.slide - 3) * .035));
       const correction = this.correction.subVectors(hand.anchor, target);
       correction.addScaledVector(normal, -correction.dot(normal));
       this.slideTarget.copy(correction).multiplyScalar(-slip);
       if (priorActive) {
         this.downhill.set(0, -1, 0).addScaledVector(normal, normal.y);
-        this.slideTarget.addScaledVector(this.downhill, gravity * dt * .11 * slip);
+        this.slideTarget.addScaledVector(this.downhill, gravity * dt * .11 * slip * Math.max(wall,Math.max(0,1-2*grip)));
       }
       if (this.slideTarget.lengthSq() > 1e-8) {
         // Sweep along the contact plane before probing for support at the new point.

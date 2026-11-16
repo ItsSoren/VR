@@ -219,12 +219,26 @@ export function updateTerrainGeometry(geometry, piece) {
   if (geometry.boundingBox) geometry.computeBoundingBox();
 }
 
+// Matches the diagonal and vertices written by terrainGeometry(), including at steep crests.
+function terrainNormal(piece, x, z, out) {
+  const {detail,w,d,surface}=gridFor(piece);
+  const u=clamp(((x-piece.x)/w+.5)*detail,0,detail);
+  const v=clamp(((z-piece.z)/d+.5)*detail,0,detail);
+  const col=Math.min(detail-1,Math.floor(u)),row=Math.min(detail-1,Math.floor(v));
+  const stride=detail+1, i=row*stride+col;
+  const lower=u-col+v-row<=1;
+  const dx=lower?surface[i+1]-surface[i]:surface[i+stride+1]-surface[i+stride];
+  const dz=lower?surface[i+stride]-surface[i]:surface[i+stride+1]-surface[i+1];
+  return out.set(-dx*detail/w,1,-dz*detail/d).normalize();
+}
+
 export function terrainCollider(piece, mesh) {
   return {
     mesh, heightfield: true,
     xMin: piece.x - piece.w / 2, xMax: piece.x + piece.w / 2,
     zMin: piece.z - piece.d / 2, zMax: piece.z + piece.d / 2,
     height: (x, z) => terrainHeight(piece, x, z),
+    normalAt: (x,z,out) => terrainNormal(piece,x,z,out),
     friction: piece.grip, gravity: piece.gravity, bounce: piece.bounce,
     zone: true, type: piece.material,
   };
@@ -249,7 +263,7 @@ function shrubGeometry() {
 }
 
 const vegetationKinds = [
-  { name: 'grass', geometry: grassGeometry, perMetre: 1.8, max: 160, salt: 21, color: '#527a34' },
+  { name: 'grass', geometry: grassGeometry, perMetre: 5, max: 3200, salt: 21, color: '#527a34' },
   { name: 'shrub', geometry: shrubGeometry, perMetre: .17, max: 48, salt: 47, color: '#36583c' },
 ];
 
@@ -258,7 +272,8 @@ export function terrainVegetation(piece) {
   for (const { name, geometry, perMetre, max, salt, color } of vegetationKinds) {
     const density = piece.terrain[name];
     if (!density) continue;
-    const count = Math.min(max, Math.max(1, Math.round(piece.w * piece.d * perMetre * density)));
+    // Cap the area first so the density slider still spans its full range on large plots.
+    const count = Math.max(1, Math.round(Math.min(max,piece.w*piece.d*perMetre)*density));
     const material = new T.MeshLambertMaterial({ color, side: name === 'grass' ? T.DoubleSide : T.FrontSide });
     material.flatShading = true;
     const plants = new T.InstancedMesh(geometry(), material, count);

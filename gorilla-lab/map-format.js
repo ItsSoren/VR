@@ -1,3 +1,4 @@
+import {Euler,Vector3} from 'three';
 import {labSpawn} from './lab-layout.js';
 import {normalizeTerrain} from './terrain-edit.js';
 
@@ -27,7 +28,7 @@ export function parseMap(input){
       return {
         name:text(p.name,36,'Pièce '+(i+1)),x:number(p.x,-120,120,0),y:number(p.y,-12,33,0),z:number(p.z,-120,120,0),
         w:number(p.w,.2,64,3),h:number(p.h,.12,36,.5),d:number(p.d,.2,64,3),
-        pitch:terrain?0:number(p.pitch,-70,70,0),yaw:terrain?0:number(p.yaw,-360,360,0),
+        pitch:terrain?0:number(p.pitch,-180,180,0),yaw:terrain?0:number(p.yaw,-360,360,0),roll:terrain?0:number(p.roll,-180,180,0),
         ...(terrain?{terrain}:{}),
         material:Math.round(number(p.material,0,16,0)),
         color:typeof p.color==='string'&&/^#[a-f0-9]{6}$/i.test(p.color)?p.color:'#ffffff',
@@ -70,17 +71,15 @@ export function exampleMap(){
 
 
 export function makePiece(fields={}){
-  return {name:'Bloc',x:0,y:.25,z:0,w:2,h:.5,d:2,pitch:0,yaw:0,material:0,color:'#ffffff',
+  return {name:'Bloc',x:0,y:.25,z:0,w:2,h:.5,d:2,pitch:0,yaw:0,roll:0,material:0,color:'#ffffff',
     grip:.8,gravity:1,bounce:1,solid:true,texture:null,...fields};
 }
 export function snapPlacement(hit,normal,shape,step=.25){
   if(!hit||!normal||!Number.isFinite(step)||step<=0)return null;
-  const pitch=shape.pitch*Math.PI/180,yaw=shape.yaw*Math.PI/180;
-  const cp=Math.cos(pitch),sp=Math.sin(pitch),cy=Math.cos(yaw),sy=Math.sin(yaw);
   const n=normal;
-  const extent=Math.abs(n.x*cy-n.z*sy)*shape.w*.5
-    +Math.abs(n.x*sy*sp+n.y*cp+n.z*cy*sp)*shape.h*.5
-    +Math.abs(n.x*sy*cp-n.y*sp+n.z*cy*cp)*shape.d*.5;
+  const inverse=new Euler(-shape.pitch*Math.PI/180,-shape.yaw*Math.PI/180,-(shape.roll??0)*Math.PI/180,'ZXY');
+  const local=new Vector3(n.x,n.y,n.z).applyEuler(inverse);
+  const extent=(Math.abs(local.x)*shape.w+Math.abs(local.y)*shape.h+Math.abs(local.z)*shape.d)*.5;
   const snap=v=>Math.round(v/step)*step;
   let x=snap(hit.x+n.x*extent), y=snap(hit.y+n.y*extent), z=snap(hit.z+n.z*extent);
   // Snap along the surface and preserve the exact face-to-face separation.

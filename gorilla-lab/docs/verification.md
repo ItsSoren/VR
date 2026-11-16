@@ -112,3 +112,9 @@ Pour reproduire la vérification des commandes sur PC, charge l’arène, ferme 
 5. Compare les volumes **1/10**, **5/10** et **10/10** avec **Écouter un pas**, puis en marchant sur PC ou en posant une paume au sol en VR. Un appui tenu ne doit produire qu’un son.
 6. Capture le rapport après avoir reproduit le geste. `debug.hands[].idleAlignmentMeters` mesure l’alignement mathématique avant résolution. `palmCenter`, `gripPosition`, `contactCenter` et `normal` sont en coordonnées du monde. Le diagnostic prend un échantillon environ toutes les 350 ms. `torsoDegrees` donne le tangage puis le roulis.
 7. Dans l’éditeur PC/mobile, ouvre **Arène de départ**, vérifie le point de spawn, le rectangle, la sphère, les zones et les textures. Déplace un bloc, puis lance **Tester la map** pour vérifier que la modification et le décor intégré sont chargés.
+
+## Pentes et poignées en R36
+
+- Sur PC/mobile, marche puis relâche les commandes sur une rampe normale. Recommence sur la glace. Le soutien du sol pour la marche s’arrête autour de 52° ; les surfaces plus raides se traitent comme des parois.
+- Dans le casque, active les paumes et les normales dans **Debug**. Compare un appui à 45°, un à 70° puis un au mur. Le test de la paume utilise la normale du triangle sculpté, indépendamment de l’angle retenu pour la marche PC. Le ressenti et l’écart résiduel du suivi se vérifient au casque.
+- Dans l’atelier, sélectionne un bloc, utilise **G**, **R** et **S** sur chaque axe. Annule, exporte et recharge la carte, puis joue-la. Vérifie aussi le redimensionnement X/Z d’un terrain.

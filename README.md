@@ -4,12 +4,14 @@
 
 `npm install`, puis `npm run build` et `npm test` à la racine du dépôt.
 
-Ouvrir index.html pour l'aperçu PC. Publier en HTTPS pour entrer en WebXR depuis le casque. Le site est statique. Placer index.html et game-lab-r35.js ensemble à la racine d'un dépôt GitHub Pages.
+Ouvrir index.html pour l'aperçu PC. Publier en HTTPS pour entrer en WebXR depuis le casque. Le site est statique. Placer index.html et game-lab-r36.js ensemble à la racine d'un dépôt GitHub Pages.
 ## Debug et calibration
 
 Dans **Debug**, active les repères de prise, de paume et de corps, les hitboxes, les collisions invisibles ou les vecteurs. La simulation peut tourner à ×1, ×0,75, ×0,5 ou ×0,25 en solo. Le volume des appuis va de 1 à 10, avec un bouton pour écouter un pas. Le rapport JSON inclut les dernières mesures de pose et les réglages.
 
 L’éditeur de carte s’ouvre sur l’arène de départ à la première visite, puis restaure le dernier brouillon. Le bouton **Arène de départ** repart des surfaces du jeu avec les textures, le terrain et les objets visibles.
+
+Dans l’atelier, **G** déplace, **R** tourne et **S** redimensionne la pièce sélectionnée avec les poignées 3D.
 
 ## Champ de vision et éditeurs
 

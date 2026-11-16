@@ -6,6 +6,7 @@ import {labMirror} from './lab-layout.js';
 import {tiledBox} from './texture-geometry.js';
 import {normalizeTerrain,resizeTerrain,sculptTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from './terrain-edit.js';
 import {texturePresets,seamlessTexture} from './seamless-texture.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   parseMap, arenaMap, exampleMap, makePiece, mapMaterials, materialColors, surfacePresets,
@@ -13,7 +14,7 @@ import {
 } from './map-format.js';
 
 const $ = id => document.getElementById(id);
-const fields = ['name', 'x', 'y', 'z', 'w', 'h', 'd', 'pitch', 'yaw', 'material', 'color', 'grip', 'gravity', 'bounce', 'solid'];
+const fields = ['name', 'x', 'y', 'z', 'w', 'h', 'd', 'pitch', 'yaw', 'roll', 'material', 'color', 'grip', 'gravity', 'bounce', 'solid'];
 const toolButtons = [...document.querySelectorAll('.tool')];
 const draftKey = 'gorilla-lab-editor-draft';
 const shapes = {
@@ -24,6 +25,9 @@ const shapes = {
 };
 const toolHelp = {
   move: 'Clique ou touche une pièce pour la sélectionner. Glisse-la pour la déplacer au sol.',
+  translate: 'Sélectionne une pièce et tire une flèche pour la déplacer sur un axe. La grille fixe le pas.',
+  rotate: 'Sélectionne une pièce puis tire un anneau coloré pour la tourner par crans de 5°.',
+  scale: 'Tire un cube coloré pour modifier un axe. Sur un terrain, les poignées X et Z règlent son emprise.',
   view: 'Glisse dans la vue 3D pour tourner. Utilise la molette ou pince à deux doigts pour zoomer.',
   block: 'Clique dans la vue 3D ou sur le plan pour poser un bloc. Échap revient à la sélection.',
   ramp: 'Clique dans la vue 3D ou sur le plan pour poser une rampe. Échap revient à la sélection.',
@@ -88,6 +92,14 @@ grid.material.opacity = .35;
 scene.add(grid);
 const group = new T.Group();
 scene.add(group);
+// Three.js draws and picks the handles. The map remains the only saved state.
+const gizmo=new TransformControls(camera,screen);
+gizmo.setSize(.9);
+gizmo.setRotationSnap(T.MathUtils.degToRad(5));
+gizmo.enabled=false;
+scene.add(gizmo.getHelper());
+const transformModes=new Set(['translate','rotate','scale']);
+let beforeTransform=null;
 const sharedBox = new T.BoxGeometry(1, 1, 1);
 const loader = new T.TextureLoader();
 const spawn = new T.Mesh(new T.ConeGeometry(.32, .75, 5), new T.MeshBasicMaterial({ color: '#ffcd63' }));
@@ -117,6 +129,7 @@ function queueRender() {
   });
 }
 
+// Adapte le framebuffer et la projection à la taille de la vue 3D.
 function resizeRenderer() {
   const width = screen.clientWidth || 1, height = screen.clientHeight || 1;
   renderer.setSize(width, height, false);
@@ -125,6 +138,7 @@ function resizeRenderer() {
   queueRender();
 }
 
+// Adapte le plan aux pixels de l’écran, puis recalcule son échelle.
 function resizePlan() {
   const width = Math.max(1, plan.clientWidth), height = Math.max(1, plan.clientHeight);
   if (width === plan.width && height === plan.height) return;
@@ -139,10 +153,12 @@ new ResizeObserver(resizePlan).observe(plan);
 controls.addEventListener('change', queueRender);
 controls.addEventListener('start', () => showGhost(null));
 
+// Calcule les pixels par mètre pour conserver la carte entière dans le plan.
 function scalePlan() {
   planRange.scale = Math.min(plan.width / planRange.width, plan.height / planRange.height);
 }
 
+// Convertit une position X/Z du monde en pixels du plan.
 function transform(x, z) {
   return [
     plan.width / 2 + (x - planRange.cx) * planRange.scale,
@@ -150,6 +166,7 @@ function transform(x, z) {
   ];
 }
 
+// Convertit la position du pointeur sur le plan en coordonnées du monde.
 function toWorld(event) {
   const rect = plan.getBoundingClientRect();
   return {
@@ -158,14 +175,17 @@ function toWorld(event) {
   };
 }
 
+// Peint l’emprise approximative d’une pièce avec son cap et son inclinaison.
 function drawFootprint(piece, fill, stroke, lineWidth, opacity) {
   const [x, z] = transform(piece.x, piece.z);
-  const w = piece.w * planRange.scale;
-  const angle = T.MathUtils.degToRad(piece.pitch);
-  const d = (Math.abs(Math.cos(angle)) * piece.d + Math.abs(Math.sin(angle)) * piece.h) * planRange.scale;
+  const pitch=T.MathUtils.degToRad(piece.pitch),roll=T.MathUtils.degToRad(piece.roll??0);
+  const projectedWidth=Math.abs(Math.cos(roll))*piece.w+Math.abs(Math.sin(roll))*piece.h;
+  const projectedDepth=Math.abs(Math.cos(pitch))*piece.d+Math.abs(Math.sin(pitch))*
+    (Math.abs(Math.sin(roll))*piece.w+Math.abs(Math.cos(roll))*piece.h);
   context.save();
   context.translate(x, z);
   context.rotate(-T.MathUtils.degToRad(piece.yaw));
+  const w=projectedWidth*planRange.scale,d=projectedDepth*planRange.scale;
   context.globalAlpha = opacity;
   context.fillStyle = fill;
   context.fillRect(-w / 2, -d / 2, w, d);
@@ -176,6 +196,7 @@ function drawFootprint(piece, fill, stroke, lineWidth, opacity) {
   context.restore();
 }
 
+// Dessine le point de départ et son orientation dans le plan.
 function drawMarker(point, isGhost) {
   const [x, z] = transform(point.x, point.z);
   context.save();
@@ -195,6 +216,7 @@ function drawMarker(point, isGhost) {
   context.restore();
 }
 
+// Redessine la grille, les pièces, la sélection et l’aperçu de pose.
 function paintPlan() {
   context.fillStyle = '#192e3a';
   context.fillRect(0, 0, plan.width, plan.height);
@@ -229,14 +251,16 @@ function paintPlan() {
   }
 }
 
+// Applique les mètres et les degrés de la carte au maillage Three.js.
 function placeMesh(mesh, piece) {
   mesh.position.set(piece.x, piece.y, piece.z);
   if(piece.terrain&&mesh!==ghostBox)mesh.scale.setScalar(1);
   else mesh.scale.set(piece.w, piece.h, piece.d);
-  mesh.rotation.set(T.MathUtils.degToRad(piece.pitch), T.MathUtils.degToRad(piece.yaw), 0, 'YXZ');
+  mesh.rotation.set(T.MathUtils.degToRad(piece.pitch), T.MathUtils.degToRad(piece.yaw), T.MathUtils.degToRad(piece.roll??0), 'YXZ');
   mesh.updateMatrixWorld();
 }
 
+// Remplace le cadre jaune et rattache les poignées à la pièce active.
 function updateSceneSelection() {
   if (selectionBox) {
     scene.remove(selectionBox);
@@ -246,9 +270,79 @@ function updateSceneSelection() {
   const mesh = group.children[selected];
   selectionBox = mesh ? new T.BoxHelper(mesh, '#ffdf88') : null;
   if (selectionBox) scene.add(selectionBox);
+  attachGizmo();
 }
 
+// Terrain vertices are baked into a heightfield. Translation and X/Z size
+// editing preserve that representation; rotation is limited to box pieces.
+function attachGizmo() {
+  const mesh=group.children[selected],terrain=current()?.terrain;
+  const active=transformModes.has(tool)&&Boolean(mesh)&&!(terrain&&tool==='rotate');
+  gizmo.enabled=active;
+  if(!active){
+    gizmo.detach();
+    if(terrain&&tool==='rotate')$('tool-help').textContent='Le terrain reste horizontal. Utilise Sculpter pour façonner sa pente.';
+    return;
+  }
+  gizmo.setMode(tool);
+  gizmo.setSpace(tool==='translate'?'world':'local');
+  gizmo.setTranslationSnap(snapStep());
+  gizmo.showX=gizmo.showZ=true;
+  gizmo.showY=!(terrain&&tool==='scale');
+  gizmo.attach(mesh);
+  $('tool-help').textContent=toolHelp[tool];
+}
+
+gizmo.addEventListener('change',queueRender);
+gizmo.addEventListener('mouseDown',()=>{
+  const piece=current();
+  if(piece)beforeTransform={map:structuredClone(map),selected};
+});
+// Reflète la transformation de Three.js dans le modèle et l’inspecteur à chaque mouvement.
+gizmo.addEventListener('objectChange',()=>{
+  const piece=current(),mesh=gizmo.object,original=beforeTransform?.map.pieces[selected];
+  if(!piece||!mesh||!original)return;
+  const clamp=T.MathUtils.clamp;
+  if(tool==='translate'){
+    piece.x=clamp(mesh.position.x,-120,120);
+    piece.y=clamp(mesh.position.y,-12,33);
+    piece.z=clamp(mesh.position.z,-120,120);
+    mesh.position.set(piece.x,piece.y,piece.z);
+  }else if(tool==='rotate'){
+    piece.pitch=T.MathUtils.radToDeg(mesh.rotation.x);
+    piece.yaw=T.MathUtils.radToDeg(mesh.rotation.y);
+    piece.roll=T.MathUtils.radToDeg(mesh.rotation.z);
+  }else{
+    piece.w=clamp(mesh.scale.x*(piece.terrain?original.w:1),.2,64);
+    piece.d=clamp(mesh.scale.z*(piece.terrain?original.d:1),.2,64);
+    if(!piece.terrain)piece.h=clamp(mesh.scale.y,.12,36);
+    mesh.scale.set(piece.terrain?piece.w/original.w:piece.w,piece.terrain?1:piece.h,piece.terrain?piece.d/original.d:piece.d);
+  }
+  mesh.updateMatrixWorld(true);
+  selectionBox?.update();
+  for(const key of ['x','y','z','pitch','yaw','roll','w','h','d'])$('p-'+key).value=Number(piece[key]??0).toFixed(2);
+  paintPlan();
+  queueRender();
+});
+// Commit one undo entry for the entire drag, then rebuild generated UVs and terrain.
+gizmo.addEventListener('dragging-changed',({value})=>{
+  controls.enabled=!value;
+  if(value||!beforeTransform)return;
+  const snapshot=beforeTransform;
+  beforeTransform=null;
+  if(JSON.stringify(snapshot.map.pieces[selected])===JSON.stringify(current()))return;
+  if(undoStack.length>=35)undoStack.shift();
+  undoStack.push(snapshot);
+  map=parseMap(map);
+  sync();
+  notice('Transformation appliquée.');
+});
+screen.addEventListener('pointerup',()=>{if(!gizmo.dragging)controls.enabled=true;});
+screen.addEventListener('pointercancel',()=>{if(gizmo.dragging)gizmo.pointerUp(null);controls.enabled=true;});
+
+// Recrée les maillages éditables à partir du JSON et libère leurs ressources précédentes.
 function rebuildScene() {
+  gizmo.detach();
   for (const mesh of [...group.children]) {
     group.remove(mesh);
     if(mesh.geometry!==sharedBox)mesh.geometry.dispose();
@@ -294,16 +388,20 @@ function rebuildScene() {
   updateSceneSelection();
 }
 
+// Renvoie la pièce active dans le modèle éditable.
 function current() { return map.pieces[selected]; }
 
+// Annonce le résultat d’une action dans la zone de statut.
 function notice(message) { $('editor-note').textContent = message; }
 
+// Prend une photo du modèle avant une action pour Ctrl+Z.
 function remember() {
   if (undoStack.length >= 35) undoStack.shift();
   undoStack.push({ map: structuredClone(map), selected });
   $('undo').disabled = false;
 }
 
+// Enregistre le brouillon local et signale les erreurs de stockage.
 function pendingSave() {
   try {
     localStorage.setItem(draftKey, JSON.stringify(map));
@@ -313,7 +411,9 @@ function pendingSave() {
   }
 }
 
+// Recherche insensible aux accents et à la casse.
 const searchName = name => name.normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase();
+// Filtre les pièces tout en conservant leurs index dans la carte.
 function updatePieceList() {
   const query=searchName($('piece-search').value.trim());
   // Keep the original map index in each option so filtering never selects a different piece.
@@ -328,6 +428,7 @@ function updatePieceList() {
   $('count').textContent=query?matches.length+' sur '+map.pieces.length:map.pieces.length+' / '+maxPieces;
 }
 
+// Rafraîchit les champs compatibles avec la pièce sélectionnée.
 function updateInspector() {
   updatePieceList();
   const piece = current();
@@ -348,13 +449,15 @@ function updateInspector() {
   $('terrain-controls').hidden=!terrain;
   if(terrain){
     for(const key of terrainFields)$('terrain-'+key).value=terrain[key];
-    $('p-pitch').disabled=$('p-yaw').disabled=true;
+    $('p-pitch').disabled=$('p-yaw').disabled=$('p-roll').disabled=true;
   }
+  $('rotate').disabled=!piece||Boolean(terrain);
   $('texture-create').disabled=!piece;
   $('surface').value = '';
   $('undo').disabled = undoStack.length === 0;
 }
 
+// Réconcilie le modèle, la 3D, le plan, le formulaire et le brouillon.
 function sync() {
   $('map-name').value = map.name;
   updateInspector();
@@ -365,6 +468,7 @@ function sync() {
   pendingSave();
 }
 
+// Change la sélection sans reconstruire tous les maillages.
 function choose(index) {
   if (selected === index) return;
   selected = index;
@@ -374,6 +478,7 @@ function choose(index) {
   queueRender();
 }
 
+// Ajoute et sélectionne une pièce dans la limite du format de carte.
 function addPiece(piece) {
   if (map.pieces.length >= maxPieces) return notice('Limite de pièces atteinte.');
   remember();
@@ -383,6 +488,7 @@ function addPiece(piece) {
   notice(piece.name + ' ajouté à la map.');
 }
 
+// Retire la pièce active et garde une sélection valide.
 function removePiece() {
   if (!current() || map.pieces.length === 1) return;
   const name = current().name;
@@ -393,6 +499,7 @@ function removePiece() {
   notice(name + ' retiré de la map.');
 }
 
+// Crée une copie voisine avec les propriétés de la sélection.
 function duplicatePiece() {
   const piece = current();
   if (!piece) return;
@@ -400,14 +507,16 @@ function duplicatePiece() {
   addPiece({ ...piece, name: (piece.name + ' bis').slice(0, 36), x });
 }
 
+// Applique le raccourci de formulaire pour pivoter de 45° sur Y.
 function rotatePiece() {
   const piece = current();
-  if (!piece) return;
+  if (!piece||piece.terrain) return;
   remember();
   piece.yaw = (piece.yaw + 45) % 360;
   sync();
 }
 
+// Restaure la carte et la sélection de l’étape précédente.
 function undo() {
   const last = undoStack.pop();
   if (!last) return;
@@ -418,18 +527,24 @@ function undo() {
   notice('Dernière modification annulée.');
 }
 
+// Synchronise le mode actif, les entrées, les poignées et l’aide affichée.
 function setTool(next) {
   tool = next;
   controls.mouseButtons.LEFT=tool==='view'?T.MOUSE.ROTATE:null;
+  attachGizmo();
+  queueRender();
   for (const button of toolButtons) button.setAttribute('aria-pressed', String(button.dataset.tool === tool));
   for (const canvas of [screen, plan]) {
     canvas.dataset.tool = tool;
     canvas.removeAttribute('data-hit');
   }
   $('tool-help').textContent = toolHelp[tool];
+  attachGizmo();
+  queueRender();
   showGhost(null);
 }
 
+// Cadre les pièces et le départ dans le plan et dans la caméra perspective.
 function fitViews() {
   const bounds = new T.Box3().setFromObject(group);
   bounds.expandByPoint(spawn.position);
@@ -470,6 +585,7 @@ function fitViews() {
   queueRender();
 }
 
+// Remplace la carte courante en conservant une entrée d’annulation.
 function loadMap(next, message) {
   remember();
   map = next;
@@ -481,14 +597,17 @@ function loadMap(next, message) {
   notice(message);
 }
 
+// Renvoie le pas de grille commun à la pose et à la translation.
 function snapStep() { return Number($('snap').value); }
 
+// Aligne un déplacement au sol sur le pas et les limites du monde.
 function snapCoordinate(value) {
   const step = snapStep();
   return T.MathUtils.clamp(Math.round(value / step) * step, -120, 120);
 }
 
 // Les deux vues produisent un rayon dans le même monde 3D pour placer et déplacer les pièces.
+// Construit un rayon 3D ou vertical depuis la vue où le pointeur agit.
 function setEventRay(canvas, event) {
   if (canvas === plan) {
     const point = toWorld(event);
@@ -503,16 +622,19 @@ function setEventRay(canvas, event) {
   }
 }
 
+// Intersecte le rayon avec le plan horizontal du geste courant.
 function rayPlane(height) {
   horizontalPlane.constant = -height;
   return raycaster.ray.intersectPlane(horizontalPlane, new T.Vector3());
 }
 
+// Renvoie le premier point touché sur les pièces ou le relief de fond.
 function pointUnderPointer(canvas, event) {
   setEventRay(canvas, event);
   return raycaster.intersectObjects(map.arenaBase?[...group.children,previewHill]:group.children, false)[0];
 }
 
+// Cherche une surface solide sous le futur point d’apparition.
 function spawnOnTop(x, z, yaw, selectedMesh = null) {
   raycaster.set(new T.Vector3(x, 80, z), new T.Vector3(0, -1, 0));
   const ground = selectedMesh ? raycaster.intersectObject(selectedMesh, false)[0]
@@ -521,6 +643,7 @@ function spawnOnTop(x, z, yaw, selectedMesh = null) {
   return { x, y: Math.max(-10, ground.point.y + .08), z, yaw };
 }
 
+// Calcule une pose valide selon l’outil, le rayon et la normale touchée.
 function placementAt(canvas, event) {
   const hit = pointUnderPointer(canvas, event);
   if (tool === 'spawn') {
@@ -540,6 +663,7 @@ function placementAt(canvas, event) {
   return snapPlacement(point, normal, shapes[tool], snapStep());
 }
 
+// Actualise l’aperçu temporaire sans écrire dans la carte.
 function showGhost(preview) {
   if (!preview && !ghost) return;
   ghost = preview;
@@ -551,6 +675,7 @@ function showGhost(preview) {
   queueRender();
 }
 
+// Applique la pose calculée au clic, puis met à jour les vues.
 function commitPlacement(canvas, event) {
   const placement = placementAt(canvas, event);
   if (!placement) {
@@ -569,8 +694,20 @@ function commitPlacement(canvas, event) {
   }
 }
 
+// Répartit le pointeur entre caméra, poignées, sélection, pinceau et création.
 function beginGesture(canvas, event) {
-  if (tool==='view'||event.button !== 0 || !event.isPrimary || gesture) return;
+  if (tool==='view'||event.button !== 0 || !event.isPrimary || gesture||gizmo.dragging) return;
+  if(transformModes.has(tool)){
+    if(canvas===screen&&gizmo.enabled){
+      const rect=screen.getBoundingClientRect();
+      gizmo.pointerHover({x:(event.clientX-rect.left)/rect.width*2-1,y:1-(event.clientY-rect.top)/rect.height*2,button:0});
+      if(gizmo.axis){controls.enabled=false;return;}
+    }
+    event.stopImmediatePropagation();
+    const hit=pointUnderPointer(canvas,event);
+    choose(hit?group.children.indexOf(hit.object):-1);
+    return;
+  }
   event.stopImmediatePropagation();
   canvas.focus({ preventScroll: true });
   canvas.setPointerCapture(event.pointerId);
@@ -588,8 +725,9 @@ function beginGesture(canvas, event) {
   start.dz = hit.point.z - piece.z;
 }
 
+// Met à jour un aperçu, un déplacement au sol ou les passages du pinceau.
 function moveGesture(canvas, event) {
-  if(tool==='view')return;
+  if(tool==='view'||transformModes.has(tool))return;
   if (!gesture) {
     if (tool === 'move') canvas.toggleAttribute('data-hit', Boolean(pointUnderPointer(canvas, event)));
     else showGhost(placementAt(canvas, event));
@@ -625,6 +763,7 @@ function moveGesture(canvas, event) {
   queueRender();
 }
 
+// Termine la capture du pointeur et valide le geste en une action.
 function endGesture(canvas, event, commit) {
   if (!gesture || gesture.canvas !== canvas || gesture.id !== event.pointerId) return;
   const finished = gesture;
@@ -715,7 +854,7 @@ $('delete').onclick = removePiece;
 $('rotate').onclick = rotatePiece;
 $('undo').onclick = undo;
 $('zoom-fit').onclick = fitViews;
-$('snap').onchange = () => showGhost(null);
+$('snap').onchange = () => {gizmo.setTranslationSnap(snapStep());showGhost(null);};
 $('new-example').onclick = () => loadMap(defaultMap(), 'Arène de départ ouverte.');
 $('blank-map').onclick = () => loadMap({
   format:'gorilla-lab-map',version:1,name: 'Ma nouvelle map', spawn: { x: 0, y: .025, z: 3, yaw: 0 },
@@ -800,6 +939,7 @@ $('terrain-reset').onclick=()=>{
   remember();current().terrain.heights=null;sync();
 };
 // Le relief est la donnée de référence. Le pinceau l’édite puis reconstruit la géométrie visible.
+// Modifie le terrain via terrain-edit.js et actualise le maillage de prévisualisation.
 function applyBrush(canvas,event){
   setEventRay(canvas,event);
   const hit=raycaster.intersectObjects(group.children,false).find(item=>map.pieces[group.children.indexOf(item.object)]?.terrain);
@@ -844,9 +984,9 @@ $('view-spawn').onclick=()=>{
   camera.lookAt(controls.target);
   queueRender();
 };
-const toolKeys = { v: 'move', c: 'view', '1': 'block', '2': 'ramp', '3': 'wall', '4': 'spawn', escape: 'move' };
+const toolKeys = { v: 'move', c: 'view', g: 'translate', r: 'rotate', s: 'scale', '1': 'block', '2': 'ramp', '3': 'wall', '4': 'spawn', escape: 'move' };
 document.addEventListener('keydown', event => {
-  if (event.target.closest?.('input, select, textarea, [contenteditable]') || gesture) return;
+  if (event.target.closest?.('input, select, textarea, [contenteditable]') || gesture||gizmo.dragging) return;
   const key = event.key.toLowerCase();
   if (event.ctrlKey || event.metaKey) {
     if (key === 'z') undo();
@@ -854,7 +994,6 @@ document.addEventListener('keydown', event => {
     else return;
   } else if (event.altKey) return;
   else if (toolKeys[key]) setTool(toolKeys[key]);
-  else if (key === 'r') rotatePiece();
   else if (key === 'f') fitViews();
   else if (key === 'delete') removePiece();
   else return;
