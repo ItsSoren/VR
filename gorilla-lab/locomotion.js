@@ -66,8 +66,9 @@ export class GorillaLocomotion {
     return this.palmContact(from, to, state.hand.mesh.quaternion, boxes, this.hit, this.hitNormal);
   }
 
-  move({head, dt, gravity, settings, boxes, velocity, movement, reach}) {
+  move({head, dt, inputDt=dt, gravity, settings, boxes, velocity, movement, reach}) {
     this.dt = dt;
+    this.inputDt = inputDt;
     this.settings = settings;
     this.boxes = boxes;
     this.contacts = 0;
@@ -210,7 +211,8 @@ export class GorillaLocomotion {
     }
 
     const sample = history[this.historyIndex];
-    sample.duration = dt;
+    // Window length tracks real controller samples, even during debug slow motion.
+    sample.duration = this.inputDt;
     sample.distance.set(0, 0, 0);
     const moving = this.intent.dot(appliedMove) > 0 && this.planned.dot(appliedMove) > 0 && contacts;
     if (moving) {

@@ -8,6 +8,7 @@ import {parseMap,makePiece,snapPlacement,maxPieces,maxMapBytes,storageKey,downlo
 
 export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultObjects}){
   const builtBoxes=arena.boxes.slice();
+  const replaceableMeshes=new Set(builtBoxes.filter(box=>box.half&&box.mesh?.isObject3D).map(box=>box.mesh));
   const group=new T.Group();scene.add(group);
   const meshRows=[], history=[];
   const loader=new T.TextureLoader(), textures=new Map();
@@ -97,10 +98,14 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     meshRows.length=0;
     const nodes=map?.pieces??[];
     signature=map?'custom-'+mapCode(JSON.stringify(map)):'';
-    defaultObjects.forEach(mesh=>mesh.visible=!map);
+    // Arena-derived maps replace editable boxes but retain hills and fixtures.
+    defaultObjects.forEach(mesh=>mesh.visible=!map||map.arenaBase&&!replaceableMeshes.has(mesh));
     for(let i=0;i<nodes.length;i++)meshRows.push(makeRow(nodes[i],i));
     pruneTextures();
-    if(map)arena.boxes.splice(0,arena.boxes.length,...meshRows.filter((row,i)=>nodes[i].solid).map(row=>row.collider));
+    if(map){
+      const retained=map.arenaBase?builtBoxes.filter(box=>!replaceableMeshes.has(box.mesh)):[];
+      arena.boxes.splice(0,arena.boxes.length,...retained,...meshRows.filter((row,i)=>nodes[i].solid).map(row=>row.collider));
+    }
     else arena.boxes.splice(0,arena.boxes.length,...builtBoxes);
     group.updateMatrixWorld(true);
     arena.bakeLightmap();
@@ -144,7 +149,9 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   }
   function edit(origin,direction,click,{mode,piece,head,feet}){
     trace.set(origin,direction);trace.far=12;
-    const hits=trace.intersectObjects(meshRows.map(row=>row.mesh),false);
+    const targets=meshRows.map(row=>row.mesh);
+    if(mode===1&&map?.arenaBase)targets.push(...builtBoxes.filter(box=>box.heightfield).map(box=>box.mesh));
+    const hits=trace.intersectObjects(targets,false);
     const hit=mode>=5?hits.find(item=>map?.pieces[item.object.userData.mapIndex]?.terrain):hits[0];
     ghost.visible=false;
     if(!map)return;
@@ -236,7 +243,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   document.querySelector('#map-export').onclick=save;
   document.querySelector('#map-reset').onclick=reset;
   return {modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,reset,blank,undo,save,edit,recenter,inform,
-    clearGhost(){ghost.visible=false;},get active(){return Boolean(map);},get status(){return status;},get yaw(){return map?.spawn.yaw??0;},
+    clearGhost(){ghost.visible=false;},get active(){return Boolean(map);},get builtIn(){return !map||map.arenaBase===true;},get status(){return status;},get yaw(){return map?.spawn.yaw??0;},
     get nodes(){return map?.pieces.length??0;},get name(){return map?.name??null;},get signature(){return signature;},
   };
 }

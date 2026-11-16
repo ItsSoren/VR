@@ -3,7 +3,7 @@ import * as T from 'three';
 import {boxCollider} from './physics.js';
 import {tiledBox} from './texture-geometry.js';
 import {createLabSky} from './sky-texture.js';
-import {labBounds,labFloors,labMaterialSample,labProbe,labStructures,labZones} from './lab-layout.js';
+import {labBounds,labFloors,labMaterialSample,labProbe,labStructures,labZones,labHillSeed} from './lab-layout.js';
 
 function canvasTexture(w,h,paint) {
   const c=document.createElement('canvas');c.width=w;c.height=h;
@@ -235,7 +235,7 @@ export function buildArena(scene,renderer) {
     hillPositions.needsUpdate=true;
     hillGeometry.computeVertexNormals();hillGeometry.computeBoundingSphere();
   }
-  setHillSeed(Math.floor(Math.random()*1000000));
+  setHillSeed(labHillSeed);
   const hill=new T.Mesh(hillGeometry,tiles[3]);
   hill.receiveShadow=hill.castShadow=true;scene.add(hill);
   const height=(x,z)=>{
