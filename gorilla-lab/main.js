@@ -143,7 +143,7 @@ const objectSpecs=[
   ['Tétraèdre',new T.TetrahedronGeometry(.29),'#d8ae53',0,1],
   ['Brique',new T.BoxGeometry(.56,.19,.28),'#b35a71',0,1.5],
   ['Grand rectangle',new T.BoxGeometry(1.42,.75,.88),'#738aa5',0,4.2],
-  ['Grande sphère',new T.IcosahedronGeometry(.60,2),'#dbab58',.60,3.7],
+  ['Grande sphère',new T.IcosahedronGeometry(.60,4),'#dbab58',.60,3.7],
   ['Coco',new T.IcosahedronGeometry(.124,1),'#956238',.124,.44],
 ].map(([name,geo,color,sphere,mass])=>({name,geo,mass,shape:colliderFor(geo,sphere),
   material:new T.MeshStandardMaterial({color,roughness:.44,metalness:.1,flatShading:true}),
@@ -382,7 +382,7 @@ function captureReport(){
   const sorted=rawFrameMs.slice().sort((a,b)=>a-b);
   const percentile=p=>sorted.length?Number(sorted[Math.min(sorted.length-1,Math.floor((sorted.length-1)*p))].toFixed(2)):null;
   reportSnapshot={
-    game:'Gorilla Lab',version:'r33',time:new Date().toISOString(),
+    game:'Gorilla Lab',version:'r34',time:new Date().toISOString(),
     mode:reportHadVR?'VR':'PC',settings:{...settings},qualityActive:liveLevel,
     performance:{fps,frames:sorted.length,frameMs:{median:percentile(.5),p95:percentile(.95),max:percentile(1)}},
     xr:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},cloud:{role:spectator.role,connected:spectator.connected,replicas:spectator.replicaCount,...spectator.stats},targetScore:fixtures.score(),locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},

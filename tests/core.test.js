@@ -1,3 +1,7 @@
+import {palmCenter,palmHalfExtent} from '../gorilla-lab/hand-skin.js';
+import {createSettings} from '../gorilla-lab/game-settings.js';
+import {GorillaLocomotion} from '../gorilla-lab/locomotion.js';
+import {boxCollider,colliderFor,palmContact,playerObjectContact} from '../gorilla-lab/physics.js';
 import {createCloudClient,createObjectFeed,decodeAvatar} from '../gorilla-lab/cloud-link.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -278,4 +282,79 @@ test('the two gun models meet their triangle budget',()=>{
   }
   assert.equal(triangles(createBlasterModel()),96);
   assert.equal(triangles(createToolVisual(new T.Scene()).mesh),104);
+});
+
+function collisionBox(position,half,quaternion=new T.Quaternion()){
+  return {position,half,min:half.clone().negate(),quaternion,mesh:{position,quaternion,visible:true},
+    shape:boxCollider(half),friction:1};
+}
+
+function handRig(boxes,rate){
+  const hand={valid:true,mesh:{quaternion:new T.Quaternion()},target:new T.Vector3()};
+  const body=new T.Vector3(),velocity=new T.Vector3(),movement=new T.Vector3();
+  const engine=new GorillaLocomotion(T.Vector3,[hand],palmContact);
+  return {hand,body,velocity,step(x,y,z){
+    hand.target.set(x,y,z).add(body);
+    engine.move({head:new T.Vector3(0,.8,0).add(body),dt:1/rate,gravity:9.81,settings:createSettings(false),boxes,velocity,movement,reach:1.1});
+    body.add(movement);
+    return engine.finish(movement,velocity);
+  }};
+}
+
+test('high collision detail is the default on desktop and mobile',()=>{
+  assert.equal(createSettings(false).preciseHitboxes,true);
+  assert.equal(createSettings(true).preciseHitboxes,true);
+});
+
+test('a resting hand slides on a wall without jumping, then a push launches away from the contact',()=>{
+  for(const rate of [72,90,120]){
+    const wall=collisionBox(new T.Vector3(.42,.65,0),new T.Vector3(.02,1,2));
+    const rig=handRig([wall],rate);
+    for(let i=0;i<rate/2;i++){
+      const report=rig.step(.39,.55,0);
+      assert.equal(report.contacts,1);
+      assert.equal(report.launched,false);
+    }
+    assert.ok(rig.body.y<-.06&&rig.body.y>-.35);
+    assert.ok(rig.hand.anchor.y<.48);
+    let launched=false;
+    for(let i=1;i<=4&&!launched;i++)launched=rig.step(.39+i*.044,.55-i*.037,0).launched;
+    assert.equal(launched,true);
+    assert.ok(rig.velocity.x< -1&&rig.velocity.y>0);
+    rig.step(.58,.40,0);
+    assert.ok(rig.velocity.x< -1);
+  }
+});
+
+test('the palm catches a narrow edge and the swept rectangle and sphere reject distant contacts',()=>{
+  const {Vector3:V,Quaternion:Q}=T;
+  const edge=collisionBox(new V(0,.19,-.4),new V(.4,.025,.018));
+  const rig=handRig([edge],90);
+  assert.equal(rig.step(0,.31,-.37).contacts,0);
+  assert.equal(rig.step(0,.23,-.37).contacts,1);
+  const rectangle=collisionBox(new V(),new V(.71,.375,.44),new Q().setFromAxisAngle(new V(0,1,0),.72));
+  const sphere={mesh:new T.Mesh(new T.IcosahedronGeometry(.6,4)),shape:colliderFor(new T.IcosahedronGeometry(.6,4),.6)};
+  for(const [body,top] of [[rectangle,.375],[sphere,.6]]){
+    body.radius=body.shape.radius;body.blocksPlayer=true;
+    const point=new V(),normal=new V(),block={objectBody:body};
+    assert.equal(palmContact(new V(0,1,0),new V(0,top-.03,0),new Q(),[block],point,normal),block);
+    assert.ok(normal.y>.99);
+    assert.equal(palmContact(new V(1.2,1,0),new V(1.2,top-.03,0),new Q(),[block],point,normal),null);
+    const player=new V(0,top+.14,0);
+    assert.ok(playerObjectContact(player,.17,body,new V(0,-1,0),normal));
+    assert.ok(Math.abs(player.y-(top+.171))<.001);
+  }
+});
+
+test('a rotated palm stops with its collision center aligned to the visual hand',()=>{
+  const {Vector3:V,Quaternion:Q}=T;
+  const rotation=new Q().setFromAxisAngle(new V(1,0,0),Math.PI/2);
+  const normal=new V(0,1,0).applyQuaternion(rotation);
+  const slab=collisionBox(normal.clone().multiplyScalar(-.05),new V(.3,.05,.3),rotation);
+  const rig=handRig([slab],90);
+  rig.hand.mesh.quaternion.copy(rotation);
+  assert.equal(rig.step(0,.18,.10).contacts,0);
+  assert.equal(rig.step(0,.18,-.018).contacts,1);
+  const palm=rig.hand.anchor.clone().add(palmCenter.clone().applyQuaternion(rotation));
+  assert.ok(Math.abs(palm.dot(normal)-palmHalfExtent.y)<.001);
 });

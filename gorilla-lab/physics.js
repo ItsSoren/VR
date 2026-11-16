@@ -1,5 +1,6 @@
 
 import * as T from 'three';
+import {palmHalfExtent} from './hand-skin.js';
 
 const qInv=new T.Quaternion(), local=new T.Vector3(), closest=new T.Vector3();
 const boundsRotation=new T.Matrix4();
@@ -242,7 +243,7 @@ function shapeContact(body,box,outNormal,outPoint) {
   if(depth>0&&outPoint)contactPoint(body,box,outNormal,outPoint);
   return depth;
 }
-const palmHull=colliderFor(new T.OctahedronGeometry(1,0).scale(.055,.033,.075));
+const palmHull=colliderFor(new T.OctahedronGeometry(1,0).scale(...palmHalfExtent));
 const palmBody={mesh:{position:new T.Vector3(),quaternion:new T.Quaternion()},shape:palmHull,radius:palmHull.radius,precise:true};
 export function palmContact(from,to,rotation,boxes,out,hitNormal){
   const steps=Math.min(48,Math.max(1,Math.ceil(from.distanceTo(to)/.021)));

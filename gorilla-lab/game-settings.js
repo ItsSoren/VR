@@ -5,7 +5,7 @@ export function createSettings(mobileScreen){
     stepHaptics:true, grip:6, slide:3,
     gravity:5, jump:5, weight:5,
     size:5, arms:5, bounce:4,
-    throw:5, preciseHitboxes:false, movement:true,
+    throw:5, preciseHitboxes:true, movement:true,
     collisions:true, objects:true, body:true,
     hands:true,
     // Rendu

@@ -33,7 +33,7 @@ Un `Mesh` enfant peut être à 10 cm de son parent. En **coordonnées locales**,
 
 La pose réelle de la manette donne une **cible**. La paume simulée poursuit cette cible par un balayage entre sa position précédente et la nouvelle. Si elle rencontre un sol ou un mur, le solveur garde un point d'**ancrage**. Pousser la main vers un mur fait reculer le corps. Pousser la main vers le sol peut faire monter le corps.
 
-On limite la portée du bras. On moyenne les contributions si les deux mains travaillent en même temps. La friction de la surface décide combien l'ancrage glisse. Après correction des collisions du joueur, [locomotion.js](../locomotion.js) mesure le déplacement réellement obtenu pour estimer l'élan. Sinon, pousser vers une direction que le corps ne peut pas emprunter donnerait quand même une vitesse de départ.
+On limite la portée du bras. On moyenne les contributions si les deux mains travaillent en même temps. La friction du matériau et la normale déterminent combien l’ancrage glisse. Le solveur projette le déplacement et la gravité sur le plan de contact, balaie le trajet, puis vérifie l’appui à l’arrivée. Sur un mur, ce glissement descend le long de la paroi. Une poussée assez vive produit une impulsion qui sort du contact. Le glissement seul n’ajoute pas d’impulsion. Après correction des collisions du joueur, [locomotion.js](../locomotion.js) mesure le déplacement réellement obtenu pour estimer l'élan. Sinon, pousser vers une direction que le corps ne peut pas emprunter donnerait quand même une vitesse de départ.
 
 Lis dans cet ordre :
 
@@ -44,7 +44,11 @@ Lis dans cet ordre :
 
 Un appui au sol est ici un contact dont la normale pointe suffisamment vers le haut. La **normale** est une flèche perpendiculaire à la surface. Elle permet aussi de différencier une pente d'un mur.
 
+Le [Player.cs d’Another Axiom](https://github.com/Another-Axiom/GorillaLocomotion/blob/main/Player.cs) et son [composant de surface](https://github.com/Another-Axiom/GorillaLocomotion/blob/main/Surface.cs) décrivent la portée des mains, les balayages successifs sur le plan de contact, le glissement par surface et l’élan plafonné. Gorilla Lab adapte ces principes à son balayage convexe de paume et à ses réglages de gravité, d’adhérence et de glissement.
+
 ### Pourquoi utiliser des formes simples
+
+Le mode **High** est actif par défaut. La paume a un volume de huit triangles calé dans le repère du maillage de la main, avec la même rotation que celui-ci. Le grand rectangle utilise un parallélépipède de 1,42 × 0,75 × 0,88 m avec la rotation de l’objet. La grande sphère utilise son rayon de 0,60 m pour garder un roulement régulier. Les faces visibles de la sphère s’inscrivent à l’intérieur de ce rayon.
 
 La géométrie visible d'un téléphone peut avoir des coins arrondis et un écran détaillé. Sa forme de collision peut être un petit volume convexe. Une roue sphérique ou cylindrique doit avoir une forme de collision adaptée à la façon dont on veut qu'elle roule. Le solveur réutilise les mêmes règles pour la plupart des objets.
 
@@ -99,7 +103,7 @@ Dans **En ligne**, chaque appareil peut héberger ou rejoindre le salon, au clav
 
 Les appareils du salon chargent la même carte. La R32 conserve le format réseau de la R31. Pour héberger sur PC ou mobile et utiliser les salons publics, recharge la R33. Les invités peuvent créer, saisir, modifier, vider ou réinitialiser les objets via l’hôte. Les éditions de carte se partagent par export ou par URL. Les options de confort et de qualité restent locales.
 
-## Où intervenir dans la R33
+## Où intervenir dans la R34
 
 | Pour modifier… | Fichier |
 | --- | --- |

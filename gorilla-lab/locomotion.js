@@ -1,5 +1,7 @@
 // Movement model based on Another-Axiom's MIT-licensed GorillaLocomotion.
 // https://github.com/Another-Axiom/GorillaLocomotion/blob/main/Player.cs
+import {palmCenter} from './hand-skin.js';
+
 const HISTORY_SECONDS = .065;
 const RELEASE_SECONDS = .08;
 const STICK_DISTANCE = .035;
@@ -29,6 +31,8 @@ export class GorillaLocomotion {
     this.hit = new Vector3();
     this.hitNormal = new Vector3();
     this.correction = new Vector3();
+    this.slideTarget = new Vector3();
+    this.downhill = new Vector3();
     this.handMotion = new Vector3();
     this.intent = new Vector3();
     this.planned = new Vector3();
@@ -85,7 +89,7 @@ export class GorillaLocomotion {
       if (!hand.valid) continue;
       const target = hand.locomotionTarget.subVectors(hand.target, head).clampLength(0, reach).add(head);
       if(hand.hasSupport)offset.copy(hand.supportOffset);
-      else offset.set(0, 0, -.036).applyQuaternion(hand.mesh.quaternion);
+      else offset.copy(palmCenter).applyQuaternion(hand.mesh.quaternion);
       if (!state.eligible) continue;
 
       const priorActive = previous && boxes.includes(previous) && !previous.objectBody?.owner;
@@ -125,19 +129,29 @@ export class GorillaLocomotion {
       normal.copy(this.hitNormal);
       const friction = surface.friction ?? .8;
       const grip = Math.min(1, Math.max(0, friction * (.75 + settings.grip * .09)));
-      const slip = Math.min(.97, Math.max(0, 1 - grip + (settings.slide - 3) * .035));
+      // The surface normal controls how much friction resists sliding against gravity.
+      const slope = 1 - Math.max(0, normal.y);
+      const slip = Math.min(.97, Math.max(0, 1 - grip + slope * .24 + (settings.slide - 3) * .035));
       const correction = this.correction.subVectors(hand.anchor, target);
-      const normalDistance = correction.dot(normal);
-      correction.addScaledVector(normal, -normalDistance);
-      if (correction.lengthSq() * slip ** 2 > CONTACT_SKIN ** 2) {
-        // Check the slipped position against the surface so an anchor cannot slide off an edge.
-        this.to.copy(hand.anchor).add(offset).addScaledVector(correction, -slip);
-        this.from.copy(this.to).addScaledVector(normal, CONTACT_SKIN);
-        this.to.addScaledVector(normal, -CONTACT_SKIN * 2);
+      correction.addScaledVector(normal, -correction.dot(normal));
+      this.slideTarget.copy(correction).multiplyScalar(-slip);
+      if (priorActive) {
+        this.downhill.set(0, -1, 0).addScaledVector(normal, normal.y);
+        this.slideTarget.addScaledVector(this.downhill, gravity * dt * .11 * slip);
+      }
+      if (this.slideTarget.lengthSq() > 1e-8) {
+        // Sweep along the contact plane before probing for support at the new point.
+        this.from.copy(hand.anchor).add(offset).addScaledVector(normal, CONTACT_SKIN);
+        this.to.copy(this.from).add(this.slideTarget);
+        if (this.sweep(state, this.from, this.to)) this.to.copy(this.hit);
+        this.from.copy(this.to);
+        this.to.addScaledVector(normal, -CONTACT_SKIN * 2.5);
         this.supportBoxes[0] = surface;
         const support = this.palmContact(this.from, this.to, hand.mesh.quaternion, this.supportBoxes, this.hit, this.hitNormal);
-        if (support) hand.anchor.copy(this.hit).sub(offset);
-        else if (slip > .5 && correction.lengthSq() > STICK_DISTANCE ** 2) continue;
+        if (support) {
+          hand.anchor.copy(this.hit).sub(offset);
+          normal.copy(this.hitNormal);
+        } else if (slip > .5 && correction.lengthSq() > STICK_DISTANCE ** 2) continue;
       }
       correction.subVectors(hand.anchor, target);
       // Existing anchors support the palm when pressed, but lifting off does not pull the body toward the surface.

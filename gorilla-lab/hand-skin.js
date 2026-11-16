@@ -19,6 +19,11 @@ const fingerSpecs = [
   { edge: 7, length: .051, splay: -.66 },
 ];
 const wristEdge = palmContour.length - 1;
+const palmFront = Math.min(...palmContour.map(point => point[1]));
+const palmBack = Math.max(...palmContour.map(point => point[1]));
+// Same local frame as the skin. The eight-face hull covers the palm through the wrist seam.
+export const palmCenter = new T.Vector3(0, 0, (palmFront + palmBack) / 2);
+export const palmHalfExtent = new T.Vector3(.047, .027, (palmBack - palmFront) / 2);
 // Each section describes distance, width, then thickness relative to the finger root.
 const fingerSections = [
   [.19, .96, 1.02], [.43, .89, .90], [.69, .78, .81], [.90, .60, .63],
