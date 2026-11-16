@@ -23,7 +23,8 @@ const shapes = {
   wall: makePiece({ name: 'Mur', w: .45, h: 2.5, d: 3.5, material: 2 }),
 };
 const toolHelp = {
-  move: 'Clique une pièce pour la sélectionner. Glisse-la pour la déplacer au sol.',
+  move: 'Clique ou touche une pièce pour la sélectionner. Glisse-la pour la déplacer au sol.',
+  view: 'Glisse dans la vue 3D pour tourner. Utilise la molette ou pince à deux doigts pour zoomer.',
   block: 'Clique dans la vue 3D ou sur le plan pour poser un bloc. Échap revient à la sélection.',
   ramp: 'Clique dans la vue 3D ou sur le plan pour poser une rampe. Échap revient à la sélection.',
   wall: 'Clique dans la vue 3D ou sur le plan pour poser un mur. Échap revient à la sélection.',
@@ -304,14 +305,35 @@ function remember() {
 }
 
 function pendingSave() {
-  try { localStorage.setItem(draftKey, JSON.stringify(map)); } catch {}
+  try {
+    localStorage.setItem(draftKey, JSON.stringify(map));
+    $('draft-status').textContent = 'Brouillon sauvegardé sur cet appareil';
+  } catch {
+    $('draft-status').textContent = 'Sauvegarde locale indisponible. Exporte le JSON pour garder la carte.';
+  }
+}
+
+const searchName = name => name.normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase();
+function updatePieceList() {
+  const query=searchName($('piece-search').value.trim());
+  // Keep the original map index in each option so filtering never selects a different piece.
+  const matches=[];
+  map.pieces.forEach((piece,index)=>{
+    if(searchName(piece.name).includes(query))matches.push(new Option(piece.name,index,false,index===selected));
+  });
+  $('pieces').replaceChildren(...matches);
+  $('pieces').value=String(selected);
+  if(!matches.length)$('pieces').append(new Option('Aucune pièce trouvée','',false,false));
+  if(!matches.length)$('pieces').options[0].disabled=true;
+  $('count').textContent=query?matches.length+' sur '+map.pieces.length:map.pieces.length+' / '+maxPieces;
 }
 
 function updateInspector() {
-  $('pieces').replaceChildren(...map.pieces.map((p, i) => new Option(p.name, i, false, i === selected)));
-  $('pieces').selectedIndex = selected;
-  $('count').textContent = map.pieces.length + ' / ' + maxPieces;
+  updatePieceList();
   const piece = current();
+  $('piece-inspector').hidden=!piece;
+  $('selection-help').hidden=Boolean(piece);
+  $('focus-piece').disabled=!piece;
   $('selection-title').textContent = piece ? piece.name : 'Aucune pièce sélectionnée';
   for (const key of fields) {
     const input = $('p-' + key);
@@ -398,6 +420,7 @@ function undo() {
 
 function setTool(next) {
   tool = next;
+  controls.mouseButtons.LEFT=tool==='view'?T.MOUSE.ROTATE:null;
   for (const button of toolButtons) button.setAttribute('aria-pressed', String(button.dataset.tool === tool));
   for (const canvas of [screen, plan]) {
     canvas.dataset.tool = tool;
@@ -451,6 +474,7 @@ function loadMap(next, message) {
   remember();
   map = next;
   selected = -1;
+  $('piece-search').value='';
   setTool('move');
   sync();
   fitViews();
@@ -546,7 +570,7 @@ function commitPlacement(canvas, event) {
 }
 
 function beginGesture(canvas, event) {
-  if (event.button !== 0 || !event.isPrimary || gesture) return;
+  if (tool==='view'||event.button !== 0 || !event.isPrimary || gesture) return;
   event.stopImmediatePropagation();
   canvas.focus({ preventScroll: true });
   canvas.setPointerCapture(event.pointerId);
@@ -565,6 +589,7 @@ function beginGesture(canvas, event) {
 }
 
 function moveGesture(canvas, event) {
+  if(tool==='view')return;
   if (!gesture) {
     if (tool === 'move') canvas.toggleAttribute('data-hit', Boolean(pointUnderPointer(canvas, event)));
     else showGhost(placementAt(canvas, event));
@@ -651,7 +676,20 @@ $('map-name').onchange = event => {
   map = parseMap(map);
   sync();
 };
-$('pieces').onchange = event => choose(Number(event.target.value));
+$('piece-search').addEventListener('input',updatePieceList);
+$('pieces').onchange = event => {if(event.target.value!=='')choose(Number(event.target.value));};
+$('focus-piece').onclick=()=>{
+  const mesh=group.children[selected];
+  if(!mesh)return;
+  const sphere=new T.Box3().setFromObject(mesh).getBoundingSphere(new T.Sphere());
+  const direction=camera.position.clone().sub(controls.target).normalize();
+  const halfFov=Math.atan(Math.tan(T.MathUtils.degToRad(camera.fov/2))*Math.min(camera.aspect,1));
+  const distance=Math.max(1.5,sphere.radius/Math.sin(halfFov)*1.15);
+  controls.target.copy(sphere.center);
+  camera.position.copy(sphere.center).addScaledVector(direction,distance);
+  controls.update();
+  queueRender();
+};
 for (const key of ['x', 'y', 'z', 'yaw']) {
   $('spawn-' + key).onchange = event => {
     remember();
@@ -793,8 +831,20 @@ $('view-top').onclick=()=>{
   camera.position.copy(target).add(new T.Vector3(0,distance,.001));
   controls.update();queueRender();
 };
-$('view-perspective').onclick=fitViews;
-const toolKeys = { v: 'move', '1': 'block', '2': 'ramp', '3': 'wall', '4': 'spawn', escape: 'move' };
+$('view-perspective').onclick=()=>{
+  camera.position.copy(controls.target).add(new T.Vector3(16,15,24));
+  fitViews();
+};
+$('view-spawn').onclick=()=>{
+  // main.js computes the default eye height as .43 + 5 × .088 metres.
+  const {x,y,z,yaw}=map.spawn;
+  const direction=new T.Vector3(0,0,-1).applyAxisAngle(worldUp,T.MathUtils.degToRad(yaw));
+  camera.position.set(x,y+.87,z);
+  controls.target.copy(camera.position).addScaledVector(direction,5);
+  camera.lookAt(controls.target);
+  queueRender();
+};
+const toolKeys = { v: 'move', c: 'view', '1': 'block', '2': 'ramp', '3': 'wall', '4': 'spawn', escape: 'move' };
 document.addEventListener('keydown', event => {
   if (event.target.closest?.('input, select, textarea, [contenteditable]') || gesture) return;
   const key = event.key.toLowerCase();
