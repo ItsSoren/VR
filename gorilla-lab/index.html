@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="fr">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Gorilla Lab — Laboratoire WebXR</title>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Gorilla Lab {{LAB_RELEASE}} — Laboratoire WebXR</title>
 <style>#map-access summary{cursor:pointer;margin:.65rem 0}#map-access input{max-width:100%;margin:.35rem 0}#map-access a{color:#ffe6ac}
 :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;color:#faf0da;background:#87c4e7;font:15px system-ui,sans-serif}html,body{width:100%;height:100%;overflow:hidden}#game{position:fixed;inset:0;display:block;width:100%;height:100%;touch-action:none}
 aside{position:fixed;left:max(clamp(10px,2vw,24px),env(safe-area-inset-left));top:max(clamp(10px,2vw,24px),env(safe-area-inset-top));width:min(342px,calc(100vw - 20px));max-height:calc(100vh - 30px);overflow:auto;padding:19px 19px 16px;background:#192934f3;border:1px solid #a1b3ac;border-radius:12px;box-shadow:0 16px 52px #17324455}
@@ -16,14 +16,14 @@ button:focus-visible{outline:2px solid #ffe6a5}button:hover{background:#4d6b78}b
 @media (any-pointer:coarse){#flat-actions{display:flex}aside{max-height:calc(100dvh - 125px)}}
 </style></head>
 <body><canvas id="game" tabindex="0" aria-label="Arène Gorilla Lab"></canvas>
-<button id="open-settings" hidden>Réglages</button><div id="crosshair" aria-hidden="true"></div>
+<button id="open-settings" aria-label="Ouvrir les réglages de Gorilla Lab {{LAB_RELEASE}}" hidden>Gorilla Lab {{LAB_RELEASE}} · Réglages</button><div id="crosshair" aria-hidden="true"></div>
 <div id="game-hint" role="status" hidden></div>
 <div id="flat-actions" aria-label="Commandes tactiles">
 <button data-flat-action="interact">Saisir</button><button data-flat-action="jump">Sauter</button>
 <button data-flat-action="tool">Outil</button><button data-flat-action="mode">Mode</button>
 <button data-flat-action="spawn">Objet</button><button data-flat-action="camera">Caméra</button><button id="touch-fire">Tirer</button>
 </div>
-<aside id="game-settings"><button id="close-settings" aria-label="Fermer les réglages">Fermer</button><h1>Gorilla Lab</h1><p id="readings" role="status">Mesure des performances…</p>
+<aside id="game-settings"><button id="close-settings" aria-label="Fermer les réglages">Fermer</button><h1>Gorilla Lab {{LAB_RELEASE}}</h1><p id="readings" role="status">Mesure des performances…</p>
 <button id="vr" disabled>Entrer en VR</button><small id="status">Mode PC. Pour la VR, ouvrir en HTTPS sur le casque.</small>
 <p>VR : pousse avec les mains. Stick droit : rotation à 45°. Grip : saisir. B/Y : réglages. A : Tool Gun, clic stick droit : action suivante.</p>
 <small>PC : ZQSD ou WASD, Maj pour courir, Espace pour sauter. Glisse pour regarder. E : saisir ou interagir. F : créer un cube. G/T : outil et mode. X : pistolet. Clic ou J : tirer. Tab : réglages.<br>Mobile : glisse à gauche pour marcher et à droite pour regarder.</small>

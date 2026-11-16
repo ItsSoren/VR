@@ -30,6 +30,8 @@ import { addLabFixtures } from './fixtures.js';
 import { buildArena } from './arena.js';
 import { solve,palmContact,handContact,solveObjects,moveKinematic,colliderFor,distanceToObject,placeObject,boxCollider,playerObjectContact } from './physics.js';
 
+// scripts/build.mjs injects the release used in the HTML titles and JSON report.
+const labRelease=__LAB_RELEASE__;
 let gameCanvas=document.getElementById('game');
 if(!(gameCanvas instanceof HTMLCanvasElement)) {
   gameCanvas=document.createElement('canvas');
@@ -378,7 +380,7 @@ function captureReport(){
   const sorted=rawFrameMs.slice().sort((a,b)=>a-b);
   const percentile=p=>sorted.length?Number(sorted[Math.min(sorted.length-1,Math.floor((sorted.length-1)*p))].toFixed(2)):null;
   reportSnapshot={
-    game:'Gorilla Lab',version:'r35',time:new Date().toISOString(),
+    game:'Gorilla Lab',version:labRelease.toLowerCase(),time:new Date().toISOString(),
     mode:reportHadVR?'VR':'PC',settings:{...settings},qualityActive:liveLevel,
     debug:lastPlayerDiagnostics,audio:{volume:settings.stepVolume,enabled:settings.stepAudio,clipsPlayed:steps.count,state:steps.state},
     performance:{fps,frames:sorted.length,frameMs:{median:percentile(.5),p95:percentile(.95),max:percentile(1)}},
@@ -976,7 +978,7 @@ let hitAreas=[], pendingAim=null;
 function drawPanel(){
   const c=panel.ctx;hitAreas=[];
   c.clearRect(0,0,640,652);c.fillStyle='#182632';c.fillRect(0,0,640,652);
-  c.font='bold 30px system-ui';c.fillStyle='#fff0cf';c.fillText('GORILLA LAB',25,42);
+  c.font='bold 30px system-ui';c.fillStyle='#fff0cf';c.fillText('GORILLA LAB '+labRelease,25,42);
   c.font='20px system-ui';c.fillText(fps+' FPS   ·   Q '+liveLevel+'/10   ·   '+(settings.auto?'AUTO':'MANUEL'),390,40);
   function item(x,y,w,h,label,action,color='#344b59'){
     c.fillStyle=color;c.fillRect(x,y,w,h);c.fillStyle='#fff4dc';c.font='21px system-ui';
