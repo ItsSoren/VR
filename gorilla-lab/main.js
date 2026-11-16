@@ -382,7 +382,7 @@ function captureReport(){
   const sorted=rawFrameMs.slice().sort((a,b)=>a-b);
   const percentile=p=>sorted.length?Number(sorted[Math.min(sorted.length-1,Math.floor((sorted.length-1)*p))].toFixed(2)):null;
   reportSnapshot={
-    game:'Gorilla Lab',version:'r31',time:new Date().toISOString(),
+    game:'Gorilla Lab',version:'r32',time:new Date().toISOString(),
     mode:reportHadVR?'VR':'PC',settings:{...settings},qualityActive:liveLevel,
     performance:{fps,frames:sorted.length,frameMs:{median:percentile(.5),p95:percentile(.95),max:percentile(1)}},
     xr:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},cloud:{role:spectator.role,connected:spectator.connected,replicas:spectator.replicaCount,...spectator.stats},targetScore:fixtures.score(),locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},

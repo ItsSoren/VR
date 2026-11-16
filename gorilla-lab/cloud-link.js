@@ -442,35 +442,48 @@ export function decodeAvatar(value,now){
   }
   return pose;
 }
-// Les deltas évitent de renvoyer tous les objets. Les états complets permettent de rattraper un message perdu.
+// Les petites pièces rapides utilisent aussi le paquet entre deux mises à jour ordinaires.
+const smallObjectRadius=.45, fastObjectSpeed=2.5;
 export function createObjectFeed(){
   const previous=new Map(),recent=new Map();
-  let last=-Infinity,fullAt=-Infinity;
+  let slowAt=-Infinity,fullAt=-Infinity;
   function capture(now,bodies){
-    if(now-last<200)return null;
-    last=now;
     const full=now-fullAt>=1600;
+    const regular=full||now-slowAt>=200;
     if(full)fullAt=now;
-    const keep=new Set(),records=[];
+    if(regular)slowAt=now;
+    const keep=regular?new Set():null,records=[];
     for(const body of bodies){
       if(!body.mesh.visible)continue;
+      const id=body.netId,prior=previous.get(id);
+      const fast=body.radius<=smallObjectRadius&&!body.frozen&&(
+        body.velocity.lengthSq()>=fastObjectSpeed**2||
+        body.angular.lengthSq()*body.radius**2>=fastObjectSpeed**2
+      );
+      // En quittant la cadence rapide, publie aussi la pose de transition ou d’arrêt.
+      if(!regular&&!fast&&!prior?.fast)continue;
       const record=encodeObjectState(body);
       if(!record)continue;
-      keep.add(body.netId);
-      if(previous.get(body.netId)!==record)recent.set(body.netId,{record,until:now+420});
-      if(full)records.push(record);
-      previous.set(body.netId,record);
+      keep?.add(id);
+      const changed=record!==prior?.record;
+      if(changed)recent.set(id,{record,until:now+420});
+      if(full||!regular&&changed)records.push(record);
+      if(prior){prior.record=record;prior.fast=fast;}
+      else previous.set(id,{record,fast});
     }
-    for(const id of previous.keys())if(!keep.has(id)){
-      recent.set(id,{record:objectRemoval(id),until:now+420});
-      previous.delete(id);
-    }
-    for(const [id,entry] of recent){
-      if(entry.until<now)recent.delete(id);
-      else if(!full)records.push(entry.record);
+    if(regular){
+      for(const id of previous.keys())if(!keep.has(id)){
+        recent.set(id,{record:objectRemoval(id),until:now+420});
+        previous.delete(id);
+      }
+      // Les répétitions passent à cadence ordinaire, y compris la pose finale et les suppressions.
+      for(const [id,entry] of recent){
+        if(entry.until<now)recent.delete(id);
+        else if(!full)records.push(entry.record);
+      }
     }
     return (full||records.length)?{full,records}:null;
   }
-  return {capture,reset(){previous.clear();recent.clear();last=fullAt=-Infinity;}};
+  return {capture,reset(){previous.clear();recent.clear();slowAt=fullAt=-Infinity;}};
 }
 

@@ -201,3 +201,33 @@ test('replayed traces share the projectile pool and only authority can apply imp
   assert.deepEqual(impacts,[false,true]);
   assert.equal(gun.shotsFired,0);
 });
+
+test('only small fast objects use intermediate pose packets and their final state is repeated',()=>{
+  function makeBody(netId,radius,speed,spin=0){
+    return {netId,netType:0,radius,mesh:new T.Mesh(),velocity:new T.Vector3(speed,0,0),angular:new T.Vector3(0,spin,0)};
+  }
+  const fast=makeBody(1,.16,5),slow=makeBody(2,.22,1),large=makeBody(3,1.3,7),spinning=makeBody(4,.35,0,15);
+  const bodies=[fast,slow,large,spinning];
+  const feed=createObjectFeed();
+  function ids(delta){return delta?.records.map(record=>Number(record.slice(0,5)))??[];}
+  assert.deepEqual(ids(feed.capture(0,bodies)),[1,2,3,4]);
+  function advance(){
+    for(const body of bodies)body.mesh.position.addScaledVector(body.velocity,.1);
+    spinning.mesh.rotation.y+=1.5;
+  }
+  advance();
+  assert.deepEqual(ids(feed.capture(100,bodies)),[1,4]);
+  advance();
+  const regular=feed.capture(200,bodies);
+  assert.deepEqual(ids(regular).sort(),[1,2,3,4]);
+  advance();
+  fast.velocity.set(0,0,0);
+  const stopped=feed.capture(300,bodies);
+  assert.deepEqual(ids(stopped),[1,4]);
+  const terminal=stopped.records[0];
+  assert.equal(Number(terminal[7])&4,4);
+  advance();
+  assert.ok(feed.capture(400,bodies).records.includes(terminal));
+  advance();
+  assert.deepEqual(ids(feed.capture(500,bodies)),[4]);
+});

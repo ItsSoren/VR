@@ -4,7 +4,7 @@
 
 `npm install`, puis `npm run build` et `npm test` à la racine du dépôt.
 
-Ouvrir index.html pour l'aperçu PC. Publier en HTTPS pour entrer en WebXR depuis le casque. Le site est statique. Placer index.html et game-lab-r31.js ensemble à la racine d'un dépôt GitHub Pages.
+Ouvrir index.html pour l'aperçu PC. Publier en HTTPS pour entrer en WebXR depuis le casque. Le site est statique. Placer index.html et game-lab-r32.js ensemble à la racine d'un dépôt GitHub Pages.
 ## Champ de vision et éditeurs
 
 Dans **Rendu → Image**, règle **FOV PC / mobile** de 50° à 105° ou **FOV VR** de 55 % à la vue native. Le réglage VR masque progressivement la périphérie de chaque œil et conserve la projection du casque.

@@ -177,6 +177,7 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
       if(difference>.06&&difference<.65&&!(record.flags&6))r.velocity.copy(record.position).sub(r.target).multiplyScalar(1/difference).clampLength(0,23);
       else r.velocity.set(0,0,0);
       r.target.copy(record.position);r.quaternion.copy(record.rotation);r.time=pose.time;r.flags=record.flags;
+      r.frequent=difference>.06&&difference<.16;
       r.received=pose.arrival;
       r.mesh.userData.netFlags=record.flags;r.mesh.userData.held=Boolean(record.flags&1);
       setReplicaAppearance(r,record);
@@ -186,10 +187,11 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
   const objectTarget=new T.Vector3();
   // Le lecteur interpole la pose reçue et la pose affichée sans simuler une deuxième physique.
   function drawReplicas(dt,visible,now){
-    const smooth=1-Math.exp(-dt*22);
+    const normalBlend=1-Math.exp(-dt*22),fastBlend=1-Math.exp(-dt*32);
     for(const r of replicas.values()){
       r.mesh.visible=visible;if(!visible)continue;
-      const horizon=r.flags&6?0:Math.min(.12,Math.max(0,(now-r.received)/1000));
+      const smooth=r.frequent?fastBlend:normalBlend;
+      const horizon=r.flags&6?0:Math.min(r.frequent ? .10 : .12,Math.max(0,(now-r.received)/1000));
       objectTarget.copy(r.target).addScaledVector(r.velocity,horizon);
       if(r.mesh.position.distanceToSquared(objectTarget)>16 || ((r.flags&6)&&r.mesh.position.distanceToSquared(r.target)<.0001))r.mesh.position.copy(objectTarget);
       else r.mesh.position.lerp(objectTarget,smooth);
@@ -313,7 +315,7 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
       if(!localReady)caption=prefix+(client.role==='vr'?'sélectionne « Entrer en VR » pour ouvrir la partie':'quitte la session VR pour utiliser ce rôle');
       else if(client.role!=='vr'&&host&&host.map!==localMap())caption=prefix+'le joueur VR utilise une autre carte. Chargez la même carte.';
       else if(client.role!=='vr'&&host&&!host.ready)caption=prefix+'casque connecté · en attente du démarrage VR';
-      else if(client.role==='player'&&host&&host.protocol<5)caption=prefix+'charge la R31 sur le casque pour synchroniser la partie';
+      else if(client.role==='player'&&host&&host.protocol<5)caption=prefix+'mets à jour le jeu sur le casque pour synchroniser la partie';
       else if(client.role!=='vr'&&readyHere(host))caption=prefix+'joueur VR connecté';
       else if(client.role==='vr'){
         const local=readyPeers.filter(readyHere);

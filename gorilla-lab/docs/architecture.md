@@ -93,13 +93,13 @@ sequenceDiagram
 
 ### Cadence et état partagé
 
-L’hôte choisit **Héberger en VR**. Les invités choisissent **Rejoindre en joueur**, puis peuvent jouer au clavier, au tactile ou entrer en VR. Le spectateur envoie sa caméra à 5 Hz. Les joueurs visent 10 Hz pour la tête, les mains, les doigts et les armes. Les tirs et les demandes d’interaction utilisent le même paquet avec un numéro de séquence pour récupérer un paquet sauté et ignorer les doublons. Les objets mobiles, leur tenue en main, leur rotation, leur matière, leur couleur et leur suppression passent à 5 Hz avec des états complets périodiques. L’hôte applique la physique des tirs et partage aussi l’ambiance, les noix de coco et le score de la cible.
+L’hôte choisit **Héberger en VR**. Les invités choisissent **Rejoindre en joueur**, puis peuvent jouer au clavier, au tactile ou entrer en VR. Le spectateur envoie sa caméra à 5 Hz. Les joueurs visent 10 Hz pour la tête, les mains, les doigts et les armes. Les tirs et les demandes d’interaction utilisent le même paquet avec un numéro de séquence pour récupérer un paquet sauté et ignorer les doublons. Les petits objets rapides (rayon de collision jusqu’à 45 cm, translation ou bord en rotation à partir de 2,5 m/s) utilisent aussi le paquet intermédiaire, jusqu’à 10 Hz. Les autres changements d’objet passent à 5 Hz. La pose d’arrêt est répétée et les états complets périodiques resynchronisent le monde après une perte de paquet. L’hôte applique la physique des tirs et partage aussi l’ambiance, les noix de coco et le score de la cible.
 
-[Turbowarp regroupe les mises à jour et peut en sauter](https://docs.turbowarp.org/cloud-variables#updates-are-buffered). Dépasser 10 envois par seconde ne réduit pas ce délai. L’extrapolation de la position est bornée à 120 ms et peut lisser une pose entre deux messages. Les effets de son propre tir restent immédiats. Le délai réseau réel varie avec le relais, le trajet réseau et les images du navigateur. Le rapport exporté contient le nombre de paquets et de caractères envoyés et reçus, ainsi que la taille de la file WebSocket au dernier relevé.
+[Turbowarp regroupe les mises à jour et peut en sauter](https://docs.turbowarp.org/cloud-variables#updates-are-buffered). Dépasser 10 envois par seconde ne réduit pas ce délai. L’extrapolation de la position est bornée à 120 ms, ou à 100 ms pour les objets reçus à cadence rapide. Au repos, les répliques convergent vers la position et la rotation publiées par l’hôte. Les effets de son propre tir restent immédiats. Le délai réseau réel varie avec le relais, le trajet réseau et les images du navigateur. Le rapport exporté contient le nombre de paquets et de caractères envoyés et reçus, ainsi que la taille de la file WebSocket au dernier relevé.
 
-Tous les appareils du salon doivent charger la R31 et la même carte. Les éditions de carte se partagent par export ou par URL. Les options de confort et de qualité restent locales.
+Les appareils du salon chargent la même carte. La R32 conserve le format réseau de la R31. Pour profiter des mises à jour d’objets rapides, charge la R32 sur le casque qui héberge. Les éditions de carte se partagent par export ou par URL. Les options de confort et de qualité restent locales.
 
-## Où intervenir dans la R31
+## Où intervenir dans la R32
 
 | Pour modifier… | Fichier |
 | --- | --- |
