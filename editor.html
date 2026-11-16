@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Atelier Gorilla Lab</title>
+<title>Atelier Gorilla Lab R35.1</title>
 <style>
   :root{color-scheme:dark;--page:#101b22;--panel:#192932;--border:#334b58;--text:#f5efdf;--muted:#b4cbd1;--accent:#ffda90;--field:#12232c}
   *{box-sizing:border-box}
@@ -54,7 +54,12 @@
   input[type="file"]{position:absolute;width:1px;height:1px;min-height:0;opacity:0;padding:0;pointer-events:none}
   .file{position:relative;display:inline-flex;flex-direction:row;align-items:center;color:var(--text);justify-content:center}
   .file:has(:disabled){opacity:.45;cursor:default}
-  #pieces{height:86px}
+  #pieces{height:125px}
+  #piece-search{margin-bottom:5px}
+  #selection-help{color:var(--muted);margin:0}
+  #draft-status{color:var(--muted);font-size:12px}
+  [hidden]{display:none!important}
+  canvas[data-tool="view"]{cursor:grab}
   .fields{display:grid;grid-template-columns:1fr 1fr;gap:7px}
   .wide{grid-column:1/-1}
   .inspector-section{margin-top:12px;padding-top:10px;border-top:1px solid var(--border)}
@@ -76,10 +81,10 @@
 </head>
 <body>
   <header class="header">
-    <h1>Atelier Gorilla Lab</h1>
+    <h1>Atelier Gorilla Lab R35.1</h1>
     <a href="./">Retour au jeu</a>
     <div class="header-actions">
-      <button id="new-example">Ouvrir l’exemple</button>
+      <button id="new-example">Arène de départ</button>
       <button id="blank-map">Nouvelle map</button>
       <label class="file">Importer JSON<input id="import-map" type="file" accept=".json,application/json"></label>
       <button id="export-map">Exporter JSON</button>
@@ -91,7 +96,8 @@
       <div class="command-bar">
         <div class="command-row">
           <div class="tools" role="group" aria-label="Outils">
-            <button class="tool" id="move-tool" data-tool="move" aria-pressed="true">Sélection / déplacement <kbd>V</kbd></button>
+            <button class="tool" id="move-tool" data-tool="move" aria-pressed="true">Sélectionner <kbd>V</kbd></button>
+            <button class="tool" data-tool="view" aria-pressed="false">Caméra <kbd>C</kbd></button>
             <button class="tool" id="add-block" data-tool="block" aria-pressed="false">Bloc <kbd>1</kbd></button>
             <button class="tool" id="add-ramp" data-tool="ramp" aria-pressed="false">Rampe <kbd>2</kbd></button>
             <button class="tool" id="add-wall" data-tool="wall" aria-pressed="false">Mur <kbd>3</kbd></button>
@@ -110,7 +116,7 @@
       </div>
       <div class="views">
         <section class="panel view view-3d" aria-labelledby="preview-title">
-          <div class="view-header"><h2 id="preview-title">Vue 3D</h2><button id="view-top">Dessus</button><button id="view-perspective">Perspective</button></div>
+          <div class="view-header"><h2 id="preview-title">Vue 3D</h2><div class="actions"><button id="view-top">Dessus</button><button id="view-perspective">Perspective</button><button id="view-spawn">Au départ</button></div></div>
           <canvas id="preview" aria-label="Vue 3D interactive" tabindex="0"></canvas>
           <div class="view-footer"><span>Clic droit + glisser · tourner<br>Molette · zoomer  ·  Clic molette + glisser · décaler</span></div>
         </section>
@@ -127,13 +133,18 @@
     </section>
     <aside class="panel" aria-label="Réglages de la carte">
       <label>Nom de la map<input id="map-name" maxlength="56"></label>
+      <div id="draft-status" role="status"></div>
       <section class="inspector-section">
         <div class="section-title"><h2 id="pieces-title">Pièces</h2><span class="count" id="count"></span></div>
-        <select id="pieces" size="4" aria-labelledby="pieces-title"></select>
+        <input id="piece-search" type="search" placeholder="Chercher par nom…" aria-label="Chercher une pièce">
+        <select id="pieces" size="6" aria-labelledby="pieces-title"></select>
       </section>
       <section class="inspector-section" aria-labelledby="selection-title">
         <h2 id="selection-title">Pièce sélectionnée</h2>
+        <p id="selection-help">Clique une pièce dans la vue 3D ou le plan. Tu peux aussi la choisir dans la liste.</p>
+        <div id="piece-inspector" hidden>
         <div class="piece-actions">
+          <button id="focus-piece">Cadrer la pièce</button>
           <button id="rotate">Tourner +45° <kbd>R</kbd></button>
           <button id="duplicate">Dupliquer <kbd>Ctrl D</kbd></button>
           <button id="delete">Supprimer <kbd>Suppr</kbd></button>
@@ -181,6 +192,7 @@
             <label>Solide<input id="p-solid" type="checkbox"></label>
           </div>
         </details>
+        </div>
       </section>
       <details>
         <summary>Point de départ</summary>
@@ -194,6 +206,6 @@
       </details>
     </aside>
   </main>
-  <script defer src="./gorilla-editor-r26.js"></script>
+  <script defer src="./gorilla-editor-r35.js"></script>
 </body>
 </html>

@@ -1,6 +1,7 @@
 const bounds=(xMin,xMax,zMin,zMax)=>({xMin,xMax,zMin,zMax});
 
 export const labBounds=bounds(-24,24,-51,7);
+export const labHillSeed=34521;
 export const labSpawn={x:0,y:0,z:3};
 export const labMirror={x:.05,y:1.16,z:5.9};
 

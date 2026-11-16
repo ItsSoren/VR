@@ -12,21 +12,26 @@ import { createToolVisual } from './tool-visual.js';
 import {createBlasterSystem,bindBlasterTrigger} from './blaster-system.js';
 import {createSettings,toolModes,shaderNames,visualPresets} from './game-settings.js';
 import { avatarPalettes,createAvatarStyle } from './avatar-style.js';
-import { makeLabProps } from './lab-props.js';
+import {createArenaObjectSpecs,forEachStartupObject} from './arena-objects.js';
 import { makeAnimatedProps,clonePropMaterial } from './animated-props.js';
 import {readModelPack,createModelPropDefinitions,createModelAvatarHead,normalizeModelPack,modelLimits,modelStorageKey} from './model-pack.js';
 import {mapCode,publicRooms} from './cloud-link.js';
-import { createHandSkin } from './hand-skin.js';
+import { createHandSkin,palmCenter } from './hand-skin.js';
+import {placeTrackedPalm} from './xr-palm.js';
+import {createStepSound} from './step-sound.js';
+import {createDebugView} from './debug-view.js';
 import { createBodySkin } from './body-skin.js';
-import { labObjectSlots,labMirror,labSpawn } from './lab-layout.js';
+import { labMirror,labSpawn } from './lab-layout.js';
 import { connectMaps } from './custom-maps.js';
-import { makePiece, mapMaterials, surfacePresets, storageKey, materialColors } from './map-format.js';
+import { arenaMap, makePiece, mapMaterials, surfacePresets, storageKey, materialColors } from './map-format.js';
 import { createVrEffects, addRayProbe } from './vr-effects.js';
 import { createVrFovMask } from './vr-fov.js';
 import { addLabFixtures } from './fixtures.js';
 import { buildArena } from './arena.js';
 import { solve,palmContact,handContact,solveObjects,moveKinematic,colliderFor,distanceToObject,placeObject,boxCollider,playerObjectContact } from './physics.js';
 
+// scripts/build.mjs injects the release used in the HTML titles and JSON report.
+const labRelease=__LAB_RELEASE__;
 let gameCanvas=document.getElementById('game');
 if(!(gameCanvas instanceof HTMLCanvasElement)) {
   gameCanvas=document.createElement('canvas');
@@ -62,6 +67,14 @@ scene.add(vrFovMask);
 const updateRayProbe=addRayProbe(arena.probe);
 const settings=createSettings(mobileScreen);
 const defaults={...settings};
+try{
+  const saved=Number(localStorage.getItem('gorilla-lab-step-volume'));
+  if(Number.isInteger(saved)&&saved>=1&&saved<=10)settings.stepVolume=saved;
+}catch{}
+const steps=createStepSound();
+for(const event of ['pointerdown','keydown'])addEventListener(event,steps.unlock,{passive:true});
+const debugView=createDebugView(scene);
+const bodyProxies=[.18,.17,.105].map(radius=>({radius,position:new T.Vector3()}));
 const boot=new T.Vector3(labSpawn.x,labSpawn.y,labSpawn.z);
 rig.position.copy(boot);
 const velocity=new T.Vector3();
@@ -70,7 +83,7 @@ const point=new T.Vector3(), prior=new T.Vector3(), candidate=new T.Vector3(), s
 const priorPlayer=new T.Vector3(),appliedMove=new T.Vector3(),previousHead=new T.Vector3(),playerNormal=new T.Vector3();
 const HEAD_RADIUS=.105,bodyCollisionBack=new T.Vector3();
 let hasPreviousHead=false,grounded=false;
-const handTwist=new T.Quaternion(), handAxis=new T.Vector3(0,0,1);
+
 let launchCount=0,lastLaunch=null;
 let refreshOptions=[],fpsGoal=100;
 const up=new T.Vector3(0,1,0), spin=new T.Quaternion();
@@ -93,7 +106,9 @@ const avatarHead=createModelAvatarHead(modelPack)??avatarStyle.createHead();
 avatarHead.visible=false;scene.add(avatarHead);
 const headForward=new T.Vector3(),headRotation=new T.Quaternion(),panelFacing=new T.Vector3();
 const bodyBack=new T.Vector3(),bodyEuler=new T.Euler(0,0,0,'YXZ');
-let bodyLean=0;
+const neck=new T.Vector3(), wristReach=new T.Vector3(), torsoTilt=new T.Vector2();
+const inverseYaw=new T.Quaternion();
+let currentGravity=9.81,lastPlayerDiagnostics=null;
 const bodyInverse=new T.Quaternion(),bodyHands=[null,null];
 function armSegmentLength(){return .24+settings.arms*.036;}
 function animateFingers(hand,buttons,dt){
@@ -110,7 +125,7 @@ const hands=['left','right'].map(side=>{
   const {mesh}=skin;
   mesh.castShadow=true;mesh.visible=false;scene.add(mesh);
   return {side,mesh,skin,pressure:[0,0,0],bodyPose:{position:new T.Vector3(),quaternion:new T.Quaternion()},
-    target:new T.Vector3(),
+    target:new T.Vector3(),gripPosition:new T.Vector3(),
     valid:false,surface:null,held:null,grip:false,trigger:false,menu:false,controllerRotation:new T.Quaternion(),aimDirection:new T.Vector3(),supportOffset:new T.Vector3(),hasSupport:false};
 });
 const locomotion=new GorillaLocomotion(T.Vector3,hands,palmContact);
@@ -137,22 +152,7 @@ function poseBody(width,stretch){
   bodySkin.pose(bodyHands,armSegmentLength(),width,stretch,settings.hands);
 }
 
-const objectSpecs=[
-  ['Cube',new T.BoxGeometry(.33,.33,.33),'#b76b50',0,1.35],
-  ['Boule',new T.IcosahedronGeometry(.225,2),'#73afcb',.225,.85],
-  ['Tétraèdre',new T.TetrahedronGeometry(.29),'#d8ae53',0,1],
-  ['Brique',new T.BoxGeometry(.56,.19,.28),'#b35a71',0,1.5],
-  ['Grand rectangle',new T.BoxGeometry(1.42,.75,.88),'#738aa5',0,4.2],
-  ['Grande sphère',new T.IcosahedronGeometry(.60,4),'#dbab58',.60,3.7],
-  ['Coco',new T.IcosahedronGeometry(.124,1),'#956238',.124,.44],
-].map(([name,geo,color,sphere,mass])=>({name,geo,mass,shape:colliderFor(geo,sphere),
-  material:new T.MeshStandardMaterial({color,roughness:.44,metalness:.1,flatShading:true}),
-  lowShape:sphere?null:boxCollider(geo.computeBoundingBox()??geo.boundingBox.getSize(new T.Vector3()).multiplyScalar(.5)),
-}));
-for(const {collisionGeo,sphere=0,...spec} of makeLabProps()){
-  const hull=colliderFor(collisionGeo??spec.geo,sphere);
-  objectSpecs.push({...spec,shape:hull,lowShape:hull});
-}
+const objectSpecs=createArenaObjectSpecs();
 const basicTypes=[0,1,2,3,4,5],detailTypes=[7,8,9,10,11,12,13,14];
 const CAMERA_TYPE=15;
 const cameraHull=boxCollider(new T.Vector3(.13,.088,.115));
@@ -254,10 +254,7 @@ function clearObjects(){
   remoteActors.clear();
 }
 function spawnSamples(){
-  spawnTypes.slice(0,labObjectSlots.length).forEach((type,i)=>{
-    const {x,z}=labObjectSlots[i];
-    spawnObject(type,new T.Vector3(x,.8,z));
-  });
+  forEachStartupObject((type,position)=>spawnObject(type,position));
 }
 spawnSamples();
 function release(hand,launch=true) {
@@ -276,7 +273,7 @@ function resetObjects(){
 function resetPlayer(){
   blaster.reset();
   rig.position.copy(boot);yaw=T.MathUtils.degToRad(maps.yaw);pitch=0;rig.rotation.y=yaw;
-  velocity.set(0,0,0);snap=false;grounded=false;hasPreviousHead=false;locomotion.reset();
+  velocity.set(0,0,0);snap=false;grounded=false;hasPreviousHead=false;locomotion.reset();steps.reset();torsoTilt.set(0,0);
   for(const hand of hands){hand.valid=false;hand.hapticGrounded=false;hand.hapticCooldown=0;hand.gamepad=null;release(hand,false);}
 
 }
@@ -378,12 +375,14 @@ function updatePropLights(spectating){
     if(mesh){light.position.copy(mesh.position);light.color.copy(mesh.material.emissive);}
   }
 }
+// Une capture garde les dernières mesures VR pour un téléchargement après la session.
 function captureReport(){
   const sorted=rawFrameMs.slice().sort((a,b)=>a-b);
   const percentile=p=>sorted.length?Number(sorted[Math.min(sorted.length-1,Math.floor((sorted.length-1)*p))].toFixed(2)):null;
   reportSnapshot={
-    game:'Gorilla Lab',version:'r34',time:new Date().toISOString(),
+    game:'Gorilla Lab',version:labRelease.toLowerCase(),time:new Date().toISOString(),
     mode:reportHadVR?'VR':'PC',settings:{...settings},qualityActive:liveLevel,
+    debug:lastPlayerDiagnostics,audio:{volume:settings.stepVolume,enabled:settings.stepAudio,clipsPlayed:steps.count,state:steps.state},
     performance:{fps,frames:sorted.length,frameMs:{median:percentile(.5),p95:percentile(.95),max:percentile(1)}},
     xr:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},cloud:{role:spectator.role,connected:spectator.connected,replicas:spectator.replicaCount,...spectator.stats},targetScore:fixtures.score(),locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
   };
@@ -417,10 +416,27 @@ const mapGroups=[['Construction',[
   ['Saisissable','modelGrab'],['Figé au départ','modelFrozen'],['Collisions du modèle','modelCollidable'],
   ['Appui pendant la prise','modelSupport'],['Sauver comme objet',()=>saveVRModel(false)],['Utiliser comme tête',()=>saveVRModel(true)],
 ]]];
-sections.push(['Carte',[]],['En ligne',[]]);
+sections.push(['Carte',[]],['En ligne',[]],['Debug',[
+  ['Prises et paumes','debugPalm'],['Hitboxes visibles','debugHitboxes'],
+  ['Collisions sans maillage','debugInvisible'],['Forces et vitesse','debugForces'],
+  ['Corps et tête','debugBody'],['Vitesse simulation','debugSpeed'],
+  ['Son des appuis','stepAudio'],['Volume des appuis','stepVolume'],
+  ['Écouter un pas',previewStep],['Capturer un rapport',captureReport],
+]]);
+function previewStep(){steps.unlock().then(()=>steps.play(settings.stepVolume));}
+function saveStepVolume(){try{localStorage.setItem('gorilla-lab-step-volume',String(settings.stepVolume));}catch{}}
 const title=document.querySelector('#section'), desktop=document.querySelector('#settings');
 const readings=document.querySelector('#readings');
+const debugSpeeds=[1,.75,.5,.25];
 function change(key,step){
+  if(key==='debugSpeed'){
+    settings.debugSpeed=T.MathUtils.clamp(settings.debugSpeed+step,1,debugSpeeds.length);
+    locomotion.reset();hudDirty=true;return;
+  }
+  if(key==='stepVolume'){
+    settings.stepVolume=T.MathUtils.clamp(settings.stepVolume+step,1,10);
+    saveStepVolume();hudDirty=true;return;
+  }
   if(key==='viewFov'){
     settings.viewFov=T.MathUtils.clamp(settings.viewFov+5*step,50,105);
     resize();hudDirty=true;return;
@@ -445,7 +461,7 @@ function change(key,step){
     const max=mapValues[key];
     settings[key]=(settings[key]-1+step+max)%max+1;hudDirty=true;return;
   }
-  if(key==='mapEdit'&&!settings.mapEdit&&!maps.active)maps.blank();
+  if(key==='mapEdit'&&!settings.mapEdit&&!maps.active)maps.load(arenaMap(arena.boxes));
   if(key==='toolMode'){
     settings.toolMode=(settings.toolMode-1+step+toolModes.length)%toolModes.length+1;
     if(!renderer.xr.isPresenting)showGameHint('Outil · '+toolModes[settings.toolMode-1]);
@@ -484,6 +500,7 @@ function syncHitboxes(){
 function restore(){
   const rows=(page===2?renderGroups:page===4?mapGroups:null)?.flatMap(group=>group[1])??currentRows();
   for(const [,key] of rows) if(typeof key==='string') settings[key]=defaults[key];
+  if(page===6){saveStepVolume();locomotion.reset();}
   if(page===0) resetPlayer();
   if(page===1){syncHitboxes();resetObjects();}
   if(page===3)clearSpawnBank();
@@ -496,6 +513,8 @@ function button(text,action){
 }
 function toggleLabel(key){return key==='preciseHitboxes'?(settings[key]?'High':'Low'):(settings[key]?'Actif':'Coupé');}
 function settingValue(key){
+  if(key==='debugSpeed')return spectator.role?'×1 en ligne':'×'+debugSpeeds[settings.debugSpeed-1];
+  if(key==='stepVolume')return settings.stepVolume+'/10';
   if(key==='viewFov')return settings.viewFov+'°';
   if(key==='vrFov')return settings.vrFov===100?'Natif':settings.vrFov+' %';
   if(key==='mapTexture')return settings[key]===1?'Aucune':texturePresets[settings[key]-2];
@@ -511,10 +530,12 @@ function currentGroup(){return page===2?renderPage:page===3?spawnPage:mapPage;}
 function selectGroup(index){if(page===2)renderPage=index;else if(page===3)spawnPage=index;else mapPage=index;}
 function actionLabel(key){
   if(key===captureReport)return 'Capturer';
+  if(key===previewStep)return 'Écouter';
   if(key===clearObjects||key===clearSpawnBank)return 'Vider';
   if(key===resetPlayer||key===requestResetObjects)return 'Réinitialiser';
   return page===3?'Créer':'Appliquer';
 }
+// Le navigateur et le panneau VR drawPanel() lisent les mêmes sections et réglages.
 function desktopMenu(){
   title.textContent=sections[page][0];
   desktopTabs.forEach((tab,index)=>tab.setAttribute('aria-pressed',String(index===page)));
@@ -522,7 +543,7 @@ function desktopMenu(){
   onlinePanel.hidden=page!==5;
   document.querySelector('#restore').hidden=page===5;
   if(page===5)return;
-  if(page>=2){
+  if(page>=2&&page<=4){
     const groups=document.createElement('nav');
     groups.setAttribute('aria-label','Catégories');
     menuGroups().forEach(([label],index)=>{
@@ -530,6 +551,11 @@ function desktopMenu(){
       tab.setAttribute('aria-pressed',String(currentGroup()===index));groups.append(tab);
     });
     desktop.append(groups);
+  }
+  if(page===6){
+    const legend=document.createElement('small');
+    legend.textContent='Cyan : prise · Vert : paume · Jaune : hitboxes · Rose : collisions invisibles · Orange : normales · Bleu : vitesse · Rouge : gravité · Crème : déplacement';
+    desktop.append(legend);
   }
   for(const [name,key] of currentRows()){
     const row=document.createElement('div');row.className='setting';row.append(name);
@@ -581,7 +607,7 @@ function updateMirror(now,pose){
   mirrorForward.set(0,0,-1).applyQuaternion(reflectionView.quaternion);
   toMirror.subVectors(mirrorFace.position,worldHead);
   const distance=toMirror.length();
-  mirrorFace.visible=!maps.active&&settings.reflections&&distance<4&&toMirror.dot(mirrorNormal)<-.15&&
+  mirrorFace.visible=maps.builtIn&&settings.reflections&&distance<4&&toMirror.dot(mirrorNormal)<-.15&&
     toMirror.multiplyScalar(1/Math.max(.001,distance)).dot(mirrorForward)>.66;
   if(!mirrorFace.visible){lastMirrorRender=-Infinity;return;}
   if(now-lastMirrorRender<(mobileScreen&&!renderer.xr.isPresenting?110:45))return;
@@ -608,7 +634,7 @@ const fixtures=addLabFixtures(scene,arena.boxes,{
 const mapToolNames=['Poser','Déplacer','Supprimer','Peindre','Monter','Creuser','Lisser','Aplanir','Appliquer le bruit'];
 const mapShapeNames=['Bloc','Rampe','Mur','Dalle','Terrain'];
 const mapSurfaceNames=['Normale','Glace','Caoutchouc','Lune'];
-const maps=connectMaps({scene,arena,boot,onReset:angle=>{clearObjects();resetPlayer();yaw=T.MathUtils.degToRad(angle);if(!maps.active)spawnSamples();},onVisual:applyVisual,
+const maps=connectMaps({scene,arena,boot,onReset:angle=>{clearObjects();resetPlayer();yaw=T.MathUtils.degToRad(angle);if(maps.builtIn)spawnSamples();},onVisual:applyVisual,
   getLevel:()=>liveLevel,defaultObjects:[...arena.builtObjects,...scene.children.filter(n=>!beforeFixtures.has(n)),mirrorBacking],
 });
 const spectator=addSpectator({scene,currentMap:()=>(maps.signature||'arena-r25-'+arena.hillSeed)+modelSignature,
@@ -678,7 +704,7 @@ function aimMap(frame,space,{source,click}){
   if(click)hudDirty=true;
 }
 function touchFixture(hand){
-  if(maps.active||!hand.valid||hand.held||hand.remoteHeld||menu)return;
+  if(!maps.builtIn||!hand.valid||hand.held||hand.remoteHeld||menu)return;
   let touched=null;
   for(const key of fixtures.targets){
     key.getWorldPosition(fixtureKeyPoint);
@@ -698,7 +724,7 @@ function pluckCoconut(coco,impulse=null){
   return object;
 }
 function fixtureRay(origin,direction,activate){
-  if(maps.active)return;
+  if(!maps.builtIn)return;
   ray.set(origin,direction);
   ray.far=5.5;
   const hits=ray.intersectObjects([...fixtures.targets,...fixtures.coconuts.filter(m=>m.visible)],false);
@@ -750,7 +776,7 @@ function handleNetworkAction(action,peer){
   if(action.type==='world'){
     if(action.mode===1){settings.timeOfDay=action.typeId+1;applyVisual();}
     else if(action.mode===3){[clearObjects,resetObjects,resetCoconuts][action.typeId]();}
-    else if(!maps.active){
+    else if(maps.builtIn){
       const coco=fixtures.coconuts[action.typeId];
       if(coco?.visible&&coco.getWorldPosition(coconutPosition).distanceToSquared(peer)<=5.8**2&&
           !handContact(spawnOrigin.copy(peer),coconutPosition,.01,activeBoxes,spawnHit,spawnNormal))pluckCoconut(coco);
@@ -952,7 +978,7 @@ let hitAreas=[], pendingAim=null;
 function drawPanel(){
   const c=panel.ctx;hitAreas=[];
   c.clearRect(0,0,640,652);c.fillStyle='#182632';c.fillRect(0,0,640,652);
-  c.font='bold 30px system-ui';c.fillStyle='#fff0cf';c.fillText('GORILLA LAB',25,42);
+  c.font='bold 30px system-ui';c.fillStyle='#fff0cf';c.fillText('GORILLA LAB '+labRelease,25,42);
   c.font='20px system-ui';c.fillText(fps+' FPS   ·   Q '+liveLevel+'/10   ·   '+(settings.auto?'AUTO':'MANUEL'),390,40);
   function item(x,y,w,h,label,action,color='#344b59'){
     c.fillStyle=color;c.fillRect(x,y,w,h);c.fillStyle='#fff4dc';c.font='21px system-ui';
@@ -976,9 +1002,10 @@ function drawPanel(){
     c.font='17px system-ui';c.fillText('Pour saisir un autre code, utilise le panneau du navigateur.',25,489,587);
     item(25,579,286,44,'Déconnecter',()=>spectator.leave());
     item(325,579,287,44,'Fermer',()=>menu=false);
+    panel.texture.needsUpdate=true;
     return;
   }
-  const grouped=page>=2;
+  const grouped=page>=2&&page<=4;
   if(grouped)menuGroups().forEach(([name],i)=>{
     const selected=currentGroup()===i;
     const width=Math.min(144,Math.floor(586/menuGroups().length)-4);
@@ -998,7 +1025,7 @@ function drawPanel(){
   });
   item(25,579,286,44,'Réglages par défaut',restore);
   item(325,579,287,44,'Fermer',()=>menu=false);
-  c.fillStyle='#c4d5d8';c.font='17px system-ui';c.fillText(vrHint|| (page===4&&maps.status?maps.status.slice(0,64):reportSnapshot?'Rapport capturé. Quitte la VR pour le télécharger.':'Gâchette : choisir  ·  B/Y : panneau  ·  ¹ Prochaine session VR'),25,645);
+  c.fillStyle='#c4d5d8';c.font='17px system-ui';c.fillText(vrHint|| (page===6?'Cyan : prise · Vert : paume · Rose : collisions invisibles':page===4&&maps.status?maps.status.slice(0,64):reportSnapshot?'Rapport capturé. Quitte la VR pour le télécharger.':'Gâchette : choisir  ·  B/Y : panneau  ·  ¹ Prochaine session VR'),25,645);
   panel.texture.needsUpdate=true;
 }
 function setMenu(side){
@@ -1113,6 +1140,7 @@ navigator.xr?.isSessionSupported('immersive-vr').then(ok=>{
 }).catch(()=>{});
 enter.onclick=async()=>{
   let session;
+  void steps.unlock();
   try{
     enter.disabled=true;
     session=await navigator.xr.requestSession('immersive-vr',{requiredFeatures:['local-floor']});
@@ -1180,11 +1208,13 @@ function trackRemoteGrip(hand,grip){
   if(closest){
     const objectId=closest.userData.netId;
     if(spectator.sendAction({type:'hold',objectId,hand:side}))hand.remoteHeld=objectId;
-  }else if(!maps.active){
+  }else if(maps.builtIn){
     const typeId=fixtures.coconuts.findIndex(coco=>coco.visible&&coco.getWorldPosition(coconutPosition).distanceToSquared(hand.target)<.26**2);
     if(typeId>=0)spectator.sendAction({type:'world',mode:2,typeId});
   }
 }
+// WebXR fournit les prises. xr-palm.js calcule leur pose dans l'arène avant
+// que locomotion.js ne les contraigne par la portée des bras et les contacts.
 function trackHands(frame,space,dt){
   const inputs=[...frame.session.inputSources];
   for(const h of hands){
@@ -1196,15 +1226,10 @@ function trackHands(frame,space,dt){
       if(spectator.role==='player')trackRemoteGrip(h,false);
       h.valid=false;h.surface=null;release(h,false);continue;
     }
-    const p=pose.transform.position;
-    candidate.set(p.x,p.y-drop,p.z);
-    h.target.copy(candidate).applyAxisAngle(up,yaw).add(rig.position);
+    placeTrackedPalm(h,pose.transform,drop,yaw,rig.position);
     h.valid=true;
     const grip=Boolean(source.gamepad?.buttons[1]?.pressed);
-    const q=pose.transform.orientation;
-    gripRotation.set(q.x,q.y,q.z,q.w).premultiply(spin.setFromAxisAngle(up,yaw));
-    h.controllerRotation.copy(gripRotation);
-    h.mesh.quaternion.copy(gripRotation).multiply(handTwist.setFromAxisAngle(handAxis,h.side==='left'?Math.PI/2:-Math.PI/2));
+    gripRotation.copy(h.controllerRotation);
     animateFingers(h,source.gamepad?.buttons??[],dt);
     if(spectator.role==='player')trackRemoteGrip(h,grip);
     else if(!menu&&grip&&!h.grip&&settings.objects&&!h.held){
@@ -1262,7 +1287,32 @@ function trackHands(frame,space,dt){
     h.trigger=trigger;
   }
 }
-function character(frame,space,pose,dt){
+// Le casque fixe le cou. La portée moyenne des manettes incline le torse
+// dans le repère du joueur. body-skin.js raccorde ensuite les poignets résolus.
+function updateTorso(inVR,dt){
+  const lookDown=inVR?-headForward.y:Math.max(0,-Math.sin(pitch));
+  let reachX=0,reachZ=0,tracked=0;
+  if(inVR){
+    inverseYaw.setFromAxisAngle(up,-bodyYaw);
+    for(const hand of hands){
+      if(!hand.valid)continue;
+      wristReach.copy(hand.gripPosition).sub(worldHead).applyQuaternion(inverseYaw);
+      reachX+=wristReach.x-(hand.side==='left'?-.20:.20);
+      reachZ+=wristReach.z+.24;
+      tracked++;
+    }
+  }
+  const forward=tracked?T.MathUtils.clamp(-reachZ/tracked,-.35,.45):0;
+  const sideways=tracked?T.MathUtils.clamp(reachX/tracked,-.35,.35):0;
+  const blend=1-Math.exp(-dt*13);
+  const bend=-.31*T.MathUtils.smoothstep(lookDown,.20,.92)-forward*.45;
+  torsoTilt.x=T.MathUtils.lerp(torsoTilt.x,bend,blend);
+  torsoTilt.y=T.MathUtils.lerp(torsoTilt.y,-sideways*.62,blend);
+  bodyEuler.set(torsoTilt.x,bodyYaw,torsoTilt.y,'YXZ');
+  monkey.quaternion.setFromEuler(bodyEuler);
+}
+
+function character(frame,space,pose,dt,inputDt=dt){
   const inVR=Boolean(pose);
   const targetEye=.43+settings.size*.088;
   if(inVR){
@@ -1294,17 +1344,20 @@ function character(frame,space,pose,dt){
   }else bodyYaw=yaw;
   const floor=surfaceAt(worldHead);
   const gravity=9.81*(settings.gravity/5)*(floor?.gravity??1);
+  currentGravity=gravity;
   priorPlayer.copy(rig.position);
   const blockers=spectator.role==='player'?replicaBlockers():objects;
   if(inVR){
-    trackHands(frame,space,dt);
+    trackHands(frame,space,inputDt);
+    updateTorso(true,inputDt);
     if(hands.some(h=>h.valid))trackedFrames++;
     handBoxes.length=0;
     for(const box of activeBoxes)handBoxes.push(box);
     if(settings.collisions&&settings.objects)for(const body of blockers)if(body.handCollider&&!body.owner)handBoxes.push(body.handCollider);
-    locomotion.move({head:worldHead,dt,gravity,settings,boxes:handBoxes,velocity,movement:delta,reach:armSegmentLength()*2+.16});
-    for(const hand of hands)updateGroundHaptics(hand,settings.stepHaptics,dt);
+    locomotion.move({head:worldHead,dt,inputDt,gravity,settings,boxes:handBoxes,velocity,movement:delta,reach:armSegmentLength()*2+.16});
+    for(const hand of hands)updateGroundHaptics(hand,settings.stepHaptics,inputDt);
   }else{
+    updateTorso(false,inputDt);
     velocity.y-=gravity*dt;
     const x=Number(keys.has('KeyD'))-Number(keys.has('KeyA')||keys.has('KeyQ'))+flat.movement.x;
     const z=Number(keys.has('KeyS'))-Number(keys.has('KeyW')||keys.has('KeyZ'))+flat.movement.z;
@@ -1326,14 +1379,15 @@ function character(frame,space,pose,dt){
   worldHead.copy(head).applyAxisAngle(up,yaw).add(rig.position);
   grounded=false;
   if(settings.collisions){
-    bodyCollisionBack.set(0,0,1).applyAxisAngle(up,bodyYaw);
-    const lookDown=inVR?-headForward.y:Math.max(0,-Math.sin(pitch));
-    const leanOffset=inVR?.17+T.MathUtils.smoothstep(lookDown,.15,.90)*.21:.08;
+    // Le solveur conserve trois sphères, avec un décalage horizontal piloté par le torse.
+    bodyCollisionBack.set(0,-1,0).applyQuaternion(monkey.quaternion);
+    bodyCollisionBack.y=0;
+    bodyCollisionBack.addScaledVector(bodyBack.set(0,0,1).applyAxisAngle(up,bodyYaw),.12);
     for(let i=0;i<3;i++){
       const height=i===0?.18:i===1?Math.max(.26,head.y*.57):head.y;
-      const radius=i===2?HEAD_RADIUS:i===0?.18:.17;
+      const {radius}=bodyProxies[i];
       point.set(worldHead.x,rig.position.y+height,worldHead.z);
-      if(i<2)point.addScaledVector(bodyCollisionBack,leanOffset);
+      if(i<2)point.addScaledVector(bodyCollisionBack,Math.max(0,head.y-height));
       prior.copy(point);
       grounded=solve(point,radius,arena.boxes,velocity,0,3+settings.grip,dt)||grounded;
       if(settings.objects)for(const object of blockers){
@@ -1342,10 +1396,14 @@ function character(frame,space,pose,dt){
       solve(point,radius,arena.boxes,velocity,0,3+settings.grip,dt);
       scratch.subVectors(point,prior);
       rig.position.add(scratch);worldHead.add(scratch);
+      for(let j=0;j<i;j++)bodyProxies[j].position.add(scratch);
+      bodyProxies[i].position.copy(point);
     }
   }
 
   appliedMove.subVectors(rig.position,priorPlayer);
+  steps.update({dt:inputDt,inVR,hands,grounded,travel:Math.hypot(appliedMove.x,appliedMove.z),
+    volume:settings.stepVolume,enabled:settings.stepAudio});
   if(inVR){
     // L’impulsion utilise le déplacement réalisé, une fois les collisions du corps résolues.
     const result=locomotion.finish(appliedMove,velocity);
@@ -1359,23 +1417,21 @@ function character(frame,space,pose,dt){
   rig.rotation.y=yaw;
   if(inVR)camera.position.set(0,0,0);
   for(const h of hands){
-    if(inVR&&h.valid)h.mesh.position.copy(h.surface?h.anchor:h.held?h.target:h.locomotionTarget).addScaledVector(appliedMove,h.surface?0:1);
+    if(inVR&&h.valid){
+      h.mesh.position.copy(h.surface?h.anchor:h.held?h.target:h.locomotionTarget).addScaledVector(appliedMove,h.surface?0:1);
+      h.gripPosition.add(appliedMove);
+    }
     if(!inVR)h.mesh.visible=false;
   }
-  const shoulderHeight=Math.min(.30,Math.max(.21,head.y*.31));
   const bodyScale=.72+settings.size*.05;
   const torsoScale=(armSegmentLength()*2)*(2/3)/.82;
   monkey.visible=settings.body;
-  monkey.position.set(worldHead.x,worldHead.y-shoulderHeight-.24*torsoScale-.05*bodyLean,worldHead.z);
-  const lookDown=inVR?-headForward.y:Math.max(0,-Math.sin(pitch));
-  bodyLean=T.MathUtils.lerp(bodyLean,T.MathUtils.smoothstep(lookDown,.24,.92),1-Math.exp(-dt*14));
-  bodyBack.set(0,0,1).applyAxisAngle(up,bodyYaw);
-  monkey.position.addScaledVector(bodyBack,.32*bodyLean);
-  bodyEuler.set(-.48*bodyLean,bodyYaw,0,'YXZ');
-  monkey.quaternion.setFromEuler(bodyEuler);
   avatarHead.position.copy(worldHead);
   if(inVR)avatarHead.quaternion.copy(headRotation).premultiply(spin.setFromAxisAngle(up,yaw));
   else avatarHead.quaternion.setFromEuler(new T.Euler(pitch,yaw,0,'YXZ'));
+  neck.set(0,-.145,.045).applyQuaternion(avatarHead.quaternion).add(worldHead);
+  // Le sommet du maillage (profil dans body-skin.js) reste au cou malgré le tilt.
+  monkey.position.set(0,.46*torsoScale,.04*bodyScale).applyQuaternion(monkey.quaternion).negate().add(neck);
   poseBody(bodyScale,torsoScale);
   rig.updateMatrixWorld(true);
   camera.updateWorldMatrix(true,false);
@@ -1454,7 +1510,10 @@ function captureNetworkAvatar(){
 renderer.setAnimationLoop((time,frame)=>{
   const actual=frameTime?Math.max(0,(time-frameTime)/1000):.014;
   frameTime=time;
-  const dt=Math.min(.035,actual);
+  const inputDt=Math.max(.0001,Math.min(.035,actual));
+  // Ralentir la simulation locale sans changer la cadence WebXR, audio ou réseau.
+  const speed=!spectator.role?debugSpeeds[settings.debugSpeed-1]:1;
+  const dt=inputDt*speed;
   const inVR=renderer.xr.isPresenting;
   const space=renderer.xr.getReferenceSpace(), pose=frame&&space&&frame.getViewerPose(space);
   if(inVR&&!pose)return;
@@ -1468,7 +1527,7 @@ renderer.setAnimationLoop((time,frame)=>{
   if(!inVR&&spectator.role==='pc'){
     monkey.visible=false;
     for(const h of hands)h.mesh.visible=false;
-  }else character(frame,space,pose,dt);
+  }else character(frame,space,pose,dt,inputDt);
   const spectating=!inVR&&spectator.role==='pc';
   // En spectateur ou joueur invité, les objets reçus sont dessinés comme répliques du monde VR.
   const remoteWorld=spectating||spectator.role==='player';
@@ -1494,7 +1553,7 @@ renderer.setAnimationLoop((time,frame)=>{
     // La cible compare le début et la fin du pas pour repérer les impacts rapides.
     for(const object of objects)object.beforePhysics.copy(object.mesh.position);
     solveObjects(objects,arena.boxes,dt,9.81*settings.gravity/5,.12+settings.bounce*.064,surfaceAt);
-    if(!maps.active)fixtures.updateTarget(objects);
+    if(maps.builtIn)fixtures.updateTarget(objects);
   }
   if(inVR&&!menu&&spectator.role!=='pc')for(const hand of hands)touchFixture(hand);
   arena.probe.rotation.y+=dt*.29;
@@ -1536,9 +1595,22 @@ renderer.setAnimationLoop((time,frame)=>{
     enabled:settings.blasterActive&&!spectating&&!menu&&!settings.mapEdit,
     flatFiring:blasterTrigger.held||keys.has('KeyJ'),
   });
-  spectator.update({inVR,time,dt,position:worldHead,yaw:spectating?yaw:bodyYaw,pitch,camera,rig,keys,actions,flat,avatar:captureNetworkAvatar,
+  spectator.update({inVR,time,dt:inputDt,position:worldHead,yaw:spectating?yaw:bodyYaw,pitch,camera,rig,keys,actions,flat,avatar:captureNetworkAvatar,
     bodies:settings.objects?objects:noBodies,score:fixtures.score()});
   actions.clear();
+  debugView.update({settings,boxes:activeBoxes,bodies:remoteWorld?(settings.debugHitboxes?replicaBlockers():noBodies):objects,hands,locomotion,velocity,
+    head:worldHead,neck,body:monkey.position,proxies:bodyProxies,gravity:currentGravity,appliedMove,playerActive:!spectating,inVR});
+  if(!spectating&&(inVR||!reportHadVR)&&time-diagAt>350){
+    lastPlayerDiagnostics={simulationScale:speed,gravity:currentGravity,velocity:velocity.toArray(),
+      grounded,torsoDegrees:[torsoTilt.x,torsoTilt.y].map(T.MathUtils.radToDeg),
+      hands:inVR?locomotion.hands.map(({hand,normal,offset})=>!hand.valid?null:{
+        side:hand.side,gripPosition:hand.gripPosition.toArray(),
+        idleAlignmentMeters:point.copy(palmCenter).applyQuaternion(hand.mesh.quaternion).add(hand.target).add(appliedMove).distanceTo(hand.gripPosition),
+        palmCenter:point.copy(palmCenter).applyQuaternion(hand.mesh.quaternion).add(hand.mesh.position).toArray(),
+        contactCenter:point.copy(hand.mesh.position).add(offset).toArray(),
+        normal:hand.surface?normal.toArray():null,surface:hand.surface?.name??hand.surface?.objectBody?.spec?.name??null,
+      }):[]};
+  }
   updatePropLights(remoteWorld);
   arena.centerShadows(lightView);
   const interval=25+(10-shadowLevel())*(inVR?7:4);

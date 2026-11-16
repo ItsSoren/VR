@@ -102,3 +102,13 @@ Scène intégrée, caméra immobile, fenêtre 960 × 540, qualité manuelle. Chr
 | 7/10 | 824 × 463 | 39 | 117 ms | 217 ms |
 
 Pour reproduire la vérification des commandes sur PC, charge l’arène, ferme le panneau avec **Tab**, avance avec **Z**, saute avec **Espace**, puis glisse la souris pour tourner. Appuie brièvement sur **X** et maintiens **J** pour tirer. Relâche **J** et vérifie que le tir cesse. Dans **Rendu → Image**, fais passer **FOV PC / mobile** de 70° à 75°. Dans le casque, compare **FOV VR** sur Natif et 75 %, avec **Post FX VR** actif puis coupé. Le centre doit garder la même perspective et seul le bord s’assombrit. Le test Chromium a aussi vérifié l’appui et le relâchement de **X** entre deux images.
+
+## Contrôle du casque et des appuis en R35
+
+1. En solo, ouvre **Debug** et active **Prises et paumes**. Au repos, avec le bras à portée, le repère cyan doit rester au centre de la paume verte. Tourne la manette autour des trois axes, puis pose la paume à plat. L’écart en appui montre la correction du solveur.
+2. Active **Corps et tête**. Regarde vers le sol et tends les deux mains vers l’avant, puis étends une seule main sur le côté. Observe le pivot du cou, le tangage et le roulis. La vue reste pilotée par le casque.
+3. Active **Hitboxes visibles** et **Collisions sans maillage** près d’une borne ou du cocotier. Le jaune indique les surfaces visibles, le rose les volumes sans maillage dédié. En **Forces et vitesse**, l’orange suit la normale, le bleu la vitesse, et le rouge la gravité.
+4. Passe à ×0,25 en solo, compare un appui au sol, sur un rebord puis au mur. Le suivi direct du casque et des manettes continue pendant que le mouvement et les objets ralentissent.
+5. Compare les volumes **1/10**, **5/10** et **10/10** avec **Écouter un pas**, puis en marchant sur PC ou en posant une paume au sol en VR. Un appui tenu ne doit produire qu’un son.
+6. Capture le rapport après avoir reproduit le geste. `debug.hands[].idleAlignmentMeters` mesure l’alignement mathématique avant résolution. `palmCenter`, `gripPosition`, `contactCenter` et `normal` sont en coordonnées du monde. Le diagnostic prend un échantillon environ toutes les 350 ms. `torsoDegrees` donne le tangage puis le roulis.
+7. Dans l’éditeur PC/mobile, ouvre **Arène de départ**, vérifie le point de spawn, le rectangle, la sphère, les zones et les textures. Déplace un bloc, puis lance **Tester la map** pour vérifier que la modification et le décor intégré sont chargés.

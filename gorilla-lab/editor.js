@@ -1,10 +1,14 @@
 import * as T from 'three';
+import {buildArena} from './arena.js';
+import {addLabFixtures} from './fixtures.js';
+import {createArenaObjectSpecs,forEachStartupObject} from './arena-objects.js';
+import {labMirror} from './lab-layout.js';
 import {tiledBox} from './texture-geometry.js';
 import {normalizeTerrain,resizeTerrain,sculptTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from './terrain-edit.js';
 import {texturePresets,seamlessTexture} from './seamless-texture.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  parseMap, exampleMap, makePiece, mapMaterials, materialColors, surfacePresets,
+  parseMap, arenaMap, exampleMap, makePiece, mapMaterials, materialColors, surfacePresets,
   maxPieces, snapPlacement, downloadMap, storageKey,
 } from './map-format.js';
 
@@ -19,7 +23,8 @@ const shapes = {
   wall: makePiece({ name: 'Mur', w: .45, h: 2.5, d: 3.5, material: 2 }),
 };
 const toolHelp = {
-  move: 'Clique une pièce pour la sélectionner. Glisse-la pour la déplacer au sol.',
+  move: 'Clique ou touche une pièce pour la sélectionner. Glisse-la pour la déplacer au sol.',
+  view: 'Glisse dans la vue 3D pour tourner. Utilise la molette ou pince à deux doigts pour zoomer.',
   block: 'Clique dans la vue 3D ou sur le plan pour poser un bloc. Échap revient à la sélection.',
   ramp: 'Clique dans la vue 3D ou sur le plan pour poser une rampe. Échap revient à la sélection.',
   wall: 'Clique dans la vue 3D ou sur le plan pour poser un mur. Échap revient à la sélection.',
@@ -27,7 +32,7 @@ const toolHelp = {
   sculpt:'Clique ou glisse sur un terrain. Le pinceau est réglable dans Relief et végétation.',
   spawn: 'Clique sur une surface pour placer le départ du joueur.',
 };
-let map = exampleMap(), selected = -1, tool = 'move', gesture = null, ghost = null;
+let map, selected = -1, tool = 'move', gesture = null, ghost = null;
 const undoStack = [];
 const screen = $('preview'), plan = $('plan'), context = plan.getContext('2d');
 let planRange = { scale: 10, cx: 0, cz: -6, width: 30, height: 40 };
@@ -46,10 +51,37 @@ controls.maxPolarAngle = Math.PI / 2 - .035;
 
 const scene = new T.Scene();
 scene.background = new T.Color('#8fb6c6');
-scene.add(new T.HemisphereLight('#f0f5ff', '#8e775c', 2.6));
+const ambient=new T.HemisphereLight('#f0f5ff', '#8e775c', 2.6);
+scene.add(ambient);
 const sun = new T.DirectionalLight('#fff1d2', 1.8);
 sun.position.set(-9, 18, 6);
 scene.add(sun);
+// Reuse the actual game arena. Editable boxes are rebuilt from its colliders;
+// scenery and props are previewed with the same geometry and textures as play.
+const referenceScene=new T.Scene();
+referenceScene.fog=new T.Fog('#a6d4ea',55,135);
+const previewArena=buildArena(referenceScene,renderer);
+const defaultMap=()=>arenaMap(previewArena.boxes);
+map=defaultMap();
+addLabFixtures(referenceScene,previewArena.boxes,{quality:()=> '7/10',resolution:()=> '7/10',textureSize:()=> '512 px'});
+const specs=createArenaObjectSpecs();
+forEachStartupObject((type,position)=>{
+  const {geo,material}=specs[type],mesh=new T.Mesh(geo,material);
+  geo.computeBoundingBox();
+  mesh.position.set(position.x,-geo.boundingBox.min.y,position.z);
+  referenceScene.add(mesh);
+});
+const mirror=new T.Mesh(new T.BoxGeometry(1.8,2.03,.10),new T.MeshStandardMaterial({color:'#8daebc',metalness:.9,roughness:.12}));
+mirror.position.set(labMirror.x,labMirror.y,labMirror.z);
+referenceScene.add(mirror);
+const editableArenaBoxes=previewArena.boxes.filter(box=>box.half&&box.mesh?.isObject3D);
+editableArenaBoxes.forEach(box=>box.mesh.removeFromParent());
+const arenaBackdrop=new T.Group();
+arenaBackdrop.add(...[...referenceScene.children]);
+scene.add(arenaBackdrop);
+const previewHill=previewArena.boxes.find(box=>box.heightfield).mesh;
+previewArena.visual(7,0,7,true,true,true,512,false);
+
 const grid = new T.GridHelper(60, 60, '#d7e2e5', '#5e7b8a');
 grid.material.transparent = true;
 grid.material.opacity = .35;
@@ -221,9 +253,13 @@ function rebuildScene() {
     group.remove(mesh);
     if(mesh.geometry!==sharedBox)mesh.geometry.dispose();
     if(mesh.userData.vegetation)disposeVegetation(mesh.userData.vegetation);
-    mesh.material.map?.dispose();
+    if(mesh.userData.ownsTexture)mesh.material.map?.dispose();
     mesh.material.dispose();
   }
+  arenaBackdrop.visible=Boolean(map.arenaBase);
+  sun.visible=ambient.visible=!map.arenaBase;
+  scene.fog=map.arenaBase?referenceScene.fog:null;
+  scene.environment=map.arenaBase?referenceScene.environment:null;
   for (const piece of map.pieces) {
     const glass = [10, 11, 12].includes(piece.material);
     const material = new T.MeshLambertMaterial({
@@ -231,14 +267,22 @@ function rebuildScene() {
       transparent: !piece.solid || glass,
       opacity: piece.solid ? (glass ? .55 : 1) : .40,
     });
+    if(map.arenaBase&&!piece.texture){
+      const original=previewArena.mapMaterial(piece.material,7);
+      material.color.set(piece.color);
+      material.map=original.map;
+      material.opacity=piece.solid?original.opacity:.40;
+      material.transparent=!piece.solid||original.transparent;
+    }
     if (piece.texture) {
       material.map = loader.load(piece.texture, queueRender);
       material.map.colorSpace = T.SRGBColorSpace;
       material.map.wrapS = material.map.wrapT = T.RepeatWrapping;
       material.color.set(piece.color);
     }
-    const geometry=piece.terrain?terrainGeometry(piece):piece.texture?tiledBox(piece.w,piece.h,piece.d).scale(1/piece.w,1/piece.h,1/piece.d):sharedBox;
+    const geometry=piece.terrain?terrainGeometry(piece):(piece.texture||map.arenaBase)?tiledBox(piece.w,piece.h,piece.d).scale(1/piece.w,1/piece.h,1/piece.d):sharedBox;
     const mesh = new T.Mesh(geometry, material);
+    mesh.userData.ownsTexture=Boolean(piece.texture);
     if(piece.terrain){
       const vegetation=terrainVegetation(piece);
       if(vegetation){mesh.add(vegetation);mesh.userData.vegetation=vegetation;}
@@ -261,14 +305,35 @@ function remember() {
 }
 
 function pendingSave() {
-  try { localStorage.setItem(draftKey, JSON.stringify(map)); } catch {}
+  try {
+    localStorage.setItem(draftKey, JSON.stringify(map));
+    $('draft-status').textContent = 'Brouillon sauvegardé sur cet appareil';
+  } catch {
+    $('draft-status').textContent = 'Sauvegarde locale indisponible. Exporte le JSON pour garder la carte.';
+  }
+}
+
+const searchName = name => name.normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase();
+function updatePieceList() {
+  const query=searchName($('piece-search').value.trim());
+  // Keep the original map index in each option so filtering never selects a different piece.
+  const matches=[];
+  map.pieces.forEach((piece,index)=>{
+    if(searchName(piece.name).includes(query))matches.push(new Option(piece.name,index,false,index===selected));
+  });
+  $('pieces').replaceChildren(...matches);
+  $('pieces').value=String(selected);
+  if(!matches.length)$('pieces').append(new Option('Aucune pièce trouvée','',false,false));
+  if(!matches.length)$('pieces').options[0].disabled=true;
+  $('count').textContent=query?matches.length+' sur '+map.pieces.length:map.pieces.length+' / '+maxPieces;
 }
 
 function updateInspector() {
-  $('pieces').replaceChildren(...map.pieces.map((p, i) => new Option(p.name, i, false, i === selected)));
-  $('pieces').selectedIndex = selected;
-  $('count').textContent = map.pieces.length + ' / ' + maxPieces;
+  updatePieceList();
   const piece = current();
+  $('piece-inspector').hidden=!piece;
+  $('selection-help').hidden=Boolean(piece);
+  $('focus-piece').disabled=!piece;
   $('selection-title').textContent = piece ? piece.name : 'Aucune pièce sélectionnée';
   for (const key of fields) {
     const input = $('p-' + key);
@@ -355,6 +420,7 @@ function undo() {
 
 function setTool(next) {
   tool = next;
+  controls.mouseButtons.LEFT=tool==='view'?T.MOUSE.ROTATE:null;
   for (const button of toolButtons) button.setAttribute('aria-pressed', String(button.dataset.tool === tool));
   for (const canvas of [screen, plan]) {
     canvas.dataset.tool = tool;
@@ -408,6 +474,7 @@ function loadMap(next, message) {
   remember();
   map = next;
   selected = -1;
+  $('piece-search').value='';
   setTool('move');
   sync();
   fitViews();
@@ -443,13 +510,13 @@ function rayPlane(height) {
 
 function pointUnderPointer(canvas, event) {
   setEventRay(canvas, event);
-  return raycaster.intersectObjects(group.children, false)[0];
+  return raycaster.intersectObjects(map.arenaBase?[...group.children,previewHill]:group.children, false)[0];
 }
 
 function spawnOnTop(x, z, yaw, selectedMesh = null) {
   raycaster.set(new T.Vector3(x, 80, z), new T.Vector3(0, -1, 0));
   const ground = selectedMesh ? raycaster.intersectObject(selectedMesh, false)[0]
-    : raycaster.intersectObjects(group.children, false).find(hit => map.pieces[group.children.indexOf(hit.object)].solid);
+    : raycaster.intersectObjects(map.arenaBase?[...group.children,previewHill]:group.children, false).find(hit => hit.object===previewHill||map.pieces[group.children.indexOf(hit.object)]?.solid);
   if (!ground || ground.point.y > 29.9) return null;
   return { x, y: Math.max(-10, ground.point.y + .08), z, yaw };
 }
@@ -503,7 +570,7 @@ function commitPlacement(canvas, event) {
 }
 
 function beginGesture(canvas, event) {
-  if (event.button !== 0 || !event.isPrimary || gesture) return;
+  if (tool==='view'||event.button !== 0 || !event.isPrimary || gesture) return;
   event.stopImmediatePropagation();
   canvas.focus({ preventScroll: true });
   canvas.setPointerCapture(event.pointerId);
@@ -514,14 +581,15 @@ function beginGesture(canvas, event) {
 
   const hit = pointUnderPointer(canvas, event);
   choose(hit ? group.children.indexOf(hit.object) : -1);
-  if (!hit) return;
   const piece = current();
+  if (!hit||!piece) return;
   start.height = hit.point.y;
   start.dx = hit.point.x - piece.x;
   start.dz = hit.point.z - piece.z;
 }
 
 function moveGesture(canvas, event) {
+  if(tool==='view')return;
   if (!gesture) {
     if (tool === 'move') canvas.toggleAttribute('data-hit', Boolean(pointUnderPointer(canvas, event)));
     else showGhost(placementAt(canvas, event));
@@ -608,7 +676,20 @@ $('map-name').onchange = event => {
   map = parseMap(map);
   sync();
 };
-$('pieces').onchange = event => choose(Number(event.target.value));
+$('piece-search').addEventListener('input',updatePieceList);
+$('pieces').onchange = event => {if(event.target.value!=='')choose(Number(event.target.value));};
+$('focus-piece').onclick=()=>{
+  const mesh=group.children[selected];
+  if(!mesh)return;
+  const sphere=new T.Box3().setFromObject(mesh).getBoundingSphere(new T.Sphere());
+  const direction=camera.position.clone().sub(controls.target).normalize();
+  const halfFov=Math.atan(Math.tan(T.MathUtils.degToRad(camera.fov/2))*Math.min(camera.aspect,1));
+  const distance=Math.max(1.5,sphere.radius/Math.sin(halfFov)*1.15);
+  controls.target.copy(sphere.center);
+  camera.position.copy(sphere.center).addScaledVector(direction,distance);
+  controls.update();
+  queueRender();
+};
 for (const key of ['x', 'y', 'z', 'yaw']) {
   $('spawn-' + key).onchange = event => {
     remember();
@@ -635,9 +716,9 @@ $('rotate').onclick = rotatePiece;
 $('undo').onclick = undo;
 $('zoom-fit').onclick = fitViews;
 $('snap').onchange = () => showGhost(null);
-$('new-example').onclick = () => loadMap(exampleMap(), 'Map exemple ouverte.');
+$('new-example').onclick = () => loadMap(defaultMap(), 'Arène de départ ouverte.');
 $('blank-map').onclick = () => loadMap({
-  ...exampleMap(), name: 'Ma nouvelle map', spawn: { x: 0, y: .025, z: 3, yaw: 0 },
+  format:'gorilla-lab-map',version:1,name: 'Ma nouvelle map', spawn: { x: 0, y: .025, z: 3, yaw: 0 },
   pieces: [makePiece({ name: 'Sol', y: -.25, w: 24, d: 24 })],
 }, 'Nouvelle map créée. Sélectionne Bloc, Rampe ou Mur, puis clique où le poser.');
 $('surface').onchange = event => {
@@ -750,8 +831,20 @@ $('view-top').onclick=()=>{
   camera.position.copy(target).add(new T.Vector3(0,distance,.001));
   controls.update();queueRender();
 };
-$('view-perspective').onclick=fitViews;
-const toolKeys = { v: 'move', '1': 'block', '2': 'ramp', '3': 'wall', '4': 'spawn', escape: 'move' };
+$('view-perspective').onclick=()=>{
+  camera.position.copy(controls.target).add(new T.Vector3(16,15,24));
+  fitViews();
+};
+$('view-spawn').onclick=()=>{
+  // main.js computes the default eye height as .43 + 5 × .088 metres.
+  const {x,y,z,yaw}=map.spawn;
+  const direction=new T.Vector3(0,0,-1).applyAxisAngle(worldUp,T.MathUtils.degToRad(yaw));
+  camera.position.set(x,y+.87,z);
+  controls.target.copy(camera.position).addScaledVector(direction,5);
+  camera.lookAt(controls.target);
+  queueRender();
+};
+const toolKeys = { v: 'move', c: 'view', '1': 'block', '2': 'ramp', '3': 'wall', '4': 'spawn', escape: 'move' };
 document.addEventListener('keydown', event => {
   if (event.target.closest?.('input, select, textarea, [contenteditable]') || gesture) return;
   const key = event.key.toLowerCase();
@@ -770,7 +863,11 @@ document.addEventListener('keydown', event => {
 
 try {
   const draft = localStorage.getItem(draftKey);
-  if (draft) map = parseMap(draft);
+  if (draft) {
+    const saved=parseMap(draft);
+    // Previously just opening the editor automatically saved the demo as a draft.
+    if(JSON.stringify(saved)!==JSON.stringify(exampleMap()))map=saved;
+  }
 } catch {}
 setTool('move');
 sync();

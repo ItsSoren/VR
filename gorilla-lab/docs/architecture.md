@@ -116,3 +116,18 @@ Les appareils du salon chargent la même carte. La R32 conserve le format résea
 | L’ordre des systèmes et le lien avec la scène | [main.js](../main.js) |
 
 Un appui bref, comme **X**, est mémorisé jusqu’à l’image qui le traite. Un mouvement ou un tir maintenu, comme **Z** ou **J**, dépend de l’état courant de la touche. Ce découpage évite de perdre les appuis courts à faible fréquence d’images.
+
+## R35 · Pose, debug, audio et éditeur
+
+| Fichier | Fonctions et données échangées |
+| --- | --- |
+| [xr-palm.js](../xr-palm.js) | `placeTrackedPalm` transforme la pose `gripSpace` fournie par WebXR en coordonnées de l’arène. Il applique la rotation du joueur puis retire le centre local fourni par `hand-skin.js` pour placer l’origine du maillage. |
+| [locomotion.js](../locomotion.js) | `move` limite la portée, balaye la paume via `palmContact` de `physics.js` et produit le déplacement demandé. `finish` lit le déplacement réellement effectué par `main.js`, puis met à jour l’historique d’impulsion. |
+| [main.js](../main.js) et [body-skin.js](../body-skin.js) | `character` conserve la pose du casque et résout les trois sphères du corps. `updateTorso` déduit le tangage et le roulis de la tête et de la portée des mains. `poseBody` convertit les poignets dans le repère du torse pour le maillage articulé de `body-skin.js`. |
+| [debug-view.js](../debug-view.js) | `update` lit les géométries du solveur, les normales et les poses après déplacement. Le rendu regroupe les traits dans une géométrie. Les vecteurs représentent la direction de la gravité, la vitesse du joueur, le déplacement réalisé et les normales de contact. |
+| [step-sound.js](../step-sound.js) | `update` détecte chaque nouvel appui au sol en VR et cadence les pas sur la distance parcourue en PC/mobile. `play` synthétise un bruit court via Web Audio. Le volume est conservé dans le navigateur. |
+| [editor.js](../editor.js) et [custom-maps.js](../custom-maps.js) | L’éditeur appelle `buildArena` et partage les objets de départ avec le jeu via `arena-objects.js`. `arenaMap` de `map-format.js` convertit les blocs de l’arène en pièces éditables. Le champ JSON `arenaBase` conserve le relief intégré, les bornes et les objets de départ au chargement. Les cartes v1 existantes sans ce champ gardent leur comportement. |
+
+La pose de prise vient de WebXR. Le centre de la paume au repos utilise le même repère que son collisionneur. Après collision, le repère cyan reste sur la prise suivie et le volume vert montre la pose résolue. La séparation entre les deux permet de voir l’effet de la portée et des appuis. Un objet tenu qui sert d’appui ajoute un second volume au point de contact de l’objet.
+
+Le ralenti applique un facteur au pas simulé. La lecture du casque, les événements audio et la fenêtre d’échantillonnage des manettes restent à cadence réelle. L’entrée dans un salon rétablit ×1 pour que les clients gardent la même cadence de jeu.

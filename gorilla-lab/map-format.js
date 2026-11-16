@@ -1,3 +1,4 @@
+import {labSpawn} from './lab-layout.js';
 import {normalizeTerrain} from './terrain-edit.js';
 
 
@@ -18,7 +19,7 @@ export function parseMap(input){
   }
   const s=input.spawn??{};
   return {
-    format:'gorilla-lab-map',version:1,name:text(input.name,56,'Ma map'),
+    format:'gorilla-lab-map',version:1,...(input.arenaBase===true?{arenaBase:true}:{}),name:text(input.name,56,'Ma map'),
     spawn:{x:number(s.x,-120,120,0),y:number(s.y,-10,30,.06),z:number(s.z,-120,120,3),yaw:number(s.yaw,-360,360,0)},
     pieces:input.pieces.map((p,i)=>{
       if(!p||typeof p!=='object')throw Error('Pièce invalide : '+(i+1));
@@ -36,6 +37,19 @@ export function parseMap(input){
       };
     }),
   };
+}
+// arena.js builds all actual surfaces. The editor serializes its boxes in metres
+// and degrees, while arenaBase preserves the built-in hills, fixtures and props.
+export function arenaMap(boxes){
+  return parseMap({
+    format:'gorilla-lab-map',version:1,name:'Gorilla Lab — arène de départ',arenaBase:true,
+    spawn:{...labSpawn,yaw:0},
+    pieces:boxes.filter(box=>box.half&&box.mesh?.isObject3D).map(box=>({
+      name:box.name,x:box.position.x,y:box.position.y,z:box.position.z,
+      w:box.half.x*2,h:box.half.y*2,d:box.half.z*2,
+      pitch:box.mesh.rotation.x*180/Math.PI,material:box.type,grip:box.friction,gravity:box.gravity,
+    })),
+  });
 }
 export function exampleMap(){
   const p=(name,x,y,z,w,h,d,material,extra={})=>({name,x,y,z,w,h,d,material,...extra});
