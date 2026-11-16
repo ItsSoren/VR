@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Atelier Gorilla Lab R36</title>
+<title>Atelier Gorilla Lab R37</title>
 <style>
   :root{color-scheme:dark;--page:#101b22;--panel:#192932;--border:#334b58;--text:#f5efdf;--muted:#b4cbd1;--accent:#ffda90;--field:#12232c}
   *{box-sizing:border-box}
@@ -83,7 +83,7 @@
 </head>
 <body>
   <header class="header">
-    <h1>Atelier Gorilla Lab R36</h1>
+    <h1>Atelier Gorilla Lab R37</h1>
     <a href="./">Retour au jeu</a>
     <div class="header-actions">
       <button id="new-example">Arène de départ</button>
@@ -114,12 +114,16 @@
             <button class="tool" id="spawn-tool" data-tool="spawn" aria-pressed="false">Départ <kbd>4</kbd></button>
           </div>
           <div class="actions">
-            <label class="compact">Pas de grille<select id="snap" class="compact"><option value=".25">0,25 m</option><option value=".5">0,5 m</option><option value="1">1 m</option><option value="2">2 m</option></select></label>
+            <label class="compact">Pas de grille<select id="snap" class="compact"><option value=".25">0,25 m</option><option value=".5">0,5 m</option><option value="1">1 m</option><option value="2">2 m</option><option value=".01">1 cm</option></select></label>
+            <label class="compact" title="Alt : désactiver temporairement l’aimant et la grille"><input id="magnet" type="checkbox" checked> Aimant entre pièces</label>
+            <label class="compact">Accroche<select id="magnet-mode"><option value="face">Faces</option><option value="edge">Arêtes</option></select></label>
+            <label class="compact">Portée<select id="magnet-distance"><option value=".04">Faible · 4 cm</option><option value=".10" selected>Moyenne · 10 cm</option><option value=".25">Forte · 25 cm</option></select></label>
             <button id="zoom-fit">Cadrer <kbd>F</kbd></button>
             <button id="undo">Annuler <kbd>Ctrl Z</kbd></button>
           </div>
         </div>
         <p class="tool-help" id="tool-help"></p>
+        <output id="placement-measures" hidden style="color:var(--accent)"></output>
       </div>
       <div class="views">
         <section class="panel view view-3d" aria-labelledby="preview-title">
@@ -214,6 +218,6 @@
       </details>
     </aside>
   </main>
-  <script defer src="./gorilla-editor-r36.js"></script>
+  <script defer src="./gorilla-editor-r37.js"></script>
 </body>
 </html>

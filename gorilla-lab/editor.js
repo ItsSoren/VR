@@ -100,6 +100,78 @@ gizmo.enabled=false;
 scene.add(gizmo.getHelper());
 const transformModes=new Set(['translate','rotate','scale']);
 let beforeTransform=null;
+let heldSnap=null, altHeld=false, edgeMidpoint=null, midpointSnapped=false;
+const magnetRange=()=>Number($('magnet-distance').value);
+for(const id of ['magnet-mode','magnet-distance']){
+  try{
+    const saved=localStorage.getItem('gorilla-lab-'+id);
+    if([...$(id).options].some(option=>option.value===saved))$(id).value=saved;
+  }catch{}
+  $(id).onchange=()=>{
+    heldSnap=null;
+    try{localStorage.setItem('gorilla-lab-'+id,$(id).value);}catch{}
+  };
+}
+const rejectedSnaps=new Map();
+try {$('magnet').checked=localStorage.getItem('gorilla-lab-editor-magnet')!=='off';}catch{}
+$('magnet').onchange=()=>{
+  heldSnap=null;rejectedSnaps.clear();
+  try{localStorage.setItem('gorilla-lab-editor-magnet',$('magnet').checked?'on':'off');}catch{}
+};
+for(const type of ['keydown','keyup'])window.addEventListener(type,event=>{altHeld=event.altKey;});
+window.addEventListener('blur',()=>{altHeld=false;heldSnap=null;});
+
+// Only parallel box faces magnetize. Compare raw positions before grid rounding;
+// require overlap along the other two axes so distant edges cannot pull a block.
+function alignTranslation(piece,raw,axes,free){
+  const aligned={...raw};
+  if(!free)for(const axis of axes)aligned[axis]=Math.round(raw[axis]/snapStep())*snapStep();
+  if(free||!$('magnet').checked||!piece.solid||piece.terrain){heldSnap=null;return aligned;}
+  const range=magnetRange(),edgeMode=$('magnet-mode').value==='edge';
+  const dimensions={x:'w',y:'h',z:'d'};
+  const half=box=>{
+    if(box.terrain||!box.solid||[box.pitch,box.yaw,box.roll??0].some(deg=>Math.abs(deg/90-Math.round(deg/90))>1e-6))return null;
+    const euler=new T.Euler(...[box.pitch,box.yaw,box.roll??0].map(T.MathUtils.degToRad),'YXZ');
+    const m=new T.Matrix4().makeRotationFromEuler(euler).elements;
+    return Object.fromEntries(['x','y','z'].map((axis,i)=>[axis,(Math.abs(m[i])*box.w+Math.abs(m[4+i])*box.h+Math.abs(m[8+i])*box.d)/2]));
+  };
+  const moving=half(piece);
+  if(!moving)return aligned;
+  const candidates=[];
+  for(const other of map.pieces){
+    if(other===piece)continue;
+    const fixed=half(other);
+    if(!fixed)continue;
+    for(const axis of axes){
+      const cross=Object.keys(dimensions).filter(key=>key!==axis);
+      const overlaps=key=>Math.abs(aligned[key]-other[key])<moving[key]+fixed[key]-.001;
+      const edge=cross.flatMap(key=>axes.includes(key)&&overlaps(cross.find(k=>k!==key))
+        ?[-1,1].flatMap(a=>[-1,1].map(b=>{
+          const value=other[key]+a*fixed[key]-b*moving[key];
+          return {key,value,distance:Math.abs(raw[key]-value)};
+        })):[]).sort((a,b)=>a.distance-b.distance)[0];
+      if(edgeMode?(!edge||edge.distance>range*1.8):!cross.every(overlaps))continue;
+      for(const side of [-1,1]){
+        const value=other[axis]+side*(moving[axis]+fixed[axis]);
+        const key=map.pieces.indexOf(other)+':'+axis+':'+side;
+        candidates.push({key,axis,value,edge:edgeMode?edge:null,distance:Math.max(Math.abs(value-raw[axis]),edgeMode?edge.distance:0)});
+      }
+    }
+  }
+  const existing=candidates.find(c=>c.key===heldSnap);
+  const apply=c=>{aligned[c.axis]=c.value;if(c.edge)aligned[c.edge.key]=c.edge.value;};
+  if(existing&&existing.distance<=range*1.8){apply(existing);return aligned;}
+  if(heldSnap){
+    rejectedSnaps.set(heldSnap,(rejectedSnaps.get(heldSnap)??0)+1);
+    heldSnap=null;
+  }
+  const next=candidates.filter(c=>c.distance<=range&&(rejectedSnaps.get(c.key)??0)<3).sort((a,b)=>a.distance-b.distance)[0];
+  if(next){apply(next);heldSnap=next.key;}
+  else for(const c of candidates){
+    if(c.distance<=range&&(rejectedSnaps.get(c.key)??0)>=3&&Math.abs(aligned[c.axis]-c.value)<.001)aligned[c.axis]=raw[c.axis];
+  }
+  return aligned;
+}
 const sharedBox = new T.BoxGeometry(1, 1, 1);
 const loader = new T.TextureLoader();
 const spawn = new T.Mesh(new T.ConeGeometry(.32, .75, 5), new T.MeshBasicMaterial({ color: '#ffcd63' }));
@@ -107,6 +179,8 @@ scene.add(spawn);
 const ghostBox = new T.Mesh(sharedBox, new T.MeshBasicMaterial({
   color: '#8ee7fc', opacity: .44, transparent: true, depthWrite: false,
 }));
+const midpointMarker=new T.Mesh(new T.SphereGeometry(.055,10,8),new T.MeshBasicMaterial({color:'#ffc85a',depthTest:false}));
+midpointMarker.visible=false;midpointMarker.renderOrder=20;scene.add(midpointMarker);
 const ghostMarker = new T.Mesh(spawn.geometry, new T.MeshBasicMaterial({
   color: '#ffe084', opacity: .65, transparent: true, depthWrite: false,
 }));
@@ -286,7 +360,7 @@ function attachGizmo() {
   }
   gizmo.setMode(tool);
   gizmo.setSpace(tool==='translate'?'world':'local');
-  gizmo.setTranslationSnap(snapStep());
+  gizmo.setTranslationSnap(null);
   gizmo.showX=gizmo.showZ=true;
   gizmo.showY=!(terrain&&tool==='scale');
   gizmo.attach(mesh);
@@ -296,6 +370,7 @@ function attachGizmo() {
 gizmo.addEventListener('change',queueRender);
 gizmo.addEventListener('mouseDown',()=>{
   const piece=current();
+  heldSnap=null;
   if(piece)beforeTransform={map:structuredClone(map),selected};
 });
 // Reflète la transformation de Three.js dans le modèle et l’inspecteur à chaque mouvement.
@@ -304,9 +379,11 @@ gizmo.addEventListener('objectChange',()=>{
   if(!piece||!mesh||!original)return;
   const clamp=T.MathUtils.clamp;
   if(tool==='translate'){
-    piece.x=clamp(mesh.position.x,-120,120);
-    piece.y=clamp(mesh.position.y,-12,33);
-    piece.z=clamp(mesh.position.z,-120,120);
+    const axes=['x','y','z'].filter(axis=>(gizmo.axis??'XYZ').includes(axis.toUpperCase()));
+    const next=alignTranslation(piece,{x:mesh.position.x,y:mesh.position.y,z:mesh.position.z},axes,altHeld);
+    piece.x=clamp(next.x,-120,120);
+    piece.y=clamp(next.y,-12,33);
+    piece.z=clamp(next.z,-120,120);
     mesh.position.set(piece.x,piece.y,piece.z);
   }else if(tool==='rotate'){
     piece.pitch=T.MathUtils.radToDeg(mesh.rotation.x);
@@ -472,6 +549,7 @@ function sync() {
 function choose(index) {
   if (selected === index) return;
   selected = index;
+  heldSnap=null;rejectedSnaps.clear();
   updateInspector();
   updateSceneSelection();
   paintPlan();
@@ -589,6 +667,7 @@ function fitViews() {
 function loadMap(next, message) {
   remember();
   map = next;
+  heldSnap=null;rejectedSnaps.clear();
   selected = -1;
   $('piece-search').value='';
   setTool('move');
@@ -645,6 +724,7 @@ function spawnOnTop(x, z, yaw, selectedMesh = null) {
 
 // Calcule une pose valide selon l’outil, le rayon et la normale touchée.
 function placementAt(canvas, event) {
+  edgeMidpoint=null;midpointSnapped=false;
   const hit = pointUnderPointer(canvas, event);
   if (tool === 'spawn') {
     if (!hit) return null;
@@ -660,13 +740,45 @@ function placementAt(canvas, event) {
   const point = hit?.point ?? rayPlane(0);
   if (!point) return null;
   const normal = hit ? hit.face.normal.clone().applyNormalMatrix(normalMatrix.getNormalMatrix(hit.object.matrixWorld)) : worldUp;
-  return snapPlacement(point, normal, shapes[tool], snapStep());
+  const midpoint=hit&&nearestEdgeMidpoint(hit);
+  const range=magnetRange();
+  if(midpoint&&midpoint.distance<=range*2){
+    edgeMidpoint=midpoint.point;
+    midpointSnapped=$('magnet').checked&&!event.altKey&&$('magnet-mode').value==='edge'&&midpoint.point.distanceTo(point)<=range;
+  }
+  const step=midpointSnapped||event.altKey?.000001:snapStep();
+  return snapPlacement(midpointSnapped?edgeMidpoint:point, normal, shapes[tool], step);
+}
+
+// Locate the closest edge of the box face hit by the placement ray, in world metres.
+function nearestEdgeMidpoint(hit){
+  const mesh=hit.object, piece=map.pieces[group.children.indexOf(mesh)];
+  if(!piece||piece.terrain)return null;
+  const local=mesh.worldToLocal(hit.point.clone());
+  const axes=['x','y','z'], tangent=axes.filter(axis=>Math.abs(hit.face.normal[axis])<.5);
+  if(tangent.length!==2)return null;
+  let best=null;
+  for(const axis of tangent)for(const side of [-.5,.5]){
+    const edge=local.clone();edge[axis]=side;
+    const distance=mesh.localToWorld(edge.clone()).distanceTo(hit.point);
+    edge[tangent.find(key=>key!==axis)]=0;
+    if(!best||distance<best.distance)best={distance,point:mesh.localToWorld(edge)};
+  }
+  return best;
 }
 
 // Actualise l’aperçu temporaire sans écrire dans la carte.
 function showGhost(preview) {
   if (!preview && !ghost) return;
   ghost = preview;
+  const measures=$('placement-measures');
+  measures.hidden=!ghost||tool==='spawn';
+  if(!measures.hidden){
+    const metres=value=>new Intl.NumberFormat('fr-FR',{maximumFractionDigits:2}).format(value);
+    measures.textContent=[ghost.w,ghost.h,ghost.d].map(metres).join(' × ')+' m (L × H × P)'+(edgeMidpoint?(midpointSnapped?' · Milieu accroché':' · Repère : milieu de l’arête'):'');
+  }
+  midpointMarker.visible=Boolean(ghost&&edgeMidpoint);
+  if(midpointMarker.visible)midpointMarker.position.copy(edgeMidpoint);
   ghostMarker.visible = Boolean(ghost && tool === 'spawn');
   ghostBox.visible = Boolean(ghost && tool !== 'spawn');
   if (ghostMarker.visible) ghostMarker.position.set(ghost.x, ghost.y + .38, ghost.z);
@@ -713,6 +825,7 @@ function beginGesture(canvas, event) {
   canvas.setPointerCapture(event.pointerId);
   const start = { canvas, id: event.pointerId, clientX: event.clientX, clientY: event.clientY, tool };
   gesture = start;
+  heldSnap=null;
   if(tool==='sculpt'){applyBrush(canvas,event);return;}
   if (tool !== 'move') return;
 
@@ -745,8 +858,8 @@ function moveGesture(canvas, event) {
   const point = rayPlane(gesture.height);
   if (!point) return;
   const piece = current();
-  const x = snapCoordinate(point.x - gesture.dx);
-  const z = snapCoordinate(point.z - gesture.dz);
+  const next=alignTranslation(piece,{x:point.x-gesture.dx,y:piece.y,z:point.z-gesture.dz},['x','z'],event.altKey);
+  const x=T.MathUtils.clamp(next.x,-120,120),z=T.MathUtils.clamp(next.z,-120,120);
   if (x === piece.x && z === piece.z) return;
   if (!gesture.recorded) {
     remember();
@@ -854,7 +967,7 @@ $('delete').onclick = removePiece;
 $('rotate').onclick = rotatePiece;
 $('undo').onclick = undo;
 $('zoom-fit').onclick = fitViews;
-$('snap').onchange = () => {gizmo.setTranslationSnap(snapStep());showGhost(null);};
+$('snap').onchange = () => showGhost(null);
 $('new-example').onclick = () => loadMap(defaultMap(), 'Arène de départ ouverte.');
 $('blank-map').onclick = () => loadMap({
   format:'gorilla-lab-map',version:1,name: 'Ma nouvelle map', spawn: { x: 0, y: .025, z: 3, yaw: 0 },

@@ -115,3 +115,6 @@ Sélectionne une pièce dans la 3D, le plan ou la liste filtrée. Elle reste sé
 `editor.js` relie les poignées de Three.js au modèle de carte. Les champs et le plan suivent pendant le glissement, puis `sync()` reconstruit les UV et le terrain et sauvegarde le brouillon. `map-format.js` vérifie les trois angles et exporte le roulis (`roll`). Les anciennes cartes sans ce champ sont lues avec un roulis de zéro. `custom-maps.js` applique le même ordre YXZ au maillage de jeu et à sa collision.
 
 La densité d’herbe va de zéro à environ cinq touffes par mètre carré à 100 %, dans la limite de 3 200 touffes par pièce. Les touffes restent instanciées afin de partager leur géométrie.
+
+En **R37**, **Aimant entre pièces** rapproche deux faces parallèles à la distance choisie (4, 10 ou 25 cm) pendant un glissement. Écarte trois fois la même face de l’aimant pour qu’il arrête de la retenir. L’atelier repart de zéro quand tu changes de pièce sélectionnée. Maintiens **Alt** pour déplacer librement la pièce sans aimant ni grille, ou décoche l’option et choisis le pas de **1 cm** sur mobile.
+Le mode **Faces** colle les surfaces qui se recouvrent. **Arêtes** aligne deux bords parallèles et peut aimanter le milieu d’une arête à la pose. L’aperçu de création affiche largeur, hauteur et profondeur en mètres.
