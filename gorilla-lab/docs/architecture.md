@@ -87,19 +87,19 @@ sequenceDiagram
     R->>P: État à afficher
 ```
 
-**L'autorité** est la machine qui décide de l'état d'un objet. Dans ce jeu, c'est le joueur VR. Le PC transmet une demande de saisie, de création ou d'action sur l'objet. L'hôte décide et diffuse l'état. Les autres clients dessinent des répliques et lissent leurs déplacements entre deux paquets.
+**L'autorité** est la machine qui décide de l'état d'un objet. Dans ce jeu, c'est l’appareil qui héberge le salon. Le PC transmet une demande de saisie, de création ou d'action sur l'objet. L'hôte décide et diffuse l'état. Les autres clients dessinent des répliques et lissent leurs déplacements entre deux paquets.
 
 [cloud-link.js](../cloud-link.js) s'occupe du transport, du format des messages et des identifiants. [cloud-view.js](../cloud-view.js) s'occupe de la caméra, des répliques et de l'affichage de l'état du salon. Le transport utilise des mises à jour groupées et périodiques. Un code de salon sert à retrouver une session. Il ne fait pas office de compte ou de mot de passe. Pour partager une carte et des objets personnalisés, charge la même carte et la même collection sur les appareils du salon.
 
 ### Cadence et état partagé
 
-L’hôte choisit **Héberger en VR**. Les invités choisissent **Rejoindre en joueur**, puis peuvent jouer au clavier, au tactile ou entrer en VR. Le spectateur envoie sa caméra à 5 Hz. Les joueurs visent 10 Hz pour la tête, les mains, les doigts et les armes. Les tirs et les demandes d’interaction utilisent le même paquet avec un numéro de séquence pour récupérer un paquet sauté et ignorer les doublons. Les petits objets rapides (rayon de collision jusqu’à 45 cm, translation ou bord en rotation à partir de 2,5 m/s) utilisent aussi le paquet intermédiaire, jusqu’à 10 Hz. Les autres changements d’objet passent à 5 Hz. La pose d’arrêt est répétée et les états complets périodiques resynchronisent le monde après une perte de paquet. L’hôte applique la physique des tirs et partage aussi l’ambiance, les noix de coco et le score de la cible.
+Dans **En ligne**, chaque appareil peut héberger ou rejoindre le salon, au clavier, au tactile ou en VR. Trois arènes publiques ont des noms fixes. Un salon privé se rejoint avec son code ou son lien, qui fait office d’invitation. Le spectateur envoie sa caméra à 5 Hz. Les joueurs visent 10 Hz pour la tête, les mains, les doigts et les armes. Les tirs et les demandes d’interaction utilisent le même paquet avec un numéro de séquence pour récupérer un paquet sauté et ignorer les doublons. Les petits objets rapides (rayon de collision jusqu’à 45 cm, translation ou bord en rotation à partir de 2,5 m/s) utilisent aussi le paquet intermédiaire, jusqu’à 10 Hz. Les autres changements d’objet passent à 5 Hz. La pose d’arrêt est répétée et les états complets périodiques resynchronisent le monde après une perte de paquet. L’hôte applique la physique des tirs et partage aussi l’ambiance, les noix de coco et le score de la cible.
 
 [Turbowarp regroupe les mises à jour et peut en sauter](https://docs.turbowarp.org/cloud-variables#updates-are-buffered). Dépasser 10 envois par seconde ne réduit pas ce délai. L’extrapolation de la position est bornée à 120 ms, ou à 100 ms pour les objets reçus à cadence rapide. Au repos, les répliques convergent vers la position et la rotation publiées par l’hôte. Les effets de son propre tir restent immédiats. Le délai réseau réel varie avec le relais, le trajet réseau et les images du navigateur. Le rapport exporté contient le nombre de paquets et de caractères envoyés et reçus, ainsi que la taille de la file WebSocket au dernier relevé.
 
-Les appareils du salon chargent la même carte. La R32 conserve le format réseau de la R31. Pour profiter des mises à jour d’objets rapides, charge la R32 sur le casque qui héberge. Les éditions de carte se partagent par export ou par URL. Les options de confort et de qualité restent locales.
+Les appareils du salon chargent la même carte. La R32 conserve le format réseau de la R31. Pour héberger sur PC ou mobile et utiliser les salons publics, recharge la R33. Les invités peuvent créer, saisir, modifier, vider ou réinitialiser les objets via l’hôte. Les éditions de carte se partagent par export ou par URL. Les options de confort et de qualité restent locales.
 
-## Où intervenir dans la R32
+## Où intervenir dans la R33
 
 | Pour modifier… | Fichier |
 | --- | --- |

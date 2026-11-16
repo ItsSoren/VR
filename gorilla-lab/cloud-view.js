@@ -4,7 +4,7 @@ import {createHandSkin} from './hand-skin.js';
 import {createBodySkin} from './body-skin.js';
 import {createBlasterModel} from './arcade-blaster.js';
 import {createToolVisual} from './tool-visual.js';
-import {createCloudClient,mapCode,roomCode,createObjectFeed} from './cloud-link.js';
+import {createCloudClient,mapCode,roomCode,createObjectFeed,publicRooms} from './cloud-link.js';
 
 const up=T.Object3D.DEFAULT_UP;
 const cameraType=15;
@@ -111,7 +111,7 @@ function disposeArt(root){
   for(const material of materials)material.dispose();
 }
 
-export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,applyCoconuts,applyScore,onAction,onShot}){
+export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,applyCoconuts,applyScore,onAction,onShot,onStatus}){
   const peers=new Map(),replicas=new Map(),feed=createObjectFeed();
   let replicaHost=0,replicaMap=-1,replicaLight=-1,replicaCoconuts=-1;
   let cachedMap='',cachedId=0,replicaScore=-1;
@@ -211,7 +211,7 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
   function cycleCamera(){setCamera((cameraMode+1)%cameraModes.length);}
   modeButton.onclick=cycleCamera;
   const client=createCloudClient({
-    onStatus(text){networkCaption=text;status.textContent=text;},
+    onStatus(text){networkCaption=text;status.textContent=text;onStatus?.();},
     onPose(pose){if(client.role!=='vr')takeObjects(pose);},
     onPeer(pose,previous){
       if(!pose){
@@ -241,10 +241,15 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     onAction,onShot,
   });
   const roomFromURL=roomCode(new URLSearchParams(location.search).get('room')??'');
-  room.value=/^[A-Z0-9]{5,12}$/.test(roomFromURL)?roomFromURL:Math.random().toString(36).slice(2,8).padEnd(6,'0').toUpperCase();
-  function connect(role){
-    const code=roomCode(room.value);
+  function privateCode(){
+    return Array.from(crypto.getRandomValues(new Uint8Array(8)),n=>(n%36).toString(36)).join('').toUpperCase();
+  }
+  room.value=/^[A-Z0-9]{5,12}$/.test(roomFromURL)?roomFromURL:privateCode();
+  function connect(role,value=room.value){
+    const code=roomCode(value);
     if(client.role===role&&client.code===code)return;
+    if(!/^[A-Z0-9]{5,12}$/.test(code)){status.textContent='Entre un code de 5 à 12 lettres ou chiffres.';return;}
+    if(client.role)client.leave();
     if(!client.join(code,role))return;
     room.value=code;
     if(role!=='vr')$('#game').focus();
@@ -252,13 +257,18 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     seedArena(mapCode(code));cachedMap='';
   }
   $('#cloud-vr').onclick=()=>connect('vr');
+  $('#cloud-new').onclick=()=>connect('vr',privateCode());
+  for(const [index,code] of publicRooms.entries()){
+    $(`#public-join-${index}`).onclick=()=>connect('player',code);
+    $(`#public-host-${index}`).onclick=()=>connect('vr',code);
+  }
   $('#cloud-pc').onclick=()=>connect('pc');
   const playerButton=$('#cloud-player');
   if(playerButton)playerButton.onclick=()=>connect('player');
   $('#cloud-leave').onclick=()=>{copyUntil=0;client.leave();};
   $('#cloud-copy').onclick=async()=>{
     const url=new URL(location.href);
-    url.searchParams.set('room',roomCode(room.value));
+    url.searchParams.set('room',client.code||roomCode(room.value));
     try{await navigator.clipboard.writeText(url.href);status.textContent='Lien copié.';}
     catch{status.textContent=url.href;}
     copyUntil=performance.now()+2500;
@@ -312,25 +322,26 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     if(client.state==='open'){
       const prefix='Salon '+client.code+' · ';
       const readyPeers=client.peers.filter(pose=>pose.ready);
-      if(!localReady)caption=prefix+(client.role==='vr'?'sélectionne « Entrer en VR » pour ouvrir la partie':'quitte la session VR pour utiliser ce rôle');
-      else if(client.role!=='vr'&&host&&host.map!==localMap())caption=prefix+'le joueur VR utilise une autre carte. Chargez la même carte.';
-      else if(client.role!=='vr'&&host&&!host.ready)caption=prefix+'casque connecté · en attente du démarrage VR';
-      else if(client.role==='player'&&host&&host.protocol<5)caption=prefix+'mets à jour le jeu sur le casque pour synchroniser la partie';
-      else if(client.role!=='vr'&&readyHere(host))caption=prefix+'joueur VR connecté';
+      if(!localReady)caption=prefix+'quitte la session VR pour utiliser le mode spectateur';
+      else if(client.role!=='vr'&&host&&host.map!==localMap())caption=prefix+'le joueur qui héberge utilise une autre carte. Chargez la même carte.';
+      else if(client.role!=='vr'&&host&&!host.ready)caption=prefix+'hôte connecté · partie en préparation';
+      else if(client.role==='player'&&host&&host.protocol<5)caption=prefix+'mets à jour le jeu chez l’hôte pour synchroniser la partie';
+      else if(client.role!=='vr'&&readyHere(host))caption=prefix+'hôte connecté';
       else if(client.role==='vr'){
         const local=readyPeers.filter(readyHere);
         const count=local.filter(p=>p.role==='player').length;
         const watcher=local.some(p=>p.role==='pc');
-        if(count||watcher)caption=prefix+[watcher?'spectateur connecté':'',count?count+' joueur'+(count===1?'':'s')+' PC / mobile':''].filter(Boolean).join(' · ');
-        else if(readyPeers.length)caption=prefix+'le correspondant utilise une autre carte. Chargez la même carte.';
+        caption=prefix+'tu héberges · '+(count+1)+' joueur'+(count?'s':'');
+        if(watcher)caption+=' · spectateur connecté';
+        if(!count&&readyPeers.some(p=>!readyHere(p)))caption+=' · carte différente chez un invité';
       }
     }
-    if(status.textContent!==caption)status.textContent=caption;
+    if(status.textContent!==caption){status.textContent=caption;onStatus?.();}
   }
   function update(frame){
     const {inVR,time,dt,position,yaw,camera,rig,keys,avatar,bodies,score}=frame;
     if(!client.role){clearReplicas();return;}
-    const ready=client.role==='vr'?inVR:client.role==='player'||!inVR,now=performance.now();
+    const ready=client.role!=='pc'||!inVR,now=performance.now();
     const map=localMap(),host=client.role!=='vr'?client.remote:null;
     const showWorld=ready&&readyHere(host);
     if(!showWorld&&replicaMap!==-1)clearReplicas();
@@ -359,7 +370,7 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     if(now-statusAt>=150){statusAt=now;updateStatus(ready,now);}
   }
   function getPeer(id){const pose=peers.get(id)?.pose;return readyHere(pose)?pose:null;}
-  return {update,getPeer,handMotion(id,index){return peers.get(id)?.handMotion[index];},sendAction(action){return client.sendAction(action,localMap());},
+  return {update,getPeer,connect,leave:()=>client.leave(),get caption(){return status.textContent;},handMotion(id,index){return peers.get(id)?.handMotion[index];},sendAction(action){return client.sendAction(action,localMap());},
     sendShot(position,quaternion){client.queueShot(position,quaternion,localMap());},
     get stats(){return client.stats;},
     get role(){return client.role;},get connected(){return readyHere(client.remote);},

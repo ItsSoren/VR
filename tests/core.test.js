@@ -2,7 +2,8 @@ import {createCloudClient,createObjectFeed,decodeAvatar} from '../gorilla-lab/cl
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
-import {createArcadeBlaster} from '../gorilla-lab/arcade-blaster.js';
+import {createToolVisual} from '../gorilla-lab/tool-visual.js';
+import {createArcadeBlaster,createBlasterModel} from '../gorilla-lab/arcade-blaster.js';
 import {updateGroundHaptics} from '../gorilla-lab/ground-haptics.js';
 import {parseMap,exampleMap} from '../gorilla-lab/map-format.js';
 import {createKeyboardState} from '../gorilla-lab/flat-controls.js';
@@ -230,4 +231,51 @@ test('only small fast objects use intermediate pose packets and their final stat
   assert.ok(feed.capture(400,bodies).records.includes(terminal));
   advance();
   assert.deepEqual(ids(feed.capture(500,bodies)),[4]);
+});
+
+test('an active public host keeps authority and a second host attempt can spawn as guest',()=>{
+  let at=0;
+  const sockets=[],traffic=[];
+  class Relay {
+    constructor(){this.readyState=1;this.bufferedAmount=0;sockets.push(this);}
+    send(message){if(JSON.parse(message).method==='set')traffic.push({sender:this,message});}
+    close(){this.readyState=3;}
+  }
+  const opts={Socket:Relay,now:()=>1_780_000_000_000+at,monotonicNow:()=>at};
+  const actions=[];
+  const host=createCloudClient({...opts,random:()=>.62,onAction:action=>actions.push(action)});
+  const guest=createCloudClient({...opts,random:()=>.12});
+  const data={x:0,y:1,z:0,yaw:0,map:12,ready:true};
+  host.join('ARENE1','vr');sockets[0].onopen();
+  function run(until){
+    for(;at<=until;at+=10){
+      host.tick(data);
+      guest.tick(data);
+      for(const {sender,message} of traffic.splice(0)){
+        for(const socket of sockets)if(socket!==sender)socket.onmessage({data:message});
+      }
+    }
+  }
+  run(1250);
+  guest.join('ARENE1','vr');sockets[1].onopen();
+  run(2050);
+  assert.equal(host.role,'vr');
+  assert.equal(guest.role,'player');
+  assert.equal(guest.remote.ready,true);
+  assert.ok(guest.sendAction({type:'spawn',typeId:1},12));
+  assert.ok(guest.sendAction({type:'world',mode:3,typeId:1},12));
+  run(2600);
+  assert.deepEqual(actions,[{type:'spawn',typeId:1},{type:'world',mode:3,typeId:1}]);
+});
+
+test('the two gun models meet their triangle budget',()=>{
+  function triangles(root){
+    let count=0;
+    root.traverse(node=>{
+      if(node.isMesh)count+=(node.geometry.index?.count??node.geometry.attributes.position.count)/3;
+    });
+    return count;
+  }
+  assert.equal(triangles(createBlasterModel()),96);
+  assert.equal(triangles(createToolVisual(new T.Scene()).mesh),104);
 });

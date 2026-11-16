@@ -11,6 +11,7 @@ button:focus-visible{outline:2px solid #ffe6a5}button:hover{background:#4d6b78}b
 #game-hint{position:fixed;top:15px;left:50%;transform:translateX(-50%);background:#243944f0;padding:.5rem .8rem;border-radius:5px;pointer-events:none}
 #crosshair{pointer-events:none;position:fixed;left:50%;top:50%;width:6px;height:6px;border-radius:50%;transform:translate(-50%,-50%);background:#fff4d1;box-shadow:0 0 4px #071219}
 #flat-actions{display:none;position:fixed;right:max(12px,env(safe-area-inset-right));bottom:max(12px,env(safe-area-inset-bottom));gap:8px;max-width:200px;flex-wrap:wrap;justify-content:flex-end}
+.cloud-card{padding:.7rem;margin:.55rem 0;background:#223844;border:1px solid #48616a;border-radius:8px}.cloud-card h3{margin:0 0 .4rem;font-size:15px}.cloud-card input{width:100%;margin:.3rem 0 .55rem;padding:.45rem;font:inherit;text-transform:uppercase}.cloud-card button{min-height:37px}.cloud-grid{display:grid;grid-template-columns:1fr 1fr;gap:.35rem}.cloud-room-row{display:grid;grid-template-columns:1fr auto auto;gap:.35rem;align-items:center;margin:.35rem 0}#cloud-status{padding:.55rem .65rem;background:#142630;border-radius:5px}
 #flat-actions button{min-height:45px;background:#273c4bb5;touch-action:none}
 @media (any-pointer:coarse){#flat-actions{display:flex}aside{max-height:calc(100dvh - 125px)}}
 </style></head>
@@ -26,18 +27,24 @@ button:focus-visible{outline:2px solid #ffe6a5}button:hover{background:#4d6b78}b
 <button id="vr" disabled>Entrer en VR</button><small id="status">Mode PC. Pour la VR, ouvrir en HTTPS sur le casque.</small>
 <p>VR : pousse avec les mains. Stick droit : rotation à 45°. Grip : saisir. B/Y : réglages. A : Tool Gun, clic stick droit : action suivante.</p>
 <small>PC : ZQSD ou WASD, Maj pour courir, Espace pour sauter. Glisse pour regarder. E : saisir ou interagir. F : créer un cube. G/T : outil et mode. X : pistolet. Clic ou J : tirer. Tab : réglages.<br>Mobile : glisse à gauche pour marcher et à droite pour regarder.</small>
-<nav aria-label="Réglages"><button data-page>Locomotion</button><button data-page>Objets</button><button data-page>Rendu</button><button data-page>Spawn</button><button data-page>Carte</button></nav>
+<nav aria-label="Réglages"><button data-page>Locomotion</button><button data-page>Objets</button><button data-page>Rendu</button><button data-page>Spawn</button><button data-page>Carte</button><button data-page>En ligne</button></nav>
 <p><a href="./floor-plan.html" target="_blank" rel="noopener">Plan de l’arène</a></p><h2 id="section">Locomotion</h2><div id="settings"></div>
 <button id="restore">Réglages par défaut</button>
-<p><button id="capture-report">Capturer le rapport</button> <button id="download-report" disabled>JSON</button></p><details id="cloud-access"><summary>Salon TurboWarp</summary>
-<p>Connexion facultative. Le joueur VR ouvre un salon. Rejoins-le avec le même code en joueur PC/mobile ou en spectateur. La position et l’orientation de jeu sont envoyées à TurboWarp tant que le salon est actif.</p>
-<label>Code du salon <input id="cloud-room" maxlength="14" autocomplete="off"></label>
-<p><button id="cloud-vr">Héberger en VR</button> <button id="cloud-pc">Spectateur</button> <button id="cloud-player">Rejoindre en joueur</button></p>
-<p><button id="cloud-camera">Caméra : Libre</button></p><small>ZQSD : voler · Espace / Maj : monter / descendre · Ctrl : accélérer · C : changer de caméra.</small>
-<p><button id="cloud-copy">Copier le lien</button> <button id="cloud-leave">Déconnecter</button></p>
-<p id="cloud-status" aria-live="polite" role="status">Hors ligne</p>
-</details><details id="map-access"><summary>Cartes et éditeur</summary><p><a href="./editor.html">Ouvrir l’atelier PC / mobile</a></p><label>Importer un fichier <input id="map-file" type="file" accept=".json,application/json"></label><label>URL de map <input id="map-url" type="url" placeholder="https://…/map.gorilla.json"></label><button id="map-load-url">Charger URL</button> <button id="map-export">Exporter JSON</button> <button id="map-reset">Arène</button><p id="map-note" role="status"></p></details><p><small>La résolution XR s’applique à la prochaine entrée en VR.</small></p>
-</aside><script defer src="./game-lab-r32.js"></script></body></html>
+<p><button id="capture-report">Capturer le rapport</button> <button id="download-report" disabled>JSON</button></p><section id="cloud-access" aria-label="Salons" hidden>
+<p id="cloud-status" role="status">Hors ligne</p>
+<div class="cloud-card"><h3>Salons publics</h3>
+<div class="cloud-room-row"><span>Arène 1</span><button id="public-join-0">Rejoindre</button><button id="public-host-0">Héberger</button></div>
+<div class="cloud-room-row"><span>Arène 2</span><button id="public-join-1">Rejoindre</button><button id="public-host-1">Héberger</button></div>
+<div class="cloud-room-row"><span>Arène 3</span><button id="public-join-2">Rejoindre</button><button id="public-host-2">Héberger</button></div>
+</div>
+<div class="cloud-card"><h3>Salon privé</h3>
+<label>Code d’invitation <input id="cloud-room" maxlength="12" autocomplete="off" spellcheck="false"></label>
+<div class="cloud-grid"><button id="cloud-new">Créer un salon</button><button id="cloud-player">Rejoindre</button><button id="cloud-vr">Héberger ce code</button><button id="cloud-copy">Copier le lien</button></div>
+</div>
+<div class="cloud-grid"><button id="cloud-pc">Spectateur</button><button id="cloud-camera">Caméra : Libre</button><button id="cloud-leave">Déconnecter</button></div>
+<p><small>PC, mobile et VR peuvent héberger et jouer ensemble. Le salon transmet les poses et les interactions via TurboWarp.</small></p>
+</section><details id="map-access"><summary>Cartes et éditeur</summary><p><a href="./editor.html">Ouvrir l’atelier PC / mobile</a></p><label>Importer un fichier <input id="map-file" type="file" accept=".json,application/json"></label><label>URL de map <input id="map-url" type="url" placeholder="https://…/map.gorilla.json"></label><button id="map-load-url">Charger URL</button> <button id="map-export">Exporter JSON</button> <button id="map-reset">Arène</button><p id="map-note" role="status"></p></details><p><small>La résolution XR s’applique à la prochaine entrée en VR.</small></p>
+</aside><script defer src="./game-lab-r33.js"></script></body></html>
 
 
 

@@ -1,4 +1,5 @@
 import * as T from 'three';
+import {gunProfile} from './gun-profile.js';
 
 const shotInterval=.1, speed=45, range=55, maxShots=128, maxSparks=96;
 const tracerPalette=[new T.Color('#ffdc4d'),new T.Color('#ff5d35'),new T.Color('#bfc4c8')];
@@ -13,10 +14,13 @@ export function createBlasterModel(){
     const item=new T.Mesh(geo,material);
     item.position.set(x,y,z);item.rotation.x=pitch;mesh.add(item);
   }
-  part(new T.BoxGeometry(.075,.064,.18),shell,.035,.024,-.065);
-  part(new T.BoxGeometry(.042,.080,.055),bore,.035,-.025,-.022,-.22);
-  part(new T.CylinderGeometry(.020,.024,.071,8).rotateX(Math.PI/2),bore,.035,.028,-.161);
-  part(new T.BoxGeometry(.024,.010,.025),accent,.035,.061,-.133);
+  const frame=new T.MeshStandardMaterial({color:'#7f4231',roughness:.46,metalness:.34});
+  part(gunProfile([[.024,.025],[.012,.052],[-.121,.059],[-.157,.046],
+    [-.169,.026],[-.146,.003],[-.047,-.005],[.015,.006]],.067),shell,.035,0,0);
+  part(gunProfile([[.012,.013],[-.035,.012],[-.045,-.017],[-.016,-.086],[.034,-.078],[.028,-.060]],.042),frame,.035,0,0);
+  part(new T.CylinderGeometry(.015,.021,.067,6).rotateX(-Math.PI/2),bore,.035,.028,-.17);
+  part(new T.BoxGeometry(.054,.014,.073),frame,.035,.045,-.099);
+  part(new T.BoxGeometry(.018,.008,.023),accent,.035,.063,-.131);
   return mesh;
 }
 

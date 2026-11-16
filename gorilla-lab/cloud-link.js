@@ -3,7 +3,9 @@ const socketURL='wss://clouddata.turbowarp.org';
 const projectPrefix='itssoren.github.io/VR/gorilla-lab/';
 const names={vr:'☁ GorillaVR',pc:'☁ GorillaPC'};
 const playerNames=Array.from({length:8},(_,i)=>'☁ GorillaPlayer'+i);
-const roles=new Map([[names.vr,'vr'],[names.pc,'pc'],...playerNames.map(name=>[name,'player'])]);
+const publicHost='☁ GorillaHost';
+export const publicRooms=['ARENE1','ARENE2','ARENE3'];
+const roles=new Map([[publicHost,'vr'],[names.vr,'vr'],[names.pc,'pc'],...playerNames.map(name=>[name,'player'])]);
 const maxObjectType=53, freshness=4400, maxValueLength=64000;
 // TurboWarp regroupe les mises à jour : un seul paquet toutes les 100 ms par client actif.
 const playerInterval=100, spectatorInterval=200, repeatShotsFor=450, maxShotEvents=6;
@@ -37,11 +39,11 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
   const clockStart=monotonicNow(),wallStart=now();
   let socket=null,role=null,code='',id=0,channel='',lastSend=-Infinity,remote=null,openedAt=0,startedAt=0;
   let retryAt=Infinity,retries=0,state='offline',localReady=false,localMap=-1;
-  let actionNumber=0,pendingActions=[],collisionAt=Infinity;
+  let actionNumber=0,pendingActions=[],collisionAt=Infinity,hostProbe=350,firstHostSend=Infinity;
   let shotNumber=0,pendingShots=[];
   let networkStats={sent:0,received:0,bytesSent:0,bytesReceived:0,bufferedBytes:0};
   function status(next,message){state=next;onStatus(message);}
-  function waitLabel(){return 'Salon '+code+' · '+(role==='vr'?'en attente de joueurs ou du spectateur':'en attente du joueur VR');}
+  function waitLabel(){return 'Salon '+code+' · '+(role==='vr'?'en attente de joueurs ou du spectateur':'en attente de l’hôte');}
   function peerPoses(){return [...senders.values()].map(sender=>sender.pose).filter(Boolean);}
   function selectRemote(){
     const candidates=peerPoses().filter(p=>role==='vr'?p.role!=='vr':p.role==='vr');
@@ -114,6 +116,13 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
     sender.candidate=null;
     if(!sender.pose&&candidate?.objects&&candidate.ready&&candidate.map===pose.map&&!pose.objects)pose.objects=candidate.objects;
     sender.pose=pose;
+    if(role==='vr'&&peerRole==='vr'&&pose.ready){
+      // Un salon déjà ouvert a la priorité. En cas d’ouverture simultanée, compare les identifiants.
+      if(firstHostSend===Infinity||candidate?.arrival<firstHostSend||data.id<id){
+        role='player';channel=playerNames[id%playerNames.length];
+        status('open','Salon '+code+' · hôte détecté, entrée en joueur');
+      }else return;
+    }
     networkStats.received++;networkStats.bytesReceived+=packet.value.length;
     onPeer(pose);
     selectRemote();
@@ -138,7 +147,7 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
   function openSocket(){
     let ws;
     try{ws=new Socket(socketURL);}catch{return false;}
-    socket=ws;startedAt=monotonicNow();lastSend=-Infinity;
+    socket=ws;startedAt=monotonicNow();lastSend=-Infinity;firstHostSend=Infinity;
     status('connecting','Connexion à TurboWarp · salon '+code);
     ws.onopen=()=>{
       if(socket!==ws)return;
@@ -158,7 +167,7 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
           continue;
         }
         const peerRole=roles.get(packet?.name);
-        if(packet?.method!=='set'||!peerRole||peerRole==='vr'&&role==='vr')continue;
+        if(packet?.method!=='set'||!peerRole)continue;
         receive(peerRole,packet.name,packet,time);
       }
     };
@@ -185,6 +194,11 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
     disconnectPeers(true);
     id=Math.floor(1000000+random()*8999999);
     role=nextRole;code=normalized;channel=names[role]??playerNames[id%playerNames.length];
+    hostProbe=350;
+    if(role==='vr'&&publicRooms.includes(code)){
+      channel=id%2===0?names.vr:publicHost;
+      hostProbe=750+id%150;
+    }
     actionNumber=shotNumber=0;pendingShots=[];
     networkStats={sent:0,received:0,bytesSent:0,bytesReceived:0,bufferedBytes:0};
     retries=0;retryAt=collisionAt=Infinity;
@@ -220,7 +234,7 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
     if(socket&&socket.readyState===0&&time-startedAt>10_000){closeSocket();retry(1006);}
     networkStats.bufferedBytes=socket?.bufferedAmount??0;
     const interval=role==='pc'?spectatorInterval:playerInterval;
-    if(!data||!role||socket?.readyState!==1||networkStats.bufferedBytes>4096||time-openedAt<350||time-lastSend<interval)return false;
+    if(!data||!role||socket?.readyState!==1||networkStats.bufferedBytes>4096||time-openedAt<(role==='vr'?hostProbe:350)||time-lastSend<interval)return false;
     if(role==='player'){
       const active=peerPoses().filter(p=>p.role==='player');
       const incumbent=active.find(p=>p.channel===channel);
@@ -245,6 +259,7 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
       shots:pendingShots,score:data.score,
     });
     lastSend=time;
+    if(role==='vr')firstHostSend=Math.min(firstHostSend,time);
     socket.send(JSON.stringify({method:'set',name:channel,value})+'\n');
     networkStats.sent++;networkStats.bytesSent+=value.length;
     return true;
@@ -305,7 +320,7 @@ function encodeAction(action){
   const {type,typeId,objectId,mode}=action;
   if(type==='spawn')return Number.isInteger(typeId)&&typeId>=0&&typeId<=maxObjectType?'10'+digits(typeId,5):null;
   if(type==='world'){
-    const maxType=mode===1?2:mode===2?4:-1;
+    const maxType=mode===1?2:mode===2?4:mode===3?2:-1;
     return Number.isInteger(typeId)&&typeId>=0&&typeId<=maxType?'5'+mode+digits(typeId,5):null;
   }
   if(!Number.isInteger(objectId)||objectId<1||objectId>=100000)return null;

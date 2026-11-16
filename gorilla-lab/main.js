@@ -15,7 +15,7 @@ import { avatarPalettes,createAvatarStyle } from './avatar-style.js';
 import { makeLabProps } from './lab-props.js';
 import { makeAnimatedProps,clonePropMaterial } from './animated-props.js';
 import {readModelPack,createModelPropDefinitions,createModelAvatarHead,normalizeModelPack,modelLimits,modelStorageKey} from './model-pack.js';
-import {mapCode} from './cloud-link.js';
+import {mapCode,publicRooms} from './cloud-link.js';
 import { createHandSkin } from './hand-skin.js';
 import { createBodySkin } from './body-skin.js';
 import { labObjectSlots,labMirror,labSpawn } from './lab-layout.js';
@@ -75,7 +75,7 @@ let launchCount=0,lastLaunch=null;
 let refreshOptions=[],fpsGoal=100;
 const up=new T.Vector3(0,1,0), spin=new T.Quaternion();
 let yaw=0,bodyYaw=0,pitch=0, drop=0, standingHeight=NaN, snap=false, frameTime=0,fps=0,windowFrames=0,windowElapsed=0,qualityTimer=0,lowCount=0,highCount=0,liveLevel=settings.quality,refreshRate=72;
-let menu=false,panelHand='left',page=0,renderPage=0,spawnPage=0,mapPage=0,hudDirty=true,lastDraw=0;
+let menu=false,panelHand='left',page=new URLSearchParams(location.search).has('room')?5:0,renderPage=0,spawnPage=0,mapPage=0,hudDirty=true,lastDraw=0;
 const blocked=[],handBoxes=[];
 let activeBoxes=arena.boxes;
 const geometry=new T.IcosahedronGeometry(1,0);
@@ -333,7 +333,7 @@ const sections=[
     ['Vibration des appuis','stepHaptics'],['Retour au départ',resetPlayer],
   ]],
   ['Objets',[
-    ['Objets actifs','objects'],['Hitboxes objets','preciseHitboxes'],['Rebond','bounce'],['Force du lancer','throw'],['Réinitialiser les objets',resetObjects],
+    ['Objets actifs','objects'],['Hitboxes objets','preciseHitboxes'],['Rebond','bounce'],['Force du lancer','throw'],['Réinitialiser les objets',requestResetObjects],
   ]],
   ['Rendu',[]],
 ];
@@ -382,7 +382,7 @@ function captureReport(){
   const sorted=rawFrameMs.slice().sort((a,b)=>a-b);
   const percentile=p=>sorted.length?Number(sorted[Math.min(sorted.length-1,Math.floor((sorted.length-1)*p))].toFixed(2)):null;
   reportSnapshot={
-    game:'Gorilla Lab',version:'r32',time:new Date().toISOString(),
+    game:'Gorilla Lab',version:'r33',time:new Date().toISOString(),
     mode:reportHadVR?'VR':'PC',settings:{...settings},qualityActive:liveLevel,
     performance:{fps,frames:sorted.length,frameMs:{median:percentile(.5),p95:percentile(.95),max:percentile(1)}},
     xr:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},cloud:{role:spectator.role,connected:spectator.connected,replicas:spectator.replicaCount,...spectator.stats},targetScore:fixtures.score(),locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
@@ -417,7 +417,7 @@ const mapGroups=[['Construction',[
   ['Saisissable','modelGrab'],['Figé au départ','modelFrozen'],['Collisions du modèle','modelCollidable'],
   ['Appui pendant la prise','modelSupport'],['Sauver comme objet',()=>saveVRModel(false)],['Utiliser comme tête',()=>saveVRModel(true)],
 ]]];
-sections.push(['Carte',[]]);
+sections.push(['Carte',[]],['En ligne',[]]);
 const title=document.querySelector('#section'), desktop=document.querySelector('#settings');
 const readings=document.querySelector('#readings');
 function change(key,step){
@@ -512,13 +512,16 @@ function selectGroup(index){if(page===2)renderPage=index;else if(page===3)spawnP
 function actionLabel(key){
   if(key===captureReport)return 'Capturer';
   if(key===clearObjects||key===clearSpawnBank)return 'Vider';
-  if(key===resetPlayer||key===resetObjects)return 'Réinitialiser';
+  if(key===resetPlayer||key===requestResetObjects)return 'Réinitialiser';
   return page===3?'Créer':'Appliquer';
 }
 function desktopMenu(){
   title.textContent=sections[page][0];
   desktopTabs.forEach((tab,index)=>tab.setAttribute('aria-pressed',String(index===page)));
   desktop.replaceChildren();
+  onlinePanel.hidden=page!==5;
+  document.querySelector('#restore').hidden=page===5;
+  if(page===5)return;
   if(page>=2){
     const groups=document.createElement('nav');
     groups.setAttribute('aria-label','Catégories');
@@ -538,6 +541,7 @@ function desktopMenu(){
   }
 }
 const desktopTabs=document.querySelectorAll('[data-page]');
+const onlinePanel=document.querySelector('#cloud-access');
 desktopTabs.forEach((b,i)=>b.onclick=()=>{selectPage(i);desktopMenu();});
 document.querySelector('#restore').onclick=()=>{restore();desktopMenu();};
 desktopMenu();
@@ -591,9 +595,8 @@ const coconutPosition=new T.Vector3(), fixtureTouchPoint=new T.Vector3(), fixtur
 let fixtureAim=null, toolLook=null, mapLook=null;
 const beforeFixtures=new Set(scene.children);
 const fixtures=addLabFixtures(scene,arena.boxes,{
-  spawn: (index,origin)=>{if(!settings.objects)settings.objects=true;spawnObject(index,origin);},
-  clear: clearObjects,resetPlayer,resetObjects,
-  resetTree:()=>{ for(const coco of fixtures.coconuts)coco.visible=true; },
+  spawn:requestSpawn,clear:clearSpawnBank,resetPlayer,resetObjects:requestResetObjects,
+  resetTree:()=>requestObjectChange(2,resetCoconuts),
   quality:()=>liveLevel+'/10',
   resolution:()=>settings.resolution+'/10 · relancer VR',
   textureSize:()=>settingValue('texturePower'),
@@ -616,6 +619,7 @@ const spectator=addSpectator({scene,currentMap:()=>(maps.signature||'arena-r25-'
     return mesh;
   },
   onAction:handleNetworkAction,
+  onStatus:()=>{if(page===5)hudDirty=true;},
   onShot:shot=>blaster.receiveShot(shot,spectator.role==='vr'),
   applyLight:mode=>{arena.setTimeOfDay(mode??settings.timeOfDay-1);hudDirty=true;if(!renderer.xr.isPresenting)desktopMenu();},
   applyScore:value=>fixtures.setScore(value),
@@ -674,7 +678,7 @@ function aimMap(frame,space,{source,click}){
   if(click)hudDirty=true;
 }
 function touchFixture(hand){
-  if(maps.active||spectator.role==='player'||!hand.valid||hand.held||menu)return;
+  if(maps.active||!hand.valid||hand.held||hand.remoteHeld||menu)return;
   let touched=null;
   for(const key of fixtures.targets){
     key.getWorldPosition(fixtureKeyPoint);
@@ -726,21 +730,26 @@ function releaseFlat(launch){
   if(!body)return;
   release(desktopActor,launch);
 }
-function clearSpawnBank(){
-  if(spectator.role==='player'||spectator.role==='pc')showGameHint('Le joueur VR gère la remise à zéro.');
-  else clearObjects();
+function requestObjectChange(typeId,local){
+  if(spectator.role==='pc'){showGameHint('Rejoins le salon en joueur pour modifier les objets.');return;}
+  if(spectator.role!=='player'){local();return;}
+  if(!spectator.sendAction({type:'world',mode:3,typeId}))showGameHint('Attends la connexion à l’hôte.');
 }
-function requestSpawn(index){
+function clearSpawnBank(){requestObjectChange(0,clearObjects);}
+function requestResetObjects(){requestObjectChange(1,resetObjects);}
+function resetCoconuts(){for(const coco of fixtures.coconuts)coco.visible=true;}
+function requestSpawn(index,origin=null){
   settings.objects=true;
   if(spectator.role==='pc'){showGameHint('Commence par rejoindre le salon en joueur.');return;}
   if(spectator.role==='player'){
-    if(!spectator.sendAction({type:'spawn',typeId:index}))showGameHint('Attends la connexion au joueur VR.');
-  }else spawnObject(index);
+    if(!spectator.sendAction({type:'spawn',typeId:index}))showGameHint('Attends la connexion à l’hôte.');
+  }else spawnObject(index,origin);
 }
 function handleNetworkAction(action,peer){
   if(!peer)return;
   if(action.type==='world'){
     if(action.mode===1){settings.timeOfDay=action.typeId+1;applyVisual();}
+    else if(action.mode===3){[clearObjects,resetObjects,resetCoconuts][action.typeId]();}
     else if(!maps.active){
       const coco=fixtures.coconuts[action.typeId];
       if(coco?.visible&&coco.getWorldPosition(coconutPosition).distanceToSquared(peer)<=5.8**2&&
@@ -947,10 +956,28 @@ function drawPanel(){
   c.font='20px system-ui';c.fillText(fps+' FPS   ·   Q '+liveLevel+'/10   ·   '+(settings.auto?'AUTO':'MANUEL'),390,40);
   function item(x,y,w,h,label,action,color='#344b59'){
     c.fillStyle=color;c.fillRect(x,y,w,h);c.fillStyle='#fff4dc';c.font='21px system-ui';
-    c.textAlign='center';c.fillText(label,x+w/2,y+h/2+7);c.textAlign='left';
+    c.textAlign='center';c.fillText(label,x+w/2,y+h/2+7,w-8);c.textAlign='left';
     hitAreas.push({x,y,w,h,action,label});
   }
-  sections.forEach(([name],i)=>item(25+i*119,61,114,44,name,()=>selectPage(i),page===i?'#586d53':'#334b58'));
+  const tabWidth=Math.floor(587/sections.length);
+  sections.forEach(([name],i)=>item(25+i*tabWidth,61,tabWidth-4,44,name,()=>selectPage(i),page===i?'#586d53':'#334b58'));
+  if(page===5){
+    c.fillStyle='#e9e5ce';c.font='22px system-ui';c.fillText(spectator.caption,25,145,587);
+    c.fillText('Salons publics',25,190);
+    publicRooms.forEach((code,i)=>{
+      const y=204+i*48;
+      c.fillText('Arène '+(i+1),25,y+29);
+      item(200,y,190,40,'Rejoindre',()=>spectator.connect('player',code));
+      item(406,y,206,40,'Héberger',()=>spectator.connect('vr',code));
+    });
+    c.fillText('Salon privé',25,390);
+    item(25,405,286,44,'Rejoindre le code saisi',()=>spectator.connect('player'));
+    item(325,405,287,44,'Créer un salon privé',()=>document.querySelector('#cloud-new').click());
+    c.font='17px system-ui';c.fillText('Pour saisir un autre code, utilise le panneau du navigateur.',25,489,587);
+    item(25,579,286,44,'Déconnecter',()=>spectator.leave());
+    item(325,579,287,44,'Fermer',()=>menu=false);
+    return;
+  }
   const grouped=page>=2;
   if(grouped)menuGroups().forEach(([name],i)=>{
     const selected=currentGroup()===i;
@@ -1469,7 +1496,7 @@ renderer.setAnimationLoop((time,frame)=>{
     solveObjects(objects,arena.boxes,dt,9.81*settings.gravity/5,.12+settings.bounce*.064,surfaceAt);
     if(!maps.active)fixtures.updateTarget(objects);
   }
-  if(inVR&&!menu&&!remoteWorld)for(const hand of hands)touchFixture(hand);
+  if(inVR&&!menu&&spectator.role!=='pc')for(const hand of hands)touchFixture(hand);
   arena.probe.rotation.y+=dt*.29;
   updateFps(Math.min(.3,actual),inVR);
   panel.mesh.visible=inVR&&menu;
