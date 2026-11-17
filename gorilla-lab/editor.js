@@ -3,7 +3,7 @@ import {buildArena} from './arena.js';
 import {addLabFixtures} from './fixtures.js';
 import {createArenaObjectSpecs,forEachStartupObject} from './arena-objects.js';
 import {labMirror} from './lab-layout.js';
-import {tiledBox,transformUVs} from './texture-geometry.js';
+import {tiledBox,transformUVs,decorPrimitiveGeometry} from './texture-geometry.js';
 import {readModelPack,createModelUnitGeometry,createModelMaterial,modelDimensions} from './model-pack.js';
 import {normalizeTerrain,resizeTerrain,sculptTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from './terrain-edit.js';
 import {texturePresets,seamlessTexture} from './seamless-texture.js';
@@ -68,10 +68,12 @@ function presetPiece(){
   const presets={
     slab:['Dalle',3,.12,3],column:['Colonne',.6,3,.6],beam:['Poutre',4,.4,.45],
     platform:['Plateforme',7,.4,5],fence:['Barrière',4,1.3,.18],
-    stair:['Marche',1.7,.25,.8],tiny:['Petit décor',.35,.35,.35]
+    stair:['Marche',1.7,.25,.8],tiny:['Petit décor',.35,.35,.35],
+    sphere:['Sphère',1,1,1],cylinder:['Cylindre',1,2,1],cone:['Cône',1.6,2,1.6],
+    torus:['Anneau',2,.65,2],capsule:['Capsule',1,2,1]
   };
   const [name,w,h,d]=presets[$('shape-preset').value]??presets.slab;
-  return makePiece({name,w,h,d,y:h/2});
+  return makePiece({name,w,h,d,y:h/2,primitive:['sphere','cylinder','cone','torus','capsule'].includes($('shape-preset').value)?$('shape-preset').value:'box'});
 }
 const editorViews=$('editor-views');
 function applyLayout(){
@@ -530,7 +532,9 @@ function rebuildScene() {
       material.map.wrapS = material.map.wrapT = T.RepeatWrapping;
       material.color.set(piece.color);
     }
-    const geometry=piece.terrain?terrainGeometry(piece):(piece.texture||map.arenaBase)?tiledBox(piece.w,piece.h,piece.d).scale(1/piece.w,1/piece.h,1/piece.d):sharedBox;
+    const geometry=piece.terrain?terrainGeometry(piece):
+      piece.primitive&&piece.primitive!=='box'?decorPrimitiveGeometry(piece.primitive):
+      (piece.texture||map.arenaBase)?tiledBox(piece.w,piece.h,piece.d).scale(1/piece.w,1/piece.h,1/piece.d):sharedBox;
     if(geometry!==sharedBox)transformUVs(geometry,piece);
     const mesh = new T.Mesh(geometry, material);
     mesh.userData.ownsTexture=Boolean(piece.texture);
