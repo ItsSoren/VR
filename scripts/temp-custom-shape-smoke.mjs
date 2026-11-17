@@ -48,7 +48,7 @@ try{
  const part=saved.models[0].parts[0];
  assert.equal(part.shape,'custom');
  assert.equal(part.profile.mode,'extrude');
- assert.equal(part.profile.depth,.67);
+ assert.ok(Math.abs(part.profile.depth-.675)<.0001,'range input rounds to the 2.5 cm step');
  assert.ok(part.profile.points.length>=6);
  await page.click('#edit-profile');
  await page.waitForSelector('.forge-sketch-backdrop',{visible:true});
