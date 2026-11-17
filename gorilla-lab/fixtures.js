@@ -15,19 +15,19 @@ export function addLabFixtures(scene,boxes,actions) {
     trunkColors.push(color.r,color.g,color.b);
   }
   trunkGeo.setAttribute('color',new T.Float32BufferAttribute(trunkColors,3));
-  const tree=new T.Group();tree.position.set(labTree.x,0,labTree.z);
+  const tree=new T.Group();tree.userData.editorAssetId='palm-tree';tree.position.set(labTree.x,0,labTree.z);
   tree.rotation.z=-.14;scene.add(tree);
   const trunk=new T.Mesh(trunkGeo,bark);
   trunk.position.y=1.575;trunk.castShadow=trunk.receiveShadow=true;tree.add(trunk);
   tree.updateMatrixWorld(true);
-  function addCollider(mesh,half,friction=.85){
+  function addCollider(mesh,half,friction=.85,editorAssetId=null){
     const position=mesh.getWorldPosition(new T.Vector3()),quaternion=mesh.getWorldQuaternion(new T.Quaternion());
     boxes.push({half,min:half.clone().negate(),position,quaternion,mesh:{position,quaternion},shape:boxCollider(half),friction,gravity:1});
   }
   for(let i=0;i<4;i++) {
     const proxy=new T.Object3D();proxy.position.y=(i+.5)*3.15/4;tree.add(proxy);
     const width=.237-i*.022;
-    addCollider(proxy,new T.Vector3(width,.398,width));
+    addCollider(proxy,new T.Vector3(width,.398,width),.85,'palm-tree');
   }
   const leafVertices=[],leafColors=[];
   const crown=3.14;
@@ -137,7 +137,7 @@ export function addLabFixtures(scene,boxes,actions) {
     ['Remettre|les cocos',actions.resetTree],['Vider|les objets',actions.clear],
   ]);
   redraw();
-  const target=new T.Group();
+  const target=new T.Group();target.userData.editorAssetId='range-target';
   const {x:targetX,y:targetY,z:targetZ}=labTarget;
   target.position.set(targetX,targetY,targetZ);scene.add(target);
   const bullseyePalette=['#e2ad5c','#ca664b','#f5e5bd'];
@@ -174,7 +174,7 @@ export function addLabFixtures(scene,boxes,actions) {
     }
   }
   drawScore();
-  return {targets,coconuts,redraw,updateTarget,score:()=>score,setScore(value){score=value;drawScore();}};
+  return {targets,coconuts,tree,target,redraw,updateTarget,score:()=>score,setScore(value){score=value;drawScore();}};
 }
 
 
