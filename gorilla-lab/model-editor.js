@@ -389,7 +389,7 @@ function pick(event){
   return hit?previews.children.indexOf(hit.object):-1;
 }
 canvas.addEventListener('pointerdown',event=>{
-  if(event.button===0)pickStart={id:event.pointerId,x:event.clientX,y:event.clientY};
+  if(event.button===0)pickStart=viewMode!=='select'&&gizmo?.axis?null:{id:event.pointerId,x:event.clientX,y:event.clientY};
   if(event.button===2)rightStart={x:event.clientX,y:event.clientY};
 });
 canvas.addEventListener('pointercancel',()=>{pickStart=null;rightStart=null;});
