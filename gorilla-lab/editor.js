@@ -1164,10 +1164,14 @@ $('undo').onclick = undo;
 $('zoom-fit').onclick = fitViews;
 $('snap').onchange = () => showGhost(null);
 $('new-example').onclick = () => loadMap(defaultMap(), 'Arène de départ ouverte.');
-$('blank-map').onclick = () => loadMap({
-  format:'gorilla-lab-map',version:1,name: 'Ma nouvelle map', spawn: { x: 0, y: .025, z: 3, yaw: 0 },
-  pieces: [makePiece({ name: 'Sol', y: -.25, w: 24, d: 24 })],
-}, 'Nouvelle map créée. Sélectionne Bloc, Rampe ou Mur, puis clique où le poser.');
+$('blank-map').onclick = () => {
+  const size=T.MathUtils.clamp(Number($('map-world-size').value)||240,24,2048);
+  loadMap({
+    format:'gorilla-lab-map',version:1,name:'Ma nouvelle map',worldSize:size,
+    spawn:{x:0,y:.025,z:3,yaw:0},
+    pieces:[makePiece({name:'Sol',y:-.25,w:Math.min(size,maxObjectSize),d:Math.min(size,maxObjectSize)})],
+  },'Nouvelle carte : '+size+' × '+size+' m. Tu peux sélectionner et modeler le sol.');
+};
 $('surface').onchange = event => {
   const preset = surfacePresets[event.target.value];
   const piece = current();
