@@ -6,6 +6,7 @@ import {
   createModelMaterial,createModelPartMaterial,disposeModelMaterial,createModelPartGeometry,createModelUnitGeometry,modelHitbox,defaultModelProperties,
   modelLimits,modelShapes,modelStorageKey,modelSurfaces,normalizeModelPack,readModelPack,
 } from './model-pack.js';
+import {createBuiltinModelTemplates} from './model-assets.js';
 import {openTextureStudio} from './texture-studio.js';
 import {openShapeStudio} from './shape-studio.js';
 import {startingSketch} from './custom-shape.js';
@@ -21,6 +22,7 @@ const limits={
   scale:{min:.02,max:4,step:.01,label:'DIMENSIONS / ÉCHELLE'},
 };
 const pack=readModelPack(localStorage);
+const builtinModels=createBuiltinModelTemplates();
 const draftKey='gorilla-foundry-draft-v1';
 let dirty=false,modelId=pack.models[0]?.id??null,partIndex=0;
 try{
@@ -256,6 +258,7 @@ function updateInspector(){
   if($('model-inspector').dataset.tab==='collision')updateHitboxControls();
   if(part){
     for(const key of ['name','shape','color','surface'])$('part-'+key).value=part[key];
+    $('part-shape').disabled=part.shape==='asset';
     for(const key of Object.keys(limits))vectorInputs[key].forEach((input,index)=>{
       if(document.activeElement!==input)input.value=Number(part[key][index].toFixed(3));
     });
@@ -448,9 +451,9 @@ for(const [key,settings] of Object.entries(limits)){
 
 function partMesh(part){
   const source={...part,position:[0,0,0],rotation:[0,0,0],scale:[1,1,1]};
-  const partMaterial=part.texture?createModelPartMaterial(source):material;
+  const partMaterial=part.texture||part.shape==='asset'?createModelPartMaterial(source):material;
   const mesh=new T.Mesh(createModelPartGeometry(source),partMaterial);
-  mesh.userData.ownMaterial=Boolean(part.texture);
+  mesh.userData.ownMaterial=Boolean(part.texture||part.shape==='asset');
   const image=partMaterial?.map?.image;
   if(image?.addEventListener&&!image.complete)image.addEventListener('load',render,{once:true});
   mesh.position.fromArray(part.position);
@@ -652,6 +655,19 @@ function exampleParts(){
 }
 function newModelId(){
   return 'custom-model-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10);
+}
+function importBuiltinAsset(assetId,open=false){
+  const source=builtinModels.find(model=>model.assetId===assetId);
+  if(!source)return status('Asset intégré introuvable.',true);
+  if(pack.models.length>=modelLimits.models)return status('Limite de '+modelLimits.models+' modèles atteinte.',true);
+  remember();
+  const model=structuredClone(source);model.id=newModelId();
+  if(pack.models.some(entry=>entry.name===model.name))model.name=(model.name+' · copie').slice(0,48);
+  pack.models.push(model);modelId=model.id;partIndex=0;
+  markDirty();refreshModel();
+  if(open)setPanel('geometry');
+  status('« '+model.name+' » importé · enregistre pour le retrouver dans les cartes.');
+  return model;
 }
 function addModel(example=false){
   if(pack.models.length>=modelLimits.models)return;
@@ -938,8 +954,10 @@ for(const key of Object.keys(defaultModelProperties)){
 $('avatar').onchange=event=>{
   beforeChange(event.target);pack.avatarId=event.target.value||null;markDirty();
 };
-setOptions($('new-shape'),Object.entries(modelShapes),'box');
+setOptions($('new-shape'),Object.entries(modelShapes).filter(([id])=>id!=='asset'),'box');
 setOptions($('part-shape'),Object.entries(modelShapes),'box');
+setOptions($('game-asset'),builtinModels.map(model=>[model.assetId,model.name]),builtinModels[0]?.assetId);
+$('add-game-asset').onclick=()=>importBuiltinAsset($('game-asset').value);
 setOptions($('part-surface'),Object.entries(modelSurfaces),'plain');
 function editProfile(){
   const part=currentPart();if(!part||part.shape!=='custom')return;
@@ -1073,5 +1091,7 @@ window.addEventListener('keyup',event=>{
   if(event.key==='Alt')attachGizmo();
 });
 window.addEventListener('beforeunload',event=>{if(dirty)event.preventDefault();});
+const requestedAsset=new URLSearchParams(location.search).get('asset');
+if(requestedAsset)importBuiltinAsset(requestedAsset,true);
 refreshModel();
 if(dirty)status('Brouillon récupéré automatiquement');
