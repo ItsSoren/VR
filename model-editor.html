@@ -25,9 +25,16 @@ background:#20272d;white-space:nowrap}
 display:grid;place-items:center;transform:skew(-7deg);font-size:22px;color:var(--accent);line-height:1}
 .brand strong{display:block;font-size:14px;letter-spacing:.095em;line-height:1.1}
 .brand small{display:block;color:var(--accent);font-size:9px;letter-spacing:.24em}
-.top-select{display:flex;align-items:center;gap:6px;min-width:110px;flex:1;max-width:360px}
+.top-select{display:flex;align-items:center;gap:6px;min-width:0;flex:1;max-width:575px}
 .top-select label{font-size:10px;letter-spacing:.09em}
-.top-select select{max-width:280px;height:30px}
+.top-select select{width:132px;max-width:145px;height:32px;flex-shrink:1}
+#model-title{width:min(178px,14vw);flex:1;min-width:88px;height:33px;border-color:#8d7254;
+color:#ffe0b4;font-weight:700;font-size:12px}
+#model-title:focus{border-color:#e1ad6d}
+#new-model{background:linear-gradient(125deg,#9d703c,#c49155);border-color:#f1bd7d;
+color:#fff6e8;min-height:36px;font-weight:800;padding:6px 13px;white-space:nowrap;box-shadow:0 2px 0 #694c2b}
+#new-model:hover{background:#d5a05c}
+.top-select #example,.top-select #duplicate-model{flex-shrink:0;min-height:30px}
 .top-actions{display:flex;align-items:center;gap:5px;margin-left:auto}
 .top-actions button{flex-shrink:0}
 .top-actions .strong{background:#bb8248;border-color:#efae69;color:#fff4e7;font-weight:750}
@@ -69,14 +76,35 @@ padding:4px 10px;background:#202a32;border-top:1px solid var(--line);font-size:1
 .preview-footer{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
 #status{font-size:10px;color:#a9cbd0;max-width:45%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}
 #status[data-error=true]{color:#ffa88e}
-.side{min-width:0;min-height:0;display:grid;grid-template-rows:minmax(160px,34%) minmax(0,1fr);gap:6px}
+.side{min-width:0;min-height:0;display:grid;grid-template-rows:minmax(230px,45%) minmax(0,1fr);gap:6px}
 .side-section{display:flex;flex-direction:column;min-height:0;background:var(--panel);border:1px solid var(--line);border-radius:5px;overflow:hidden}
 .side-head{height:34px;flex:0 0 34px;display:flex;align-items:center;justify-content:space-between;gap:6px;
 padding:6px 10px;background:#2a333b;border-bottom:1px solid var(--line)}
 .side-head h2{font-size:12px;margin:0;font-weight:650;letter-spacing:.045em}
 .side-head small{color:var(--muted);font-size:10px}
 .side-body{min-height:0;overflow:auto;padding:9px 10px;scrollbar-width:thin}
-.outliner .side-body{display:flex;flex-direction:column;gap:7px;overflow:hidden}
+.outliner .side-body{display:flex;flex-direction:column;gap:5px;overflow:hidden}
+.model-collection{display:flex;flex-direction:column;gap:4px;min-height:65px;max-height:43%;border-bottom:1px solid #43535e;padding-bottom:6px}
+.collection-head{display:flex;align-items:center;justify-content:space-between;color:#edb97c;font-size:10px;font-weight:750;letter-spacing:.09em}
+.collection-head small{color:#91a6b1;letter-spacing:0}
+#model-list{display:flex;flex-direction:column;gap:3px;overflow:auto;min-height:30px;scrollbar-width:thin}
+.model-entry-wrap{display:flex;align-items:center;gap:4px;flex-shrink:0}
+.model-entry{flex:1;min-width:0;text-align:left;font-size:11px;padding:4px 7px;background:#24323a;border:1px solid #3e4c58}
+.model-entry[aria-pressed=true]{border-color:#e2ab69;background:#574637;color:#ffdfb0}
+.model-entry small{display:inline;font-size:9px;color:#a8b8c0;margin-left:4px}
+.model-visibility,.part-visibility{width:25px;min-height:27px;flex-shrink:0;padding:3px;font-size:14px;text-align:center}
+.model-visibility[aria-pressed=true],.part-visibility[aria-pressed=false]{color:#f2b36a;border-color:#bb884f}
+.model-visibility:disabled{opacity:.25}
+.part-row{display:flex;gap:3px;align-items:center}
+.part-row .part-entry{flex:1;min-width:0}
+.mask-toolbar{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.mask-toolbar label{display:flex;align-items:center;gap:4px;font-size:10px;flex:1;min-width:0}
+.mask-toolbar select{height:25px;min-height:25px;font-size:10px;padding:2px;flex:1;width:82px}
+.mask-toolbar button{min-height:25px;font-size:10px;padding:2px 5px}
+#collection-help{color:#95adb7;font-size:10px}
+#quick-send-to-map{background:#385648;border:1px solid #6fa783;color:#e2f6e6;white-space:nowrap;padding:4px 9px;font-weight:700}
+#quick-send-to-map:hover{background:#4b6f58}
+#go-cards{color:#a9d9bc;border-color:#5d8a71}
 #part-list{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:3px;scrollbar-width:thin}
 .part-entry{display:flex;align-items:center;justify-content:space-between;min-height:30px;
 gap:8px;width:100%;text-align:left;white-space:normal;padding:5px 8px;border-color:transparent;background:#252e36}
@@ -126,6 +154,7 @@ button.mini{min-height:26px;font-size:11px;padding:3px 6px}
 body.preview-fullscreen .layout{grid-template-columns:60px minmax(0,1fr)}
 body.preview-fullscreen .side{display:none}
 @media(max-width:1150px){.layout{grid-template-columns:54px minmax(0,1fr) 275px}
+.top-select label{display:none}.top-select select{width:115px}#model-title{width:100px}
 .brand{min-width:auto}.brand strong{font-size:11px}.brand small{font-size:8px}
 .top-actions nav a{display:none}.rail-btn{width:46px}
 .top-select{max-width:210px}}
@@ -143,8 +172,10 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
 <header class="topbar">
   <div class="brand"><div class="brand-glyph" aria-hidden="true">⌁</div>
     <div><strong>GORILLA / FOUNDRY</strong><small>ATELIER DE MODÈLES</small></div></div>
-  <div class="top-select"><label for="models">PROJET</label><select id="models" aria-label="Modèle en cours"></select>
-    <button id="new-model" class="mini" title="Nouveau modèle">＋</button>
+  <div class="top-select"><label for="models">MODÈLE</label><select id="models" aria-label="Modèle actif"></select>
+    <input id="model-title" maxlength="48" aria-label="Renommer le modèle" placeholder="Nom du modèle" title="Clique ici pour renommer ton modèle">
+    <button id="new-model" title="Créer un nouveau modèle">＋ Nouveau modèle</button>
+    <button id="duplicate-model" class="mini" title="Dupliquer le modèle actif">⧉</button>
     <button id="example" class="mini" title="Créer un exemple">Ex.</button></div>
   <div class="top-actions">
     <button id="undo-action" class="mini" title="Annuler · Ctrl Z">↶</button>
@@ -156,7 +187,7 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
     </select>
     <button id="export">Exporter</button>
     <button id="import">Importer JSON</button><input id="file" type="file" accept=".json,application/json">
-    <nav aria-label="Navigation"><a href="./editor.html">Cartes ↗</a><a href="./index.html">Jouer ↗</a></nav>
+    <nav aria-label="Navigation"><a id="go-cards" href="./editor.html">Cartes ↗</a><a href="./index.html">Jouer ↗</a></nav>
   </div>
 </header>
 <main class="layout">
@@ -182,7 +213,7 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
   </nav>
   <section class="viewport" aria-label="Espace de modélisation">
     <div class="viewport-head">
-      <strong id="viewport-title">ESPACE DE CONSTRUCTION / 3D</strong>
+      <strong id="viewport-title">ESPACE DE CONSTRUCTION / 3D</strong><a id="quick-send-to-map" href="./editor.html" title="Enregistrer et ouvrir l’atelier des cartes avec ce modèle prêt à poser">↗ Placer sur une carte</a>
       <div class="viewport-controls">
         <label class="ghost-note" for="snap-step">AIMANT</label><select id="snap-step" title="Grille de transformation">
           <option value="0">Libre</option><option value="0.01">1 cm</option><option value="0.05" selected>5 cm</option><option value="0.1">10 cm</option><option value="0.25">25 cm</option></select>
@@ -206,10 +237,23 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
   </section>
   <aside class="side" aria-label="Structure et réglages">
     <section class="side-section outliner">
-      <div class="side-head"><h2>HIÉRARCHIE / PIÈCES</h2><small id="part-count">0 / 64</small></div>
+      <div class="side-head"><h2>PROJET / MODÈLES & PIÈCES</h2><small id="part-count">0 / 64</small></div>
       <div class="side-body">
+        <div class="model-collection">
+          <div class="collection-head"><span>MES MODÈLES</span><small id="model-count">0 / 12</small></div>
+          <div id="model-list" aria-label="Tous les modèles du projet"></div>
+          <span id="collection-help">Clique pour changer de modèle · œil pour voir un autre modèle en référence</span>
+        </div>
         <div class="outline-tools"><select id="new-shape" aria-label="Forme à ajouter"></select><button id="add-part" title="Ajouter la forme sélectionnée">＋ Ajouter</button></div>
-        <div id="part-list" aria-label="Pièces du modèle"></div>
+        <div class="mask-toolbar">
+          <label>Masque <select id="mask-set" aria-label="Vue de travail">
+            <option value="all">Principal</option><option value="A">Vue A</option>
+            <option value="B">Vue B</option><option value="C">Vue C</option>
+          </select></label>
+          <button id="solo-part" title="Masquer toutes les autres pièces">Isoler</button>
+          <button id="show-all-parts" title="Rendre toutes les pièces visibles">Tout voir</button>
+        </div>
+        <div id="part-list" aria-label="Pièces et masques de visibilité"></div>
       </div>
     </section>
     <section class="side-section inspector" id="model-inspector" data-tab="geometry">
@@ -258,7 +302,7 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
             <label>Nom du modèle<input id="model-name" maxlength="48" autocomplete="off"></label>
             <label>Utilisation<select id="model-kind"><option value="structure">Décor fixe / terrain</option>
               <option value="prop">Objet manipulable</option></select></label>
-            <a id="send-to-map" href="./editor.html">Placer dans l’atelier des cartes ↗</a>
+            <a id="send-to-map" href="./editor.html">↗ Placer ce modèle sur une carte</a>
             <label class="check"><input id="in-game" type="checkbox"> Disponible dans le menu Spawn</label>
             <h3>PROPRIÉTÉS DE JEU</h3>
             <label class="check"><input id="grabbable" type="checkbox"> Saisissable</label>
