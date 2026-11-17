@@ -101,7 +101,12 @@ function gridFor(piece) {
         }
         const fade=edgeFade?Math.pow(Math.max(0,Math.min(1,(.5-Math.abs(col/detail-.5))*2,
           (.5-Math.abs(row/detail-.5))*2)),edgeFade*2):1;
-        procedural[row*stride+col]=amplitude*height/total*fade;
+        // Preserve previously saved terrain shapes when users have not enabled new noise controls.
+        const classic=octaves===3&&roughness===.42&&ridge===0&&edgeFade===0;
+        procedural[row*stride+col]=classic
+          ? amplitude*(.62*noise(x,z,seed)+.26*noise(x*2.03,z*2.03,seed+13)
+              +.12*noise(x*4.13,z*4.13,seed+37))
+          : amplitude*height/total*fade;
       }
     }
   }
