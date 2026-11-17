@@ -4,6 +4,7 @@ on:
     branches: [feature/atelier-cartes-ux-r38]
     paths:
       - '.github/workflows/temp-map-editor-r38.yml'
+      - 'scripts/temp-editor-smoke.mjs'
 jobs:
   validation:
     runs-on: ubuntu-latest
