@@ -222,6 +222,7 @@
   #scene-sidebar[data-tab="scene"] #scene-options{display:block}
   #scene-sidebar[data-tab="scene"] #object-section{display:none}
   #scene-sidebar[data-tab="object"] #piece-inspector>details{display:none}
+  #scene-sidebar[data-tab="object"] #piece-inspector>#model-object-controls:not([hidden]){display:block}
   #scene-sidebar[data-tab="terrain"] #piece-inspector>.piece-actions,
   #scene-sidebar[data-tab="terrain"] #piece-inspector>.fields,
   #scene-sidebar[data-tab="terrain"] #surface-controls,
@@ -420,6 +421,17 @@
           <label>Pente X (°)<input id="p-pitch" type="number" step="1"></label>
           <label>Inclinaison Z (°)<input id="p-roll" type="number" step="1"></label>
         </div>
+        <details id="model-object-controls" hidden open>
+          <summary>Comportement en jeu · Objet saisissable</summary>
+          <div class="fields">
+            <label class="compact"><input id="model-grabbable" type="checkbox" checked> Saisissable par le joueur</label>
+            <label class="compact"><input id="model-frozen" type="checkbox"> Figé au départ</label>
+            <label class="compact"><input id="model-collidable" type="checkbox" checked> Collision active</label>
+            <label class="compact"><input id="model-support-held" type="checkbox"> Peut servir d’appui pendant la prise</label>
+          </div>
+          <p style="font-size:11px;color:var(--muted)">Ces réglages sont enregistrés dans le modèle intégré à la carte et appliqués en jeu.</p>
+        </details>
+        <p id="model-structure-note" hidden style="font-size:11px;color:var(--muted)">Structure de décor : tu peux la déplacer, la tourner et la redimensionner ici. Sa géométrie détaillée se modifie dans l’atelier des modèles.</p>
         <details id="terrain-controls" hidden>
           <summary>Relief et végétation</summary>
           <div class="fields">
