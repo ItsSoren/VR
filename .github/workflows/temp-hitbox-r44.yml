@@ -1,0 +1,33 @@
+name: Temporary hitbox workshop validation
+on:
+  push:
+    branches: [feature/foundry-editable-hitboxes-r44]
+    paths:
+      - '.github/workflows/temp-hitbox-r44.yml'
+      - 'scripts/temp-hitbox-browser.mjs'
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-package-lock
+      - run: npm test
+      - run: npm run build
+      - run: npm install --no-save --no-package-lock puppeteer-core
+      - run: node scripts/temp-hitbox-browser.mjs
+      - name: Commit generated workshop bundles
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add editor.html model-editor.html gorilla-editor-r37.js gorilla-model-editor-r26.js game-lab-r37.js index.html
+          if ! git diff --cached --quiet; then
+            git commit -m "Build adjustable model hitboxes in Foundry and Gorilla Lab"
+            git push
+          fi
