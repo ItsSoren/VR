@@ -732,6 +732,10 @@ function rebuildScene() {
   for (const mesh of [...group.children]) {
     group.remove(mesh);
     if(mesh.geometry!==sharedBox)mesh.geometry.dispose();
+    if(mesh.userData.pickProxy){
+      mesh.userData.pickProxy.geometry.dispose();
+      mesh.userData.pickProxy.material.dispose();
+    }
     if(mesh.userData.vegetation)disposeVegetation(mesh.userData.vegetation);
     if(mesh.userData.ownsTexture)mesh.material.map?.dispose();
     disposeModelMaterial(mesh.material);
@@ -744,6 +748,15 @@ function rebuildScene() {
     if(piece.model) {
       const mesh=new T.Mesh(createModelUnitGeometry(piece.model),createModelMaterial(piece.model));
       mesh.castShadow=mesh.receiveShadow=true;
+      // Complex models can contain gaps or thin/back-facing faces. This invisible
+      // unit box makes the whole model's bounds reliably clickable in the editor.
+      const pickProxy=new T.Mesh(new T.BoxGeometry(1,1,1),new T.MeshBasicMaterial({
+        colorWrite:false,depthWrite:false,side:T.DoubleSide
+      }));
+      pickProxy.name='model-selection-volume';
+      mesh.add(pickProxy);
+      mesh.userData.pickProxy=pickProxy;
+      mesh.userData.mapIndex=group.children.length;
       group.add(mesh);
       placeMesh(mesh,piece);
       continue;
@@ -816,7 +829,8 @@ function updatePieceList() {
   // Keep the original map index in each option so filtering never selects a different piece.
   const matches=[];
   map.pieces.forEach((piece,index)=>{
-    if(searchName(piece.name).includes(query))matches.push(new Option(piece.name,index,false,index===selected));
+    const kind=piece.model?(piece.model.kind==='prop'?' · Objet saisissable':' · Structure'):'';
+    if(searchName(piece.name+' '+kind).includes(query))matches.push(new Option(piece.name+kind,index,false,index===selected));
   });
   $('pieces').replaceChildren(...matches);
   $('pieces').value=String(selected);
@@ -832,7 +846,18 @@ function updateInspector() {
   $('piece-inspector').hidden=!piece;
   $('selection-help').hidden=Boolean(piece);
   $('focus-piece').disabled=!piece;
-  $('selection-title').textContent = piece ? piece.name : 'Aucune pièce sélectionnée';
+  $('selection-title').textContent = piece
+    ?piece.name+(piece.model?(piece.model.kind==='prop'?' · Objet saisissable':' · Structure'):'')
+    :'Aucune pièce sélectionnée';
+  const isGrabProp=piece?.model?.kind==='prop';
+  $('model-object-controls').hidden=!isGrabProp;
+  $('model-structure-note').hidden=!piece?.model||piece.model.kind!=='structure';
+  if(isGrabProp){
+    $('model-grabbable').checked=piece.model.properties?.grabbable!==false;
+    $('model-frozen').checked=piece.model.properties?.frozen===true;
+    $('model-collidable').checked=piece.model.properties?.collidable!==false;
+    $('model-support-held').checked=piece.model.properties?.supportWhileHeld===true;
+  }
   for (const key of fields) {
     const input = $('p-' + key);
     input.disabled = !piece;
@@ -920,7 +945,7 @@ function duplicatePiece() {
   const piece = current();
   if (!piece) return;
   const x = T.MathUtils.clamp(piece.x + piece.w + snapStep(), -120, 120);
-  addPiece({ ...piece, name: (piece.name + ' bis').slice(0, 36), x });
+  addPiece({ ...structuredClone(piece), name: (piece.name + ' bis').slice(0, 36), x });
 }
 
 // Applique le raccourci de formulaire pour pivoter de 45° sur Y.
@@ -1058,9 +1083,21 @@ function rayPlane(height) {
 }
 
 // Renvoie le premier point touché sur les pièces ou le relief de fond.
+function pieceRoot(object){
+  let node=object;
+  while(node&&node.parent!==group)node=node.parent;
+  return node?.parent===group?node:null;
+}
 function pointUnderPointer(canvas, event) {
   setEventRay(canvas, event);
-  return raycaster.intersectObjects(map.arenaBase?[...group.children,previewHill]:group.children, false)[0];
+  const objects=map.arenaBase?[...group.children,previewHill]:group.children;
+  const hits=raycaster.intersectObjects(objects,true);
+  for(const hit of hits){
+    if(hit.object===previewHill)return hit;
+    const root=pieceRoot(hit.object);
+    if(root)return {...hit,object:root};
+  }
+  return null;
 }
 
 // Cherche une surface solide sous le futur point d’apparition.
@@ -1148,8 +1185,15 @@ function commitPlacement(canvas, event) {
     sync();
     notice('Point de départ déplacé.');
   } else {
+    const placingModel=tool==='model';
     showGhost(null);
     addPiece(placement);
+    // Place once, then return to selection so the new object can immediately
+    // be moved, rotated, resized, or edited without accidentally duplicating it.
+    if(placingModel){
+      setTool('move');
+      notice(placement.name+' placé · sélectionné. Tu peux maintenant le déplacer ou le modifier.');
+    }
   }
 }
 
@@ -1371,14 +1415,37 @@ $('uv-reset').onclick=()=>{
   remember();Object.assign(piece,{uvScale:1,uvRotation:0,uvOffsetX:0,uvOffsetY:0});
   map=parseMap(map);sync();
 };
+const modelPropertyFields={
+  grabbable:'model-grabbable',frozen:'model-frozen',
+  collidable:'model-collidable',supportWhileHeld:'model-support-held'
+};
+for(const [key,id] of Object.entries(modelPropertyFields)){
+  $(id).addEventListener('change',event=>{
+    const piece=current();
+    if(!piece?.model||piece.model.kind!=='prop')return;
+    remember();
+    piece.model.properties[key]=event.target.checked;
+    if(key==='collidable')piece.solid=event.target.checked;
+    map=parseMap(map);sync();
+    const messages={
+      grabbable:event.target.checked?'Objet saisissable par le joueur.':'Prise en main désactivée.',
+      frozen:event.target.checked?'Objet figé au départ.':'Objet libre au départ.',
+      collidable:event.target.checked?'Collision de l’objet activée.':'Collision de l’objet désactivée.',
+      supportWhileHeld:event.target.checked?'L’objet peut servir d’appui pendant la prise.':'Appui pendant la prise désactivé.'
+    };
+    notice(messages[key]);
+  });
+}
 for (const key of fields) {
   $('p-' + key).addEventListener('change', event => {
     const piece = current();
     if (!piece) return;
     remember();
     const input = event.target;
-    if (key === 'solid') piece[key] = input.checked;
-    else piece[key] = ['name', 'color'].includes(key) ? input.value : Number(input.value);
+    if (key === 'solid') {
+      piece[key] = input.checked;
+      if(piece.model)piece.model.properties.collidable=input.checked;
+    }else piece[key] = ['name', 'color'].includes(key) ? input.value : Number(input.value);
     map = parseMap(map);
     sync();
   });
