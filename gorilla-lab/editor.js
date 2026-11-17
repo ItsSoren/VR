@@ -357,6 +357,7 @@ function assetPiece(assetId,position,sourceModel=null,name=null){
 }
 const defaultMap=()=>{
   const next=arenaMap(previewArena.boxes);
+  next.assetLayer=true;
   forEachStartupObject((type,position)=>{
     const assetId=spawnAssetIds[type];
     if(assetId)next.pieces.push(assetPiece(assetId,position));
