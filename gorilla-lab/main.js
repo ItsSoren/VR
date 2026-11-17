@@ -251,7 +251,7 @@ function releaseAll(){
 }
 function clearObjects(){
   releaseAll();
-  for(const body of objects){scene.remove(body.mesh,body.shadow);if(body.customMaterial)body.mesh.material.dispose();}
+  for(const body of objects){scene.remove(body.mesh,body.shadow);if(body.customMaterial)for(const mat of Array.isArray(body.mesh.material)?body.mesh.material:[body.mesh.material])mat.dispose();}
   objects.length=0;
   remoteActors.clear();
 }
@@ -357,7 +357,8 @@ const lightSlots=Array.from({length:3},()=>{
 let activeLights=lightSlots;
 const lightView=new T.Vector3();
 function addPropLight(mesh){
-  if(!mesh.visible||mesh.material.emissiveIntensity<1||mesh.material.emissive.getHex()===0)return;
+  const mat=Array.isArray(mesh.material)?mesh.material[0]:mesh.material;
+  if(!mesh.visible||!mat||mat.emissiveIntensity<1||mat.emissive.getHex()===0)return;
   const distance=mesh.position.distanceToSquared(lightView);
   if(distance>34**2)return;
   let farthest=activeLights[0];
@@ -374,7 +375,7 @@ function updatePropLights(spectating){
     light.distance=range;
     light.visible=Boolean(mesh);
     light.intensity=mesh?132:0;
-    if(mesh){light.position.copy(mesh.position);light.color.copy(mesh.material.emissive);}
+    if(mesh){light.position.copy(mesh.position);light.color.copy((Array.isArray(mesh.material)?mesh.material[0]:mesh.material).emissive);}
   }
 }
 // Une capture garde les dernières mesures VR pour un téléchargement après la session.
@@ -897,15 +898,17 @@ function customMaterial(body){
   return body.mesh.material;
 }
 function paintStyle(body){
-  const material=customMaterial(body),style=body.materialStyle;
-  material.roughness=[.94,.12,.16,.40][style];
-  material.metalness=[0,.87,.12,0][style];
-  material.transparent=style===2;
-  material.depthWrite=style!==2;
-  material.opacity=style===2?.40:1;
-  material.emissive.copy(material.color);
-  material.emissiveIntensity=style===3?1.65:0;
-  material.needsUpdate=true;
+  const all=customMaterial(body),style=body.materialStyle;
+  for(const material of Array.isArray(all)?all:[all]){
+    material.roughness=[.94,.12,.16,.40][style];
+    material.metalness=[0,.87,.12,0][style];
+    material.transparent=style===2;
+    material.depthWrite=style!==2;
+    material.opacity=style===2?.40:1;
+    material.emissive.copy(material.color);
+    material.emissiveIntensity=style===3?1.65:0;
+    material.needsUpdate=true;
+  }
 }
 function findToolTarget(origin,direction,objectsInView){
   ray.set(origin,direction);ray.far=9;
@@ -937,7 +940,7 @@ function manipulateBody(body,mode,actor,heldAt){
     body.frozen=!body.frozen;body.velocity.set(0,0,0);body.angular.set(0,0,0);
   }else if(mode===3&&!body.protected){
     scene.remove(body.mesh,body.shadow);
-    if(body.customMaterial)body.mesh.material.dispose();
+    if(body.customMaterial)for(const mat of Array.isArray(body.mesh.material)?body.mesh.material:[body.mesh.material])mat.dispose();
     objects.splice(objects.indexOf(body),1);
   }else if(mode===4&&!body.protected){
     toolPosition.copy(body.mesh.position).addScaledVector(up,body.radius*2+.08);
@@ -949,9 +952,11 @@ function manipulateBody(body,mode,actor,heldAt){
       placeObject(duplicate,arena.boxes);
     }
   }else if(mode===5){
-    const material=customMaterial(body);
-    material.color.set(toolColors[body.paint++%toolColors.length]);
-    if(body.materialStyle===3)material.emissive.copy(material.color);
+    const all=customMaterial(body),tint=toolColors[body.paint++%toolColors.length];
+    for(const material of Array.isArray(all)?all:[all]){
+      material.color.set(tint);
+      if(body.materialStyle===3)material.emissive.copy(material.color);
+    }
   }else if(mode===6||mode===7){
     body.materialStyle=body.materialStyle<0?(mode===6?0:3):(body.materialStyle+(mode===6?1:3))%4;
     paintStyle(body);
@@ -1503,7 +1508,9 @@ function updateFps(dt,inVR){
 arena.bakeLightmap();
 const photoContrast={value:1},photoSaturation={value:1},photoWarmth={value:0},shaderMode={value:0};
 const graded=new WeakSet();
-function grade(material){ if(!material||graded.has(material))return;
+function grade(material){
+  if(Array.isArray(material)){for(const mat of material)grade(mat);return;}
+  if(!material||graded.has(material))return;
   graded.add(material);
   const previous=material.onBeforeCompile;
   const cacheKey=material.customProgramCacheKey.call(material);
