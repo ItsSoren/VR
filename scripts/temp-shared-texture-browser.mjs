@@ -62,8 +62,13 @@ try{
   console.log('model texture bytes',texture.length);
 
   await page.select('#export-format','glb');await page.click('#export');
-  await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('Export GLB'),{timeout:18000});
-  await page.waitForFunction(()=>document.querySelector('#status').dataset.error!=='true');
+  await page.waitForFunction(()=>{
+    const s=document.querySelector('#status');
+    return s.textContent.includes('Export GLB')||s.dataset.error==='true';
+  },{timeout:30000});
+  const message=await page.$eval('#status',s=>({message:s.textContent,error:s.dataset.error}));
+  if(message.error==='true')throw Error('GLB export failed: '+message.message);
+  console.log('Export status:',message.message);
   await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('GLB'));
   await new Promise(resolve=>setTimeout(resolve,450));
   const glbFiles=(await readdir(downloadDir)).filter(file=>file.endsWith('.glb'));
