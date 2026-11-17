@@ -13,6 +13,7 @@ import {createBlasterSystem,bindBlasterTrigger} from './blaster-system.js';
 import {createSettings,toolModes,shaderNames,visualPresets} from './game-settings.js';
 import { avatarPalettes,createAvatarStyle } from './avatar-style.js';
 import {createArenaObjectSpecs,forEachStartupObject} from './arena-objects.js';
+import {spawnAssetIds} from './model-assets.js';
 import { makeAnimatedProps,clonePropMaterial } from './animated-props.js';
 import {readModelPack,createModelPropDefinitions,createModelAvatarHead,createModelUnitGeometry,createModelMaterial,modelCollisionGeometry,normalizeModelPack,modelLimits,modelStorageKey} from './model-pack.js';
 import {mapCode,publicRooms} from './cloud-link.js';
@@ -202,6 +203,7 @@ function makePropMesh(type,ownMaterial=false){
   if(type===CAMERA_TYPE)cameraDetails(mesh);
   return mesh;
 }
+let maps=null;
 const objects=[],noBodies=[];
 const desktopActor={held:null},remoteActors=new Map();
 let remoteHeld=0;
@@ -256,7 +258,11 @@ function clearObjects(){
   remoteActors.clear();
 }
 function spawnSamples(){
-  forEachStartupObject((type,position)=>spawnObject(type,position));
+  if(maps?.assetLayer)return;
+  const represented=new Set(maps?.placedModels?.().map(piece=>piece.model.assetId).filter(Boolean)??[]);
+  forEachStartupObject((type,position)=>{
+    if(!represented.has(spawnAssetIds[type]))spawnObject(type,position);
+  });
 }
 spawnSamples();
 function release(hand,launch=true) {
@@ -653,6 +659,7 @@ function spawnPlacedModels(){
       objectSpecs.push({
         id:piece.model.id,name:piece.model.name,geo,material:createModelMaterial(piece.model),
         shape,lowShape:shape,
+        assetId:piece.model.assetId??null,
         properties:{...piece.model.properties,grabbable:piece.model.properties.grabbable!==false},
         mass:T.MathUtils.clamp(piece.w*piece.h*piece.d*9,.18,12)
       });
@@ -666,8 +673,9 @@ function spawnPlacedModels(){
     }
   }
 }
-const maps=connectMaps({scene,arena,boot,onReset:angle=>{
+maps=connectMaps({scene,arena,boot,onReset:angle=>{
   clearObjects();resetPlayer();yaw=T.MathUtils.degToRad(angle);
+  fixtures.coconuts.forEach(coco=>{coco.visible=!maps.assetLayer;});
   if(maps.builtIn)spawnSamples();
   spawnPlacedModels();
 },onVisual:applyVisual,
@@ -799,7 +807,17 @@ function requestObjectChange(typeId,local){
 }
 function clearSpawnBank(){requestObjectChange(0,clearObjects);}
 function requestResetObjects(){requestObjectChange(1,resetObjects);}
-function resetCoconuts(){for(const coco of fixtures.coconuts)coco.visible=true;}
+function resetCoconuts(){
+  if(maps?.assetLayer){
+    for(const body of objects)if(body.spec.assetId==='spawn-coconut'){
+      if(body.owner){body.owner.held=null;body.owner=null;}
+      body.toolHold=false;body.mesh.position.copy(body.start);body.mesh.quaternion.identity();
+      body.velocity.set(0,0,0);body.angular.set(0,0,0);body.frozen=true;
+    }
+    return;
+  }
+  for(const coco of fixtures.coconuts)coco.visible=true;
+}
 function requestSpawn(index,origin=null){
   settings.objects=true;
   if(spectator.role==='pc'){showGameHint('Commence par rejoindre le salon en joueur.');return;}
