@@ -52,6 +52,8 @@
         <div id="model-details" hidden>
           <hr class="rule">
           <label>Nom du modèle<input id="model-name" maxlength="48" autocomplete="off"></label>
+          <label>Utilisation dans une carte<select id="model-kind"><option value="structure">Décor fixe / forme complexe du terrain</option><option value="prop">Objet physique manipulable</option></select></label>
+          <a id="send-to-map" href="./editor.html">Placer dans l’atelier des cartes</a>
           <label class="check"><input id="in-game" type="checkbox"> Afficher dans le menu Spawn</label>
           <button id="delete-model" class="secondary">Supprimer le modèle</button>
           <hr class="rule">
@@ -75,7 +77,7 @@
           <div class="preview-bar"><span id="preview-tag" class="preview-tag">Modèle 3D</span><button id="frame">Cadrer</button></div>
           <p id="preview-empty" class="empty">Crée un modèle et ajoute une pièce pour commencer.</p>
         </div>
-        <p class="preview-footer">Glisse pour tourner · Molette ou pincement pour zoomer · Clique sur une pièce pour la sélectionner</p>
+        <p class="preview-footer">Glisse pour tourner · Molette ou pincement pour zoomer · Clique sur une pièce pour la sélectionner · Assemble jusqu’à 64 formes pour créer un décor ou un objet</p>
       </section>
       <section class="panel inspector" aria-labelledby="part-heading">
         <h2 id="part-heading">Pièce sélectionnée</h2>
