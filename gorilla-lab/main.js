@@ -650,7 +650,7 @@ function spawnPlacedModels(){
       collisionGeo.dispose();
       type=objectSpecs.length;
       objectSpecs.push({
-        id:piece.model.id,name:piece.model.name,geo,material:createModelMaterial(),
+        id:piece.model.id,name:piece.model.name,geo,material:createModelMaterial(piece.model),
         shape,lowShape:shape,
         properties:{...piece.model.properties,grabbable:piece.model.properties.grabbable!==false},
         mass:T.MathUtils.clamp(piece.w*piece.h*piece.d*9,.18,12)
