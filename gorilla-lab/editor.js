@@ -1771,7 +1771,15 @@ try {
   if (draft) {
     const saved=parseMap(draft);
     // Previously just opening the editor automatically saved the demo as a draft.
-    if(JSON.stringify(saved)!==JSON.stringify(exampleMap()))map=saved;
+    if(JSON.stringify(saved)!==JSON.stringify(exampleMap())){
+      if(saved.arenaBase&&!saved.assetLayer&&!saved.pieces.some(piece=>piece.model?.assetId)){
+        const defaults=defaultMap();
+        saved.pieces.push(...defaults.pieces.filter(piece=>piece.model?.assetId));
+        saved.assetLayer=true;
+        map=parseMap(saved);
+        notice('Carte mise à niveau : objets du Spawn et éléments de test désormais éditables.');
+      }else map=saved;
+    }
   }
 } catch {}
 setTool('move');
