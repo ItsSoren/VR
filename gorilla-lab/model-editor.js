@@ -485,7 +485,7 @@ function toggleReference(id){
   if(id===modelId||!pack.models.some(entry=>entry.id===id))return;
   if(references.has(id))references.delete(id);
   else references.add(id);
-  storeWorkspace();updateModelLists();updateReferencePreview();frameModel();
+  storeWorkspace();updateModelLists();updatePreview();frameModel();
 }
 function changeMask(slot){
   if(!modelId)return;
