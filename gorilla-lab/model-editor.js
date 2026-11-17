@@ -31,6 +31,7 @@ try{
   }
 }catch{}
 let renderer=null,orbit=null,gizmo=null,viewMode='select';
+let transformMoved=false;
 let pendingDraft=0,gestureStart=null,fieldHistory=null;
 const undoStack=[],redoStack=[],maxUndo=48;
 const previews=new T.Group();
@@ -214,9 +215,19 @@ try{
   scene.add(helper);
   gizmo.addEventListener('dragging-changed',event=>{
     orbit.enabled=!event.value;
-    if(!event.value)markDirty();
+    if(!event.value&&transformMoved){
+      transformMoved=false;
+      markDirty();
+      // Recreate final geometry only once the mouse has released the axis.
+      // Detaching/rebuilding during a drag cancels the active transform.
+      updatePreview();
+    }
   });
-  gizmo.addEventListener('mouseDown',()=>remember());
+  gizmo.addEventListener('mouseDown',()=>{
+    remember();
+    transformMoved=false;
+    pickStart=null; // A gizmo click must not reselect another mesh on pointerup.
+  });
   gizmo.addEventListener('objectChange',()=>{
     const mesh=gizmo.object,part=currentPart();
     if(!mesh||!part)return;
@@ -226,14 +237,12 @@ try{
     part.scale=mesh.scale.toArray().map(v=>clamp(Math.abs(v),.02,4));
     mesh.position.fromArray(part.position);
     mesh.scale.fromArray(part.scale);
-    showSelection();
+    transformMoved=true;
+    updateSelectionOutline(); // Never detach or reattach the gizmo mid-gesture.
     updateInspector();
     render();
   });
-  gizmo.addEventListener('mouseUp',()=>{
-    const part=currentPart();
-    if(part){markDirty();updatePreview();}
-  });
+
   new ResizeObserver(()=>{
     const width=Math.max(1,canvas.clientWidth),height=Math.max(1,canvas.clientHeight);
     camera.aspect=width/height;camera.updateProjectionMatrix();
@@ -288,11 +297,17 @@ function partMesh(part){
 }
 function attachGizmo(){
   if(!gizmo)return;
-  gizmo.detach();
-  if(viewMode!=='select'&&previews.children[partIndex]){
+  const mesh=viewMode==='select'?null:previews.children[partIndex]??null;
+  // Keep the same attachment while dragging. Re-attaching resets the
+  // TransformControls axis and quietly aborts rotate/scale/translate.
+  if(gizmo.object!==mesh){
+    if(gizmo.dragging)return;
+    if(mesh)gizmo.attach(mesh);
+    else gizmo.detach();
+  }
+  if(mesh){
     gizmo.setMode(viewMode);
     gizmo.setSpace(viewMode==='translate'?'world':'local');
-    gizmo.attach(previews.children[partIndex]);
   }
   const snap=Number($('snap-step').value);
   gizmo.setTranslationSnap(snap||null);
@@ -300,11 +315,15 @@ function attachGizmo(){
   gizmo.setScaleSnap(snap||null);
   render();
 }
-function showSelection(){
+function updateSelectionOutline(){
   const mesh=previews.children[partIndex];
   selection.visible=!!mesh;
   if(mesh)selection.box.setFromObject(mesh);
-  attachGizmo();render();
+  render();
+}
+function showSelection(){
+  updateSelectionOutline();
+  attachGizmo();
 }
 function frameModel(onlySelected=false){
   if(!orbit)return;
