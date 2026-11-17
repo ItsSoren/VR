@@ -44,6 +44,12 @@ try{
   const enlarged=await page.evaluate(()=>JSON.parse(localStorage.getItem('gorilla-lab-editor-draft')));
   assert.equal(enlarged.worldSize,640);
   assert.equal(enlarged.pieces[0].w,512);
+  await page.select('#shape-preset','sphere');
+  await page.click('[data-tool="preset"]');
+  await page.click('#plan',{offset:{x:180,y:240}});
+  const withSphere=await page.evaluate(()=>JSON.parse(localStorage.getItem('gorilla-lab-editor-draft')));
+  assert.ok(withSphere.pieces.some(p=>p.primitive==='sphere'),'sphere should be placed directly from quick forms');
+  await page.select('#pieces','0');
   await page.$eval('#p-uvScale',n=>{n.value='2';n.dispatchEvent(new Event('change',{bubbles:true}));});
   assert.equal(await page.$eval('#p-uvScale',n=>n.value),'2');
   await page.click('#new-example');
