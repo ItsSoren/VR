@@ -1,0 +1,33 @@
+name: Temporary Foundry model handoff validation
+on:
+  push:
+    branches: [feature/foundry-model-library-workflow-r43]
+    paths:
+      - '.github/workflows/temp-model-workflow.yml'
+      - 'scripts/temp-model-workflow-browser.mjs'
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-package-lock
+      - run: npm test
+      - run: npm run build
+      - run: npm install --no-save --no-package-lock puppeteer-core
+      - run: node scripts/temp-model-workflow-browser.mjs
+      - name: Commit rebuilt published workshop bundles
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add editor.html gorilla-editor-r37.js model-editor.html gorilla-model-editor-r26.js game-lab-r37.js
+          if ! git diff --cached --quiet; then
+            git commit -m "Build Foundry model library and direct map placement"
+            git push
+          fi
