@@ -41,6 +41,7 @@ page.on('pageerror',err=>errors.push(err.stack||err.message));
 page.on('console',message=>{if(message.type()==='error')errors.push(message.text());});
 await page.setViewport({width:1440,height:900});
 async function pickRing(mode,preferred='Z'){
+ await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
  const data=await page.evaluate(({mode,preferred})=>{
    const probe=window.__gizmoProbe,g=probe?.gizmo,canvas=probe?.canvas;
    if(!g?.object)throw Error('no transform target for '+mode);
@@ -51,7 +52,7 @@ async function pickRing(mode,preferred='Z'){
    const cy=rect.top+(1-origin.y)*rect.height/2;
    const candidates=[];
    const counts={};
-   for(let radius=24;radius<=170;radius+=5){
+   for(let radius=16;radius<=340;radius+=6){
      for(let k=0;k<72;k++){
        const theta=k*Math.PI/36,x=cx+Math.cos(theta)*radius,y=cy+Math.sin(theta)*radius;
        if(x<rect.left+2||x>rect.right-2||y<rect.top+2||y>rect.bottom-2)continue;
