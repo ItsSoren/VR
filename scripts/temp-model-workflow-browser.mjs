@@ -79,7 +79,9 @@ try{
 
  // Show the other model as a separate, noneditable ghost/reference.
  await page.click('#model-list .model-entry-wrap:first-child .model-visibility');
- assert.ok((await page.$eval('#preview-tag',el=>el.textContent)).includes('RÉF.'));
+ const previewLabel=await page.$eval('#preview-tag',el=>el.textContent);
+ console.log('MODEL_REFERENCE_PREVIEW',previewLabel);
+ assert.ok(previewLabel.includes('RÉF.'),'reference visible in model viewport');
  await page.click('#model-list .model-entry-wrap:first-child .model-entry');
  assert.equal(await page.$eval('#model-title',el=>el.value),'Ma plateforme personnalisée');
  assert.equal(await page.$eval('#models',el=>el.value),oldId);
