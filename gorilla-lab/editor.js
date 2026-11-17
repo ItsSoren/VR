@@ -765,8 +765,8 @@ function updateInspector() {
   $('delete').disabled = !piece || map.pieces.length === 1;
   $('texture-clear').disabled = !piece?.texture;
   $('texture-paint').disabled = !piece||Boolean(piece.model);
-  $('terrain-grassTexture-paint').disabled = !terrain;
   const terrain=piece?.terrain;
+  $('terrain-grassTexture-paint').disabled = !terrain;
   for(const key of uvFields){const input=$('p-'+key);input.disabled=!piece||Boolean(piece?.model);input.value=piece?.[key]??(key==='uvScale'?1:0);}
   $('uv-reset').disabled=!piece||Boolean(piece?.model);
   $('terrain-controls').hidden=!terrain;
