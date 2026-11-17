@@ -8,6 +8,7 @@ import {readModelPack,createModelUnitGeometry,createModelMaterial,modelDimension
 import {normalizeTerrain,resizeTerrain,sculptTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from './terrain-edit.js';
 import {texturePresets,seamlessTexture} from './seamless-texture.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import {resizedCenter} from './editor-scale.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   parseMap, arenaMap, exampleMap, makePiece, mapMaterials, materialColors, surfacePresets,
@@ -575,15 +576,11 @@ function syncScaleAnchor(){
   if(tool!=='scale')return;
   const piece=current(),original=beforeTransform?.map.pieces[selected],mesh=gizmo.object;
   if(!piece||!original||!mesh)return;
-  const delta=new T.Vector3((piece.w-original.w)/2,
-    piece.terrain?0:(piece.h-original.h)/2,(piece.d-original.d)/2);
-  if(ctrlScaleHeld)delta.set(0,0,0);
-  else delta.applyEuler(new T.Euler(T.MathUtils.degToRad(original.pitch),
-    T.MathUtils.degToRad(original.yaw),T.MathUtils.degToRad(original.roll??0),'YXZ'));
+  const next=resizedCenter(original,piece,ctrlScaleHeld);
   const limit=(map.worldSize??240)/2;
-  piece.x=T.MathUtils.clamp(original.x+delta.x,-limit,limit);
-  piece.y=T.MathUtils.clamp(original.y+delta.y,-256,256);
-  piece.z=T.MathUtils.clamp(original.z+delta.z,-limit,limit);
+  piece.x=T.MathUtils.clamp(next.x,-limit,limit);
+  piece.y=T.MathUtils.clamp(next.y,-256,256);
+  piece.z=T.MathUtils.clamp(next.z,-limit,limit);
   mesh.position.set(piece.x,piece.y,piece.z);
   selectionBox?.update();
   for(const key of ['x','y','z'])$('p-'+key).value=piece[key].toFixed(2);
@@ -1548,3 +1545,4 @@ sync();
 resizeRenderer();
 resizePlan();
 fitViews();
+applyLayout();
