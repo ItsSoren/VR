@@ -30,7 +30,10 @@ try{
  await page.waitForSelector('.forge-sketch-backdrop',{visible:true});
  assert.equal(await page.$eval('[data-field=mode]',el=>el.value),'extrude');
  await page.select('[data-field=preset]','angle');
- await page.waitForFunction(()=>!document.querySelector('[data-error]').textContent,{timeout:8000});
+ await new Promise(resolve=>setTimeout(resolve,350));
+ const shapeError=await page.$eval('[data-error]',el=>el.textContent);
+ console.log('SKETCH_VALIDATION',JSON.stringify(shapeError));
+ assert.equal(shapeError,'','angle preset should be a valid contour');
  const canvas=await page.$eval('#sketch-2d',el=>{const r=el.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height};});
  await page.mouse.move(canvas.x+canvas.w*.36,canvas.y+canvas.h*.68);
  await page.mouse.down();
