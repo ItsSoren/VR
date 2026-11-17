@@ -883,6 +883,11 @@ function updateInspector() {
   const isGrabProp=piece?.model?.kind==='prop';
   $('model-object-controls').hidden=!isGrabProp;
   $('model-structure-note').hidden=!piece?.model||piece.model.kind!=='structure';
+  const assetEditLink=$('model-asset-edit-link');
+  if(assetEditLink){
+    assetEditLink.hidden=!piece?.model;
+    assetEditLink.href='./model-editor.html'+(piece?.model?(piece.model.assetId?'?asset='+encodeURIComponent(piece.model.assetId):'?model='+encodeURIComponent(piece.model.id)):'');
+  }
   if(isGrabProp){
     $('model-grabbable').checked=piece.model.properties?.grabbable!==false;
     $('model-frozen').checked=piece.model.properties?.frozen===true;
