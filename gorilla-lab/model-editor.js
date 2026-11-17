@@ -3,7 +3,7 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {TransformControls} from 'three/addons/controls/TransformControls.js';
 import {GLTFExporter} from 'three/addons/exporters/GLTFExporter.js';
 import {
-  createModelMaterial,createModelPartMaterial,disposeModelMaterial,createModelPartGeometry,defaultModelProperties,
+  createModelMaterial,createModelPartMaterial,disposeModelMaterial,createModelPartGeometry,createModelUnitGeometry,defaultModelProperties,
   modelLimits,modelShapes,modelStorageKey,modelSurfaces,normalizeModelPack,readModelPack,
 } from './model-pack.js';
 import {openTextureStudio} from './texture-studio.js';
@@ -37,6 +37,7 @@ let transformMoved=false;
 let pendingDraft=0,gestureStart=null,fieldHistory=null;
 const undoStack=[],redoStack=[],maxUndo=48;
 const previews=new T.Group();
+const referencePreviews=new T.Group();
 const scene=new T.Scene();
 scene.background=new T.Color('#152229');
 const camera=new T.PerspectiveCamera(45,1,.005,110);
@@ -45,7 +46,7 @@ guide.position.y=-.002;
 const selection=new T.Box3Helper(new T.Box3(),'#eeb578');
 selection.visible=false;
 const material=createModelMaterial();
-scene.add(previews,guide,selection,new T.HemisphereLight('#ecf7ff','#4c5960',2.4));
+scene.add(previews,referencePreviews,guide,selection,new T.HemisphereLight('#ecf7ff','#4c5960',2.4));
 const sun=new T.DirectionalLight('#ffe5c2',2.05);
 sun.position.set(-2.5,4,-3);
 scene.add(sun);
@@ -55,6 +56,37 @@ camera.lookAt(0,0,0);
 const clamp=T.MathUtils.clamp;
 const currentModel=()=>pack.models.find(model=>model.id===modelId);
 const currentPart=()=>currentModel()?.parts[partIndex];
+// Display masks are editor-only views, never deleted from the model export.
+const workspaceKey='gorilla-foundry-visibility-v1';
+let workspace={active:{},masks:{},references:[]};
+try{
+  const stored=JSON.parse(localStorage.getItem(workspaceKey)||'null');
+  if(stored&&typeof stored==='object'&&stored.masks&&stored.active){
+    workspace={active:stored.active,masks:stored.masks,
+      references:Array.isArray(stored.references)?stored.references:[],
+      lastModel:typeof stored.lastModel==='string'?stored.lastModel:null};
+  }
+}catch{}
+if(pack.models.some(model=>model.id===workspace.lastModel))modelId=workspace.lastModel;
+const references=new Set(workspace.references);
+function storeWorkspace(){
+  try{workspace.references=[...references];localStorage.setItem(workspaceKey,JSON.stringify(workspace));}catch{}
+}
+function activeMask(){return workspace.active[modelId]||'all';}
+function hiddenParts(){
+  const indices=workspace.masks[modelId]?.[activeMask()]||[];
+  return new Set(Array.isArray(indices)?indices.filter(x=>Number.isInteger(x)&&x>=0):[]);
+}
+function setHiddenParts(indices){
+  if(!modelId)return;
+  if(!workspace.masks[modelId])workspace.masks[modelId]={};
+  workspace.masks[modelId][activeMask()]=[...indices].sort((a,b)=>a-b);
+  storeWorkspace();updateParts();updatePreview();
+}
+function resetModelMasks(){
+  if(modelId)delete workspace.masks[modelId];
+  storeWorkspace();
+}
 const snapshot=()=>({data:structuredClone(pack),modelId,partIndex});
 function status(message,error=false){
   $('status').textContent=message;
@@ -131,18 +163,49 @@ function setOptions(select,entries,value){
   select.value=value??'';
 }
 function updateModelLists(){
-  const list=pack.models.map(model=>[model.id,model.name]);
+  const list=pack.models.map(model=>[model.id,model.name||'Sans nom']);
   setOptions($('models'),list.length?list:[['','Aucun modèle']],modelId);
   $('models').disabled=!list.length;
+  const model=currentModel();
+  $('model-title').disabled=!model;
+  if(document.activeElement!==$('model-title'))$('model-title').value=model?.name??'';
+  $('duplicate-model').disabled=!model||pack.models.length>=modelLimits.models;
+  $('model-count').textContent=pack.models.length+' / '+modelLimits.models;
   setOptions($('avatar'),[['','Singe d’origine'],...list.filter(([id])=>pack.models.find(m=>m.id===id)?.parts.length)],pack.avatarId);
+  const container=$('model-list'),scroll=container.scrollTop;
+  const rows=pack.models.map(entry=>{
+    const row=document.createElement('div');row.className='model-entry-wrap';
+    const button=document.createElement('button');button.type='button';button.className='model-entry';
+    button.setAttribute('aria-pressed',String(entry.id===modelId));
+    button.title='Éditer '+entry.name;
+    button.textContent=entry.name||'Sans nom';
+    const count=document.createElement('small');count.textContent=' · '+entry.parts.length+' p.';
+    button.append(count);
+    button.onclick=()=>switchModel(entry.id);
+    const eye=document.createElement('button');eye.type='button';eye.className='model-visibility';
+    eye.disabled=entry.id===modelId||!entry.parts.length;
+    eye.setAttribute('aria-pressed',String(references.has(entry.id)));
+    eye.textContent=entry.id===modelId?'●':references.has(entry.id)?'◉':'◎';
+    eye.title=entry.id===modelId?'Modèle actif':'Afficher/masquer comme référence 3D sans modifier ce modèle';
+    eye.setAttribute('aria-label',eye.title+' : '+entry.name);
+    eye.onclick=()=>toggleReference(entry.id);
+    row.append(button,eye);return row;
+  });
+  container.replaceChildren(...rows);
+  container.scrollTop=scroll;
 }
 function updateParts(){
   const parts=currentModel()?.parts??[];
   $('part-count').textContent=parts.length+' / '+modelLimits.parts;
   $('add-part').disabled=parts.length>=modelLimits.parts||!currentModel();
   $('duplicate-part').disabled=parts.length>=modelLimits.parts||!currentPart();
+  const hidden=hiddenParts();
+  $('mask-set').value=activeMask();
+  $('solo-part').disabled=!parts.length||!currentPart();
+  $('show-all-parts').disabled=!hidden.size;
   const currentScroll=$('part-list').scrollTop;
   $('part-list').replaceChildren(...parts.map((part,index)=>{
+    const row=document.createElement('div');row.className='part-row';
     const button=document.createElement('button');
     button.type='button';button.className='part-entry';
     button.setAttribute('aria-pressed',String(index===partIndex));
@@ -152,8 +215,18 @@ function updateParts(){
     const color=document.createElement('span');
     color.className='swatch';color.style.setProperty('--swatch',part.color);
     button.append(title,color);
+    if(hidden.has(index))button.style.opacity='.48';
     button.onclick=()=>selectPart(index);
-    return button;
+    const eye=document.createElement('button');eye.type='button';eye.className='part-visibility';
+    eye.textContent=hidden.has(index)?'◌':'◉';
+    eye.setAttribute('aria-pressed',String(!hidden.has(index)));
+    eye.title=hidden.has(index)?'Afficher cette pièce dans la vue':'Masquer cette pièce dans la vue';
+    eye.setAttribute('aria-label',eye.title+' : '+part.name);
+    eye.onclick=()=>{
+      const next=hiddenParts();if(next.has(index))next.delete(index);else next.add(index);
+      setHiddenParts(next);
+    };
+    row.append(button,eye);return row;
   }));
   $('part-list').scrollTop=currentScroll;
 }
@@ -163,10 +236,11 @@ function updateInspector(){
   $('part-inspector').hidden=!part;
   $('part-empty').hidden=!!part||$('model-inspector').dataset.tab==='settings';
   if(model){
-    $('model-name').value=model.name;
+    if(document.activeElement!==$('model-name'))$('model-name').value=model.name;
     $('model-kind').value=model.kind||'prop';
     $('in-game').checked=model.inGame;
-    $('send-to-map').href='./editor.html?model='+encodeURIComponent(model.id);
+    const destination='./editor.html?model='+encodeURIComponent(model.id);
+    for(const id of ['send-to-map','quick-send-to-map','go-cards'])$(id).href=destination;
     for(const key of Object.keys(defaultModelProperties))$(key).checked=!!model.properties[key];
   }
   if(part){
@@ -192,6 +266,8 @@ function updateInspector(){
   $('viewport-title').textContent=model
     ?'ATELIER / '+model.name.toUpperCase()
     :'ESPACE DE CONSTRUCTION / 3D';
+  $('quick-send-to-map').setAttribute('aria-disabled',String(!model?.parts.length));
+  $('send-to-map').setAttribute('aria-disabled',String(!model?.parts.length));
 }
 function setPanel(tab){
   $('model-inspector').dataset.tab=tab;
@@ -301,7 +377,8 @@ function partMesh(part){
 }
 function attachGizmo(){
   if(!gizmo)return;
-  const mesh=viewMode==='select'?null:previews.children[partIndex]??null;
+  const selectedMesh=previews.children[partIndex];
+  const mesh=viewMode==='select'||!selectedMesh?.visible?null:selectedMesh;
   // Keep the same attachment while dragging. Re-attaching resets the
   // TransformControls axis and quietly aborts rotate/scale/translate.
   if(gizmo.object!==mesh){
@@ -321,7 +398,7 @@ function attachGizmo(){
 }
 function updateSelectionOutline(){
   const mesh=previews.children[partIndex];
-  selection.visible=!!mesh;
+  selection.visible=!!mesh?.visible;
   if(mesh)selection.box.setFromObject(mesh);
   render();
 }
@@ -335,6 +412,8 @@ function frameModel(onlySelected=false){
   const box=onlySelected&&modelPart
     ?new T.Box3().setFromObject(modelPart)
     :new T.Box3().setFromObject(previews);
+  if(!onlySelected&&referencePreviews.children.length)
+    box.union(new T.Box3().setFromObject(referencePreviews));
   const center=new T.Vector3(),size=new T.Vector3();
   if(!box.isEmpty()){box.getCenter(center);box.getSize(size);}
   const halfH=T.MathUtils.degToRad(camera.fov/2);
@@ -345,24 +424,49 @@ function frameModel(onlySelected=false){
   camera.position.copy(center).addScaledVector(direction,distance);
   orbit.update();render();
 }
+function updateReferencePreview(){
+  for(const mesh of [...referencePreviews.children]){
+    referencePreviews.remove(mesh);mesh.geometry.dispose();mesh.material.dispose();
+  }
+  if(!renderer)return;
+  const models=pack.models.filter(entry=>references.has(entry.id)&&entry.id!==modelId&&entry.parts.length);
+  models.forEach((entry,index)=>{
+    const geometry=createModelUnitGeometry(entry);
+    const material=new T.MeshBasicMaterial({color:'#8bd1dc',side:T.DoubleSide,
+      transparent:true,opacity:.25,depthWrite:false});
+    const ghost=new T.Mesh(geometry,material);
+    ghost.name='Référence : '+entry.name;
+    const angle=(index/models.length)*Math.PI*2-Math.PI/2;
+    const radius=2.2+Math.floor(index/5)*1.6;
+    ghost.position.set(Math.cos(angle)*radius,0,Math.sin(angle)*radius);
+    ghost.renderOrder=3;
+    referencePreviews.add(ghost);
+  });
+}
 function updatePreview(frame=false){
   gizmo?.detach();
   for(const mesh of [...previews.children]){
     previews.remove(mesh);mesh.geometry.dispose();
     if(mesh.userData.ownMaterial)disposeModelMaterial(mesh.material);
   }
-  const parts=currentModel()?.parts??[];
-  if(renderer)for(const part of parts)previews.add(partMesh(part));
+  const parts=currentModel()?.parts??[],hidden=hiddenParts();
+  if(renderer)parts.forEach((part,index)=>{
+    const mesh=partMesh(part);mesh.visible=!hidden.has(index);previews.add(mesh);
+  });
+  updateReferencePreview();
   $('preview-empty').hidden=Boolean(parts.length&&renderer);
   $('preview-empty').textContent=!renderer?'Prévisualisation 3D indisponible : les valeurs restent modifiables.'
     :currentModel()?'Ajoute une forme avec la barre à gauche pour commencer.'
-    :'Crée un modèle avec ＋ puis assemble tes pièces.';
-  $('preview-tag').textContent=parts.length+' PIÈCE'+(parts.length>1?'S':'')+' / '+(currentModel()?.kind==='structure'?'DÉCOR':'OBJET');
+    :'Crée un modèle avec + Nouveau modèle puis assemble tes pièces.';
+  $('preview-tag').textContent=parts.length+' PIÈCE'+(parts.length>1?'S':'')+
+    ' / '+(currentModel()?.kind==='structure'?'DÉCOR':'OBJET')+
+    (referencePreviews.children.length?' · '+referencePreviews.children.length+' RÉF.':'');
   showSelection();
-  if(frame&&parts.length)frameModel();
+  if(frame&&(parts.length||referencePreviews.children.length))frameModel();
   else render();
 }
 function refreshModel(){
+  workspace.lastModel=modelId;storeWorkspace();
   updateModelLists();
   $('new-model').disabled=$('example').disabled=pack.models.length>=modelLimits.models;
   updateParts();updateInspector();updatePreview(true);updateHistoryButtons();
@@ -370,6 +474,23 @@ function refreshModel(){
 function selectPart(index){
   if(!currentModel()?.parts[index])return;
   partIndex=index;updateParts();updateInspector();showSelection();
+}
+function switchModel(id){
+  if(!pack.models.some(entry=>entry.id===id)||id===modelId)return;
+  modelId=id;partIndex=0;
+  refreshModel();
+  status('Modèle actif : '+currentModel().name);
+}
+function toggleReference(id){
+  if(id===modelId||!pack.models.some(entry=>entry.id===id))return;
+  if(references.has(id))references.delete(id);
+  else references.add(id);
+  storeWorkspace();updateModelLists();updatePreview();frameModel();
+}
+function changeMask(slot){
+  if(!modelId)return;
+  workspace.active[modelId]=slot;storeWorkspace();
+  updateParts();updatePreview();
 }
 function setTool(tool){
   viewMode=tool;
@@ -389,7 +510,7 @@ function pick(event){
   const rect=canvas.getBoundingClientRect();
   pointer.set(2*(event.clientX-rect.left)/rect.width-1,1-2*(event.clientY-rect.top)/rect.height);
   raycaster.setFromCamera(pointer,camera);
-  const hit=raycaster.intersectObjects(previews.children,false)[0];
+  const hit=raycaster.intersectObjects(previews.children.filter(mesh=>mesh.visible),false)[0];
   return hit?previews.children.indexOf(hit.object):-1;
 }
 canvas.addEventListener('pointerdown',event=>{
@@ -440,16 +561,36 @@ function exampleParts(){
     makePart('sphere','Nez',[0,-.025,-.181],[.071,.039,.033],dark),
   ];
 }
+function newModelId(){
+  return 'custom-model-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10);
+}
 function addModel(example=false){
   if(pack.models.length>=modelLimits.models)return;
   remember();
-  const id='custom-model-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10);
+  const id=newModelId();
   const name=example?'Singe de pierre':'Modèle '+(pack.models.length+1);
   pack.models.push({id,name,kind:'structure',inGame:false,
     properties:{...defaultModelProperties},parts:example?exampleParts():[]});
   modelId=id;partIndex=0;
   markDirty();refreshModel();
   setPanel('geometry');
+  if(!example){
+    $('model-title').focus({preventScroll:true});
+    $('model-title').select();
+  }
+}
+function duplicateModel(){
+  const model=currentModel();
+  if(!model||pack.models.length>=modelLimits.models)return;
+  remember();
+  const copied=structuredClone(model);
+  copied.id=newModelId();
+  copied.name=(model.name.slice(0,37)+' · variante').slice(0,48);
+  pack.models.push(copied);
+  modelId=copied.id;partIndex=0;
+  markDirty();refreshModel();
+  $('model-title').focus({preventScroll:true});$('model-title').select();
+  status('Variante créée : modifie-la sans toucher au modèle original.');
 }
 function addPart(shape=$('new-shape').value){
   const model=currentModel();
@@ -478,6 +619,7 @@ function deletePart(){
   const model=currentModel();
   if(!model?.parts.length)return;
   remember();model.parts.splice(partIndex,1);
+  resetModelMasks();
   partIndex=Math.max(0,Math.min(partIndex,model.parts.length-1));
   if(!model.parts.length&&pack.avatarId===model.id)pack.avatarId=null;
   markDirty();updateModelLists();updateParts();updateInspector();updatePreview();
@@ -588,8 +730,19 @@ async function doExport(){
 }
 
 $('new-model').onclick=()=>addModel();
+$('duplicate-model').onclick=duplicateModel;
 $('example').onclick=()=>addModel(true);
-$('models').onchange=event=>{modelId=event.target.value;partIndex=0;refreshModel();};
+$('models').onchange=event=>switchModel(event.target.value);
+$('mask-set').onchange=event=>changeMask(event.target.value);
+$('solo-part').onclick=()=>{
+  const model=currentModel();if(!model?.parts.length)return;
+  setHiddenParts(new Set(model.parts.map((_,index)=>index).filter(index=>index!==partIndex)));
+  status('Masque '+activeMask()+' : seule la pièce active est affichée.');
+};
+$('show-all-parts').onclick=()=>{
+  setHiddenParts(new Set());
+  status('Toutes les pièces sont visibles.');
+};
 $('save').onclick=saveNow;
 $('undo-action').onclick=undo;
 $('redo-action').onclick=redo;
@@ -613,24 +766,38 @@ $('file').onchange=async event=>{
     markDirty();refreshModel();status('Importé · enregistrer pour appliquer au jeu');
   }catch(error){status(error instanceof SyntaxError?'JSON illisible.':error.message,true);}
 };
-$('send-to-map').onclick=event=>{
+function sendToCards(event){
+  const model=currentModel();
+  if(!model?.parts.length){
+    event.preventDefault();
+    status('Ajoute au moins une pièce avant de placer le modèle sur une carte.',true);
+    return;
+  }
   if(!saveNow())event.preventDefault();
-};
+}
+for(const id of ['send-to-map','quick-send-to-map','go-cards'])
+  $(id).addEventListener('click',sendToCards);
 $('delete-model').onclick=()=>{
   const model=currentModel();if(!model||!confirm('Supprimer le modèle « '+model.name+' » ?'))return;
   remember();
   const index=pack.models.indexOf(model);
   pack.models.splice(index,1);
+  references.delete(model.id);
+  delete workspace.active[model.id];
+  delete workspace.masks[model.id];
+  storeWorkspace();
   if(pack.avatarId===model.id)pack.avatarId=null;
   modelId=(pack.models[index]??pack.models[index-1])?.id??null;partIndex=0;
   markDirty();refreshModel();
 };
-$('model-name').addEventListener('input',event=>{
+function renameActiveModel(event){
   const model=currentModel();if(!model)return;
   beforeChange(event.target);
-  model.name=event.target.value;
+  model.name=event.target.value.slice(0,48);
   markDirty();updateModelLists();updateInspector();
-});
+}
+for(const id of ['model-name','model-title'])
+  $(id).addEventListener('input',renameActiveModel);
 $('model-kind').onchange=event=>{
   if(!currentModel())return;beforeChange(event.target);
   currentModel().kind=event.target.value;markDirty();updatePreview();

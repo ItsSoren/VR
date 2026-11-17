@@ -29,6 +29,7 @@ $('model-library').replaceChildren(
 );
 const requestedModel = new URLSearchParams(location.search).get('model');
 if (modelLibrary.some(model => model.id === requestedModel)) $('model-library').value = requestedModel;
+else if(modelLibrary.length===1)$('model-library').value=modelLibrary[0].id;
 $('place-model').disabled = !modelLibrary.length;
 function selectedModel() { return modelLibrary.find(model => model.id === $('model-library').value); }
 function modelPiece() {
@@ -135,15 +136,22 @@ function buildWorkspaceShell(){
   const insert=make('div','insert-palette');
   insert.id='insert-palette';
   insert.hidden=true;
-  insert.append(make('h2','', 'Ajouter un élément'));
+  const paletteTitle=make('h2','','Ajouter un élément');
+  insert.append(paletteTitle);
   const oldTools=document.querySelector('.command-bar .tools');
   const shapeLabel=$('shape-preset').closest('label');
   const modelSection=$('model-library').closest('.inspector-section');
   const modelLink=oldTools.querySelector('a[href*="model-editor"]');
   insert.append(shapeLabel,modelSection);
+  const modelAction=make('button','model-place-action','⬡ Placer ce modèle dans la scène');
+  modelAction.id='model-place-action';
+  modelAction.type='button';
+  insert.append(modelAction);
   if(modelLink)insert.append(modelLink);
-  const insertHint=make('p','palette-help','Choisis une forme puis l’outil ⊞, ou sélectionne un modèle puis ⬡. Clique ensuite dans la scène.');
+  const insertHint=make('p','palette-help','Choisis une forme, puis clique dans la scène.');
   insert.append(insertHint);
+  const modelCount=make('p','model-count-hint','');
+  insert.append(modelCount);
   main.append(insert);
   const toolRow=document.querySelector('.command-bar .command-row');
   oldTools.remove();
@@ -165,10 +173,37 @@ function buildWorkspaceShell(){
   toolRow.append(settings);
   const showInsert=(mode)=>{
     if(mode==='close'){insert.hidden=true;return;}
+    const showingModels=mode==='model';
     insert.hidden=false;
-    const target=mode==='model'?'model-library':'shape-preset';
+    insert.dataset.mode=mode;
+    paletteTitle.textContent=showingModels?'Mes modèles / bibliothèque':'Ajouter une forme';
+    modelSection.hidden=!showingModels;
+    shapeLabel.hidden=showingModels;
+    modelAction.hidden=!showingModels;
+    if(modelLink)modelLink.hidden=!showingModels;
+    insertHint.textContent=showingModels
+      ?'Sélectionne un modèle, puis clique sur le terrain ou le plan pour le placer. Il sera intégré à la carte.'
+      :'Choisis une forme puis clique dans la vue 3D ou sur le plan pour la poser.';
+    modelCount.hidden=!showingModels;
+    modelCount.textContent=showingModels
+      ?modelLibrary.length+' modèle(s) enregistré(s) dans ce navigateur'
+      :'';
+    const name=selectedModel();
+    modelAction.disabled=!name;
+    modelAction.textContent=name?'⬡ Placer « '+name.name+' »':'Aucun modèle à placer';
+    const target=showingModels?'model-library':'shape-preset';
     $(target).focus({preventScroll:true});
   };
+  modelAction.onclick=()=>{
+    if(!selectedModel())return;
+    setTool('model');
+    showInsert('close');
+    screen.focus({preventScroll:true});
+    notice('Clique dans la scène pour placer « '+selectedModel().name+' ».');
+  };
+  $('model-library').addEventListener('change',()=>{
+    if(insert.dataset.mode==='model'&&!insert.hidden)showInsert('model');
+  });
   for(const type of ['model','preset']){
     const btn=toolButtons.find(node=>node.dataset.tool===type);
     btn?.addEventListener('click',()=>showInsert(type));
@@ -1576,3 +1611,12 @@ resizeRenderer();
 resizePlan();
 fitViews();
 applyLayout();
+if(requestedModel){
+  const selectedFromFoundry=modelLibrary.find(model=>model.id===requestedModel);
+  if(selectedFromFoundry){
+    $('place-model').click(); // tool + library popup: discoverable handoff
+    notice('« '+selectedFromFoundry.name+' » est prêt à être placé. Clique dans la vue 3D ou sur le plan.');
+  }else{
+    notice('Modèle introuvable dans ce navigateur. Enregistre-le dans l’atelier des modèles, puis réessaie.');
+  }
+}
