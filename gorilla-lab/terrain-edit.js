@@ -362,7 +362,7 @@ export function disposeVegetation(group) {
   if (!group) return;
   for (const plants of group.children) {
     plants.geometry.dispose();
-    if(plants.material.userData.ownTexture)plants.material.map?.dispose();
+    if(plants.material?.userData?.ownTexture)plants.material.map?.dispose();
     disposeModelMaterial(plants.material);
     plants.dispose();
   }
