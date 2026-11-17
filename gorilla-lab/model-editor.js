@@ -242,7 +242,7 @@ function updateInspector(){
   const model=currentModel(),part=currentPart();
   $('model-details').hidden=!model;
   $('part-inspector').hidden=!part;
-  $('part-empty').hidden=!!part||$('model-inspector').dataset.tab==='settings';
+  $('part-empty').hidden=!!part||['settings','collision'].includes($('model-inspector').dataset.tab);
   if(model){
     if(document.activeElement!==$('model-name'))$('model-name').value=model.name;
     $('model-kind').value=model.kind||'prop';
@@ -251,6 +251,7 @@ function updateInspector(){
     for(const id of ['send-to-map','quick-send-to-map','go-cards'])$(id).href=destination;
     for(const key of Object.keys(defaultModelProperties))$(key).checked=!!model.properties[key];
   }
+  if($('model-inspector').dataset.tab==='collision')updateHitboxControls();
   if(part){
     for(const key of ['name','shape','color','surface'])$('part-'+key).value=part[key];
     for(const key of Object.keys(limits))vectorInputs[key].forEach((input,index)=>{
@@ -276,6 +277,62 @@ function updateInspector(){
     :'ESPACE DE CONSTRUCTION / 3D';
   $('quick-send-to-map').setAttribute('aria-disabled',String(!model?.parts.length));
   $('send-to-map').setAttribute('aria-disabled',String(!model?.parts.length));
+}
+// The visual preview uses Foundry's uncentred model coordinates.
+// When exported, physics recentres the geometry and applies the same offset.
+function updateHitboxControls(){
+  const model=currentModel(),manual=model?.hitbox?.mode==='box';
+  $('hitbox-auto').setAttribute('aria-pressed',String(!manual));
+  $('hitbox-manual').setAttribute('aria-pressed',String(!!manual));
+  $('hitbox-geometry').hidden=!manual;
+  $('hitbox-auto').disabled=$('hitbox-manual').disabled=!model?.parts.length;
+  $('hitbox-drag').setAttribute('aria-pressed',String(!!hitboxEditing&&viewMode==='translate'));
+  $('hitbox-scale').setAttribute('aria-pressed',String(!!hitboxEditing&&viewMode==='scale'));
+  if(!model?.parts.length){
+    $('hitbox-info').textContent='Ajoute une pièce pour générer sa hitbox.';
+    return;
+  }
+  $('hitbox-info').textContent=manual
+    ?'Hitbox personnalisée : déplace la boîte orange ou modifie les valeurs.'
+    :'Hitbox automatique : une boîte ajustée autour du modèle entier.';
+  if(!manual)return;
+  for(const key of ['center','size'])for(let index=0;index<3;index++){
+    const input=$('hitbox-'+key+'-'+['x','y','z'][index]);
+    if(document.activeElement!==input)input.value=Number(model.hitbox[key][index].toFixed(3));
+  }
+}
+function updateHitboxPreview(){
+  const model=currentModel();
+  const show=!!model?.parts.length&&$('model-inspector').dataset.tab==='collision'&&
+    $('hitbox-preview-toggle').checked;
+  hitboxPreview.visible=show;
+  if(show){
+    const hitbox=modelHitbox(model);
+    hitboxPreview.position.copy(hitbox.center);
+    hitboxPreview.scale.copy(hitbox.size);
+    hitboxPreview.material.color.set(model.properties.collidable?'#ffb55e':'#9b9fa5');
+  }
+  if(!gizmo?.dragging)attachGizmo();
+  render();
+}
+function setHitboxMode(mode){
+  const model=currentModel();
+  if(!model?.parts.length)return;
+  const hb=modelHitbox(model);
+  remember();
+  model.hitbox=mode==='box'
+    ?{mode:'box',center:hb.center.toArray(),size:hb.size.toArray()}
+    :{mode:'auto'};
+  hitboxEditing=false;
+  markDirty();
+  updateHitboxControls();
+  updateHitboxPreview();
+  if(mode==='box'){
+    $('hitbox-preview-toggle').checked=true;
+    hitboxEditing=true;
+    setTool('scale');
+    updateHitboxPreview();
+  }else setTool('select');
 }
 function setPanel(tab){
   if(tab!=='collision'&&hitboxEditing){
@@ -828,6 +885,40 @@ function renameActiveModel(event){
 }
 for(const id of ['model-name','model-title'])
   $(id).addEventListener('input',renameActiveModel);
+$('hitbox-auto').onclick=()=>setHitboxMode('auto');
+$('hitbox-manual').onclick=()=>setHitboxMode('box');
+$('hitbox-preview-toggle').onchange=updateHitboxPreview;
+for(const [id,mode] of [['hitbox-drag','translate'],['hitbox-scale','scale']]){
+  $(id).onclick=()=>{
+    const model=currentModel();
+    if(!model?.parts.length||model.hitbox?.mode!=='box')return;
+    $('hitbox-preview-toggle').checked=true;
+    hitboxEditing=true;
+    setTool(mode);
+    updateHitboxControls();
+    updateHitboxPreview();
+  };
+}
+$('hitbox-fit').onclick=()=>{
+  const model=currentModel();
+  if(!model?.parts.length)return;
+  const hitbox=modelHitbox({...model,hitbox:{mode:'auto'}});
+  remember();
+  model.hitbox={mode:'box',center:hitbox.center.toArray(),size:hitbox.size.toArray()};
+  markDirty();updateHitboxControls();updateHitboxPreview();
+  status('Hitbox ajustée à la géométrie actuelle.');
+};
+for(const key of ['center','size'])for(let i=0;i<3;i++){
+  const input=$('hitbox-'+key+'-'+['x','y','z'][i]);
+  input.oninput=event=>{
+    const model=currentModel(),value=event.target.valueAsNumber;
+    if(model?.hitbox?.mode!=='box'||!Number.isFinite(value))return;
+    beforeChange(event.target);
+    model.hitbox[key][i]=clamp(value,key==='size'?.025:-6,key==='size'?12:6);
+    markDirty();updateHitboxPreview();
+  };
+  input.onchange=updateHitboxControls;
+}
 $('model-kind').onchange=event=>{
   if(!currentModel())return;beforeChange(event.target);
   currentModel().kind=event.target.value;markDirty();updatePreview();
@@ -839,6 +930,7 @@ for(const key of Object.keys(defaultModelProperties)){
   $(key).onchange=event=>{
     if(!currentModel())return;beforeChange(event.target);
     currentModel().properties[key]=event.target.checked;markDirty();
+    if(key==='collidable')updateHitboxPreview();
   };
 }
 $('avatar').onchange=event=>{
