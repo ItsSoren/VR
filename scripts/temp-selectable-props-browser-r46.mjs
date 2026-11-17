@@ -50,6 +50,8 @@ try{
  assert.ok(title.includes('Objet test saisissable')&&title.includes('Objet saisissable'),title);
  assert.equal(await page.$eval('#model-object-controls',e=>e.hidden),false,
   'prop-specific controls appear after placement');
+ assert.notEqual(await page.$eval('#model-object-controls',e=>getComputedStyle(e).display),'none',
+  'prop-specific controls are actually visible in the Object inspector');
  console.log('PLACEMENT_AND_AUTO_SELECT',JSON.stringify({title,tool:await page.$eval('#move-tool',e=>e.getAttribute('aria-pressed'))}));
 
  // Test selection by clicking the object in the top-down plan.
