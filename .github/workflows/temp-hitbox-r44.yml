@@ -22,6 +22,7 @@ jobs:
       - run: npm run build
       - run: npm install --no-save --no-package-lock puppeteer-core
       - run: node scripts/temp-hitbox-browser.mjs
+      - run: node scripts/temp-hitbox-drag-browser.mjs
       - name: Commit generated workshop bundles
         run: |
           git config user.name "github-actions[bot]"
