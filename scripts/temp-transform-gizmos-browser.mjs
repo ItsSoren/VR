@@ -110,8 +110,10 @@ try{
   const moving=await dragRing('model translate','X');
   assert.ok(moving.stats.moves>scaling.stats.moves+1,'model move handle must produce drag updates');
 
+  // Persist model edits so the beforeunload confirmation doesn't block navigation.
+  await page.click('#save');
   // Map check: start from an existing solid piece and focus camera on it.
-  await page.goto('http://127.0.0.1:8999/__gizmo_debug_map.html',{waitUntil:'networkidle2',timeout:60000});
+  await page.goto('http://127.0.0.1:8999/__gizmo_debug_map.html',{waitUntil:'domcontentloaded',timeout:60000});
   await page.waitForFunction(()=>document.querySelector('#pieces')?.options.length>0,{timeout:15000});
   await page.select('#pieces','0');
   await page.click('[data-tool="rotate"]');
