@@ -23,7 +23,7 @@ await page.setViewport({width:1440,height:920});
 await page.evaluateOnNewDocument(()=>{
  const model={id:'custom-model-grab-test',name:'Objet test saisissable',kind:'prop',inGame:true,
   properties:{grabbable:true,frozen:false,collidable:true,supportWhileHeld:false},
-  hitbox:{mode:'auto'},parts:[{name:'Corps',shape:'box',position:[0,0,0],rotation:[0,0,0],
+  hitbox:{mode:'auto'},parts:[{name:'Anneau',shape:'torus',position:[0,0,0],rotation:[0,0,0],
   scale:[3,2,3],color:'#51bdd2',surface:'plain'}]};
  localStorage.setItem('gorilla-lab-models-v1',JSON.stringify({version:1,models:[model],avatarId:null}));
 });
