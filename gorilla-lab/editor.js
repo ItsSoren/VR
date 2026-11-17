@@ -217,7 +217,7 @@ function buildWorkspaceShell(){
   detailsPane.append(tabs,content);
   aside.replaceChildren(outline,detailsPane);
   const setTab=(tab)=>{
-    const piece=current();
+    const piece=map?.pieces?.[selected];
     if(tab==='terrain'&&!piece?.terrain)tab='object';
     if(tab==='material'&&!piece)tab='object';
     aside.dataset.tab=tab;
@@ -568,11 +568,41 @@ function attachGizmo() {
   $('tool-help').textContent=toolHelp[tool];
 }
 
+// Default scaling moves one face while preserving the opposite face.
+// Ctrl temporarily fixes the centre and grows/shrinks symmetrically.
+let ctrlScaleHeld=false;
+function syncScaleAnchor(){
+  if(tool!=='scale')return;
+  const piece=current(),original=beforeTransform?.map.pieces[selected],mesh=gizmo.object;
+  if(!piece||!original||!mesh)return;
+  const delta=new T.Vector3((piece.w-original.w)/2,
+    piece.terrain?0:(piece.h-original.h)/2,(piece.d-original.d)/2);
+  if(ctrlScaleHeld)delta.set(0,0,0);
+  else delta.applyEuler(new T.Euler(T.MathUtils.degToRad(original.pitch),
+    T.MathUtils.degToRad(original.yaw),T.MathUtils.degToRad(original.roll??0),'YXZ'));
+  const limit=(map.worldSize??240)/2;
+  piece.x=T.MathUtils.clamp(original.x+delta.x,-limit,limit);
+  piece.y=T.MathUtils.clamp(original.y+delta.y,-256,256);
+  piece.z=T.MathUtils.clamp(original.z+delta.z,-limit,limit);
+  mesh.position.set(piece.x,piece.y,piece.z);
+  selectionBox?.update();
+  for(const key of ['x','y','z'])$('p-'+key).value=piece[key].toFixed(2);
+  paintPlan();queueRender();
+}
+function trackScaleControl(event){
+  const wasHeld=ctrlScaleHeld;
+  ctrlScaleHeld=event.ctrlKey;
+  if(wasHeld!==ctrlScaleHeld&&gizmo.dragging)syncScaleAnchor();
+}
+for(const type of ['keydown','keyup'])window.addEventListener(type,trackScaleControl);
+screen.addEventListener('pointermove',trackScaleControl,{capture:true});
+
 gizmo.addEventListener('change',queueRender);
 gizmo.addEventListener('mouseDown',()=>{
   const piece=current();
   heldSnap=null;
   if(piece)beforeTransform={map:structuredClone(map),selected};
+  ctrlScaleHeld=Boolean(ctrlScaleHeld||window.event?.ctrlKey);
 });
 // Reflète la transformation de Three.js dans le modèle et l’inspecteur à chaque mouvement.
 gizmo.addEventListener('objectChange',()=>{
@@ -596,19 +626,7 @@ gizmo.addEventListener('objectChange',()=>{
     piece.d=clamp(mesh.scale.z*(piece.terrain?original.d:1),.05,maxObjectSize);
     if(!piece.terrain)piece.h=clamp(mesh.scale.y,.05,256);
     mesh.scale.set(piece.terrain?piece.w/original.w:piece.w,piece.terrain?1:piece.h,piece.terrain?piece.d/original.d:piece.d);
-    const anchor=$('scale-anchor').value;
-    if(anchor!=='center'){
-      const sign=anchor==='positive'?1:-1;
-      const offset=new T.Vector3((piece.w-original.w)*sign/2,
-        piece.terrain?0:(piece.h-original.h)*sign/2,(piece.d-original.d)*sign/2);
-      const quaternion=new T.Quaternion().setFromEuler(
-        new T.Euler(T.MathUtils.degToRad(original.pitch),T.MathUtils.degToRad(original.yaw),T.MathUtils.degToRad(original.roll??0),'YXZ'));
-      offset.applyQuaternion(quaternion);
-      piece.x=clamp(original.x+offset.x,-maxWorldReach,maxWorldReach);
-      piece.y=clamp(original.y+offset.y,-256,256);
-      piece.z=clamp(original.z+offset.z,-maxWorldReach,maxWorldReach);
-      mesh.position.set(piece.x,piece.y,piece.z);
-    }
+    syncScaleAnchor();
   }
   mesh.updateMatrixWorld(true);
   selectionBox?.update();
