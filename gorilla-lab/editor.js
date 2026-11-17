@@ -212,7 +212,7 @@ function buildWorkspaceShell(){
     modelAction.disabled=!name;
     modelAction.textContent=name?'⬡ Placer « '+name.name+' »':'Aucun modèle à placer';
     deleteLibraryButton.disabled=!name||!modelPack.models.some(entry=>entry.id===name.id);
-    if(modelLink)modelLink.href='./model-editor.html'+(name?(name.assetId?'?asset='+encodeURIComponent(name.assetId):'?model='+encodeURIComponent(name.id)):'');
+    if(modelLink)modelLink.href='./model-editor.html'+(name?(name.assetId&&name.id==='custom-model-game-'+name.assetId?'?asset='+encodeURIComponent(name.assetId):'?model='+encodeURIComponent(name.id)):'');
     const target=showingModels?'model-library':'shape-preset';
     $(target).focus({preventScroll:true});
   };
@@ -886,7 +886,7 @@ function updateInspector() {
   const assetEditLink=$('model-asset-edit-link');
   if(assetEditLink){
     assetEditLink.hidden=!piece?.model;
-    assetEditLink.href='./model-editor.html'+(piece?.model?(piece.model.assetId?'?asset='+encodeURIComponent(piece.model.assetId):'?model='+encodeURIComponent(piece.model.id)):'');
+    assetEditLink.href='./model-editor.html'+(piece?.model?(piece.model.assetId&&piece.model.id==='custom-model-game-'+piece.model.assetId?'?asset='+encodeURIComponent(piece.model.assetId):'?model='+encodeURIComponent(piece.model.id)):'');
   }
   if(isGrabProp){
     $('model-grabbable').checked=piece.model.properties?.grabbable!==false;
