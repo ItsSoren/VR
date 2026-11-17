@@ -166,6 +166,8 @@ function showModel() {
   elements['new-model'].disabled = elements.example.disabled = pack.models.length >= modelLimits.models;
   if (model) {
     elements['model-name'].value = model.name;
+    elements['model-kind'].value = model.kind || 'prop';
+    elements['send-to-map'].href = './editor.html?model=' + encodeURIComponent(model.id);
     elements['in-game'].checked = model.inGame;
     for (const key of Object.keys(defaultModelProperties)) elements[key].checked = model.properties[key];
   }
@@ -223,7 +225,7 @@ function addModel(example = false) {
   if (pack.models.length >= modelLimits.models) return;
   const name = example ? 'Singe de pierre' : `Modèle ${pack.models.length + 1}`;
   const id = `custom-model-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  pack.models.push({ id, name, inGame: false, properties: { ...defaultModelProperties }, parts: example ? makeExample() : [] });
+  pack.models.push({ id, name, kind: 'prop', inGame: false, properties: { ...defaultModelProperties }, parts: example ? makeExample() : [] });
   modelId = id;
   partIndex = 0;
   markDirty();
@@ -251,6 +253,16 @@ listen('example', 'click', () => addModel(true));
 listen('models', 'change', event => { modelId = event.target.value; partIndex = 0; showModel(); });
 listen('model-name', 'input', event => { currentModel().name = event.target.value; markDirty(); updateModelLists(); });
 listen('in-game', 'change', event => { currentModel().inGame = event.target.checked; markDirty(); });
+listen('model-kind', 'change', event => { currentModel().kind = event.target.value; markDirty(); });
+listen('send-to-map', 'click', event => {
+  try {
+    localStorage.setItem(modelStorageKey, JSON.stringify(normalizeModelPack(pack)));
+    dirty = false;
+  } catch (error) {
+    event.preventDefault();
+    status('Impossible de transférer le modèle. Exporte le JSON pour le conserver.', true);
+  }
+});
 for (const key of Object.keys(defaultModelProperties)) {
   listen(key, 'change', event => { currentModel().properties[key] = event.target.checked; markDirty(); });
 }
