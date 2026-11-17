@@ -89,6 +89,16 @@ try{
   });
   await page.mouse.click(190,165,{button:'right'});
   assert.equal(await page.$eval('#context-actions',e=>e.hidden),true,'right click dismisses menu');
+  // Right-clicking another surface while the menu is open dismisses it,
+  // instead of immediately opening a new menu.
+  await page.evaluate(()=>{
+    const menu=document.querySelector('#context-actions');
+    menu.hidden=false;menu.style.left='300px';menu.style.top='300px';
+  });
+  const contextRect=await rect('#preview');
+  await page.mouse.click(contextRect.x+contextRect.w*.48,contextRect.y+contextRect.h*.63,{button:'right'});
+  assert.equal(await page.$eval('#context-actions',e=>e.hidden),true,
+    'right click on the 3D viewport dismisses the previous context menu');
   console.log('CONTEXT_MENU_DISMISSED_BOTH_BUTTONS');
 
   // Place model and preserve that instance when library definition is deleted.
