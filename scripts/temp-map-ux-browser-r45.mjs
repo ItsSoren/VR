@@ -7,7 +7,7 @@ import puppeteer from 'puppeteer-core';
 const root=process.cwd(),types={'.html':'text/html','.js':'application/javascript','.json':'application/json','.css':'text/css'};
 const server=createServer(async(req,res)=>{
   if(req.url==='/favicon.ico'){res.writeHead(204);return res.end();}
-  const rel=decodeURIComponent((req.url?.split('?')[0]||'/').replace(/^\\//,'')||'index.html');
+  const rel=decodeURIComponent((req.url?.split('?')[0]||'/').replace(/^[/]/,'')||'index.html');
   const file=resolve(root,rel);
   if(!file.startsWith(root)){res.writeHead(403);return res.end();}
   try{res.setHeader('Content-Type',types[extname(file)]||'application/octet-stream');res.end(await readFile(file));}
