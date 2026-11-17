@@ -1546,7 +1546,7 @@ function refreshDiagnostics(){
   for(const box of [...diagnosticBoxes.children]){diagnosticBoxes.remove(box);box.geometry.dispose();box.material.dispose();}
   grid.visible=$('debug-grid').checked;
   for(const mesh of group.children){
-    if(mesh.material)mesh.material.wireframe=$('debug-wire').checked;
+    if(mesh.material)for(const mat of Array.isArray(mesh.material)?mesh.material:[mesh.material])mat.wireframe=$('debug-wire').checked;
     if($('debug-hitboxes').checked){
       diagnosticBoxes.add(new T.BoxHelper(mesh,'#fa9945'));
     }
