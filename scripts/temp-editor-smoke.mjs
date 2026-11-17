@@ -30,9 +30,11 @@ try{
   assert.equal(await page.$eval('#editor-views',n=>n.dataset.layout),'only-plan');
   await page.select('#layout-mode','split');
   await page.click('#plan-zoom-in');
+  await page.$eval('#debug-controls',n=>n.open=true);
   await page.click('#debug-hitboxes');
   await page.click('#blank-map');
   assert.ok(await page.$eval('#pieces',n=>n.options.length)>0);
+  await page.select('#pieces','0');
   await page.focus('#map-world-size');
   await page.$eval('#map-world-size',n=>{n.value='640';n.dispatchEvent(new Event('change',{bubbles:true}));});
   assert.equal(await page.$eval('#map-world-size',n=>n.value),'640');
