@@ -844,6 +844,7 @@ function updateInspector() {
   $('delete').title=piece?.model
     ?'Retirer cet exemplaire de la carte (le modèle restera dans la bibliothèque)'
     :'Supprimer cette pièce de la carte';
+  $('delete').firstChild.textContent=piece?.model?'Retirer ':'Supprimer ';
   $('texture-clear').disabled = !piece?.texture;
   $('texture-paint').disabled = !piece||Boolean(piece.model);
   const terrain=piece?.terrain;
@@ -1309,13 +1310,23 @@ for(const canvas of [screen,plan]){
     if(index<0){closeQuickMenu();return;}
     choose(index);
     $('context-title').textContent=current()?.name??'Pièce';
+    quickMenu.querySelector('[data-context-action="delete"]').textContent=
+      current()?.model?'Retirer de la carte':'Supprimer';
     quickMenu.hidden=false;
     const width=195,height=285;
     quickMenu.style.left=Math.max(4,Math.min(event.clientX,innerWidth-width-6))+'px';
     quickMenu.style.top=Math.max(4,Math.min(event.clientY,innerHeight-height-6))+'px';
   });
 }
-document.addEventListener('pointerdown',event=>{if(!quickMenu.contains(event.target))closeQuickMenu();});
+// Dismiss on the very first mouse press anywhere outside, including right
+// clicks on menus or a different part of the 3D view.
+document.addEventListener('pointerdown',event=>{
+  if(!quickMenu.hidden&&!quickMenu.contains(event.target))closeQuickMenu();
+},{capture:true});
+document.addEventListener('contextmenu',event=>{
+  if(!quickMenu.hidden&&!quickMenu.contains(event.target)&&event.target!==screen&&event.target!==plan)
+    closeQuickMenu();
+},{capture:true});
 document.addEventListener('keydown',event=>{if(event.key==='Escape')closeQuickMenu();});
 for(const button of quickMenu.querySelectorAll('[data-context-action]'))button.onclick=()=>{
   const action=button.dataset.contextAction;closeQuickMenu();
