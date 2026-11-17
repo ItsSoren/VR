@@ -125,12 +125,18 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     meshRows.length=0;
     const nodes=map?.pieces??[];
     signature=map?'custom-'+mapCode(JSON.stringify(map)):'';
-    // Arena-derived maps replace editable boxes but retain hills and fixtures.
-    defaultObjects.forEach(mesh=>mesh.visible=!map||map.arenaBase&&!replaceableMeshes.has(mesh));
+    // Asset-backed map pieces replace their matching built-in fixture instead of stacking on it.
+    const mappedAssets=new Set(nodes.map(piece=>piece.model?.assetId).filter(Boolean));
+    defaultObjects.forEach(mesh=>{
+      const assetId=mesh.userData?.editorAssetId;
+      mesh.visible=!map||map.arenaBase&&!replaceableMeshes.has(mesh)&&(!assetId||!mappedAssets.has(assetId));
+      if(map?.assetLayer&&mesh.userData?.editorAssetId==='palm-tree')
+        mesh.traverse(child=>{if(child.userData?.editorFixtureCoconut)child.visible=false;});
+    });
     for(let i=0;i<nodes.length;i++)meshRows.push(makeRow(nodes[i],i));
     pruneTextures();
     if(map){
-      const retained=map.arenaBase?builtBoxes.filter(box=>!replaceableMeshes.has(box.mesh)):[];
+      const retained=map.arenaBase?builtBoxes.filter(box=>!replaceableMeshes.has(box.mesh)&&(!box.editorAssetId||!mappedAssets.has(box.editorAssetId))):[];
       arena.boxes.splice(0,arena.boxes.length,...retained,...meshRows.filter((row,i)=>nodes[i].solid&&nodes[i].model?.kind!=='prop'&&nodes[i].model?.properties?.collidable!==false).map(row=>row.collider));
     }
     else arena.boxes.splice(0,arena.boxes.length,...builtBoxes);
@@ -270,7 +276,9 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   document.querySelector('#map-export').onclick=save;
   document.querySelector('#map-reset').onclick=reset;
   return {placedModels:()=>map?.pieces.filter(p=>p.model?.kind==='prop')??[],modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,reset,blank,undo,save,edit,recenter,inform,
-    clearGhost(){ghost.visible=false;},get active(){return Boolean(map);},get builtIn(){return !map||map.arenaBase===true;},get status(){return status;},get yaw(){return map?.spawn.yaw??0;},
+    clearGhost(){ghost.visible=false;},get active(){return Boolean(map);},get builtIn(){return !map||map.arenaBase===true;},get assetLayer(){return map?.assetLayer===true;},
+    hasAsset(assetId){return Boolean(map?.pieces.some(piece=>piece.model?.assetId===assetId));},
+    get status(){return status;},get yaw(){return map?.spawn.yaw??0;},
     get nodes(){return map?.pieces.length??0;},get name(){return map?.name??null;},get signature(){return signature;},
   };
 }
