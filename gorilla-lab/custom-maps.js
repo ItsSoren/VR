@@ -278,6 +278,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   return {placedModels:()=>map?.pieces.filter(p=>p.model?.kind==='prop')??[],modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,reset,blank,undo,save,edit,recenter,inform,
     clearGhost(){ghost.visible=false;},get active(){return Boolean(map);},get builtIn(){return !map||map.arenaBase===true;},get assetLayer(){return map?.assetLayer===true;},
     hasAsset(assetId){return Boolean(map?.pieces.some(piece=>piece.model?.assetId===assetId));},
+    getAssetPiece(assetId){return map?.pieces.find(piece=>piece.model?.assetId===assetId)??null;},
     get status(){return status;},get yaw(){return map?.spawn.yaw??0;},
     get nodes(){return map?.pieces.length??0;},get name(){return map?.name??null;},get signature(){return signature;},
   };
