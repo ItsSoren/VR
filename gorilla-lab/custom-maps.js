@@ -131,7 +131,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     pruneTextures();
     if(map){
       const retained=map.arenaBase?builtBoxes.filter(box=>!replaceableMeshes.has(box.mesh)):[];
-      arena.boxes.splice(0,arena.boxes.length,...retained,...meshRows.filter((row,i)=>nodes[i].solid&&nodes[i].model?.kind!=='prop').map(row=>row.collider));
+      arena.boxes.splice(0,arena.boxes.length,...retained,...meshRows.filter((row,i)=>nodes[i].solid&&nodes[i].model?.kind!=='prop'&&nodes[i].model?.properties?.collidable!==false).map(row=>row.collider));
     }
     else arena.boxes.splice(0,arena.boxes.length,...builtBoxes);
     group.updateMatrixWorld(true);
