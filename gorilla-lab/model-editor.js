@@ -3,7 +3,7 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {TransformControls} from 'three/addons/controls/TransformControls.js';
 import {GLTFExporter} from 'three/addons/exporters/GLTFExporter.js';
 import {
-  createModelMaterial,createModelPartMaterial,disposeModelMaterial,createModelPartGeometry,defaultModelProperties,
+  createModelMaterial,createModelPartMaterial,disposeModelMaterial,createModelPartGeometry,createModelUnitGeometry,defaultModelProperties,
   modelLimits,modelShapes,modelStorageKey,modelSurfaces,normalizeModelPack,readModelPack,
 } from './model-pack.js';
 import {openTextureStudio} from './texture-studio.js';
@@ -616,6 +616,7 @@ function deletePart(){
   const model=currentModel();
   if(!model?.parts.length)return;
   remember();model.parts.splice(partIndex,1);
+  resetModelMasks();
   partIndex=Math.max(0,Math.min(partIndex,model.parts.length-1));
   if(!model.parts.length&&pack.avatarId===model.id)pack.avatarId=null;
   markDirty();updateModelLists();updateParts();updateInspector();updatePreview();
@@ -726,8 +727,19 @@ async function doExport(){
 }
 
 $('new-model').onclick=()=>addModel();
+$('duplicate-model').onclick=duplicateModel;
 $('example').onclick=()=>addModel(true);
-$('models').onchange=event=>{modelId=event.target.value;partIndex=0;refreshModel();};
+$('models').onchange=event=>switchModel(event.target.value);
+$('mask-set').onchange=event=>changeMask(event.target.value);
+$('solo-part').onclick=()=>{
+  const model=currentModel();if(!model?.parts.length)return;
+  setHiddenParts(new Set(model.parts.map((_,index)=>index).filter(index=>index!==partIndex)));
+  status('Masque '+activeMask()+' : seule la pièce active est affichée.');
+};
+$('show-all-parts').onclick=()=>{
+  setHiddenParts(new Set());
+  status('Toutes les pièces sont visibles.');
+};
 $('save').onclick=saveNow;
 $('undo-action').onclick=undo;
 $('redo-action').onclick=redo;
@@ -751,24 +763,38 @@ $('file').onchange=async event=>{
     markDirty();refreshModel();status('Importé · enregistrer pour appliquer au jeu');
   }catch(error){status(error instanceof SyntaxError?'JSON illisible.':error.message,true);}
 };
-$('send-to-map').onclick=event=>{
+function sendToCards(event){
+  const model=currentModel();
+  if(!model?.parts.length){
+    event.preventDefault();
+    status('Ajoute au moins une pièce avant de placer le modèle sur une carte.',true);
+    return;
+  }
   if(!saveNow())event.preventDefault();
-};
+}
+for(const id of ['send-to-map','quick-send-to-map','go-cards'])
+  $(id).addEventListener('click',sendToCards);
 $('delete-model').onclick=()=>{
   const model=currentModel();if(!model||!confirm('Supprimer le modèle « '+model.name+' » ?'))return;
   remember();
   const index=pack.models.indexOf(model);
   pack.models.splice(index,1);
+  references.delete(model.id);
+  delete workspace.active[model.id];
+  delete workspace.masks[model.id];
+  storeWorkspace();
   if(pack.avatarId===model.id)pack.avatarId=null;
   modelId=(pack.models[index]??pack.models[index-1])?.id??null;partIndex=0;
   markDirty();refreshModel();
 };
-$('model-name').addEventListener('input',event=>{
+function renameActiveModel(event){
   const model=currentModel();if(!model)return;
   beforeChange(event.target);
-  model.name=event.target.value;
+  model.name=event.target.value.slice(0,48);
   markDirty();updateModelLists();updateInspector();
-});
+}
+for(const id of ['model-name','model-title'])
+  $(id).addEventListener('input',renameActiveModel);
 $('model-kind').onchange=event=>{
   if(!currentModel())return;beforeChange(event.target);
   currentModel().kind=event.target.value;markDirty();updatePreview();
