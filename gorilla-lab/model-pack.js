@@ -2,7 +2,8 @@ import * as T from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 export const modelStorageKey = 'gorilla-lab-models-v1';
-export const modelLimits = Object.freeze({ models: 12, parts: 64, fileBytes: 180000 });
+export const modelLimits = Object.freeze({ models: 12, parts: 64, fileBytes: 2_500_000, textureBytes: 160_000 });
+const texturePattern=/^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=\r\n]+$/i;
 export const modelShapes = Object.freeze({
   box: 'Cube', sphere: 'Sphère', cylinder: 'Cylindre', cone: 'Cône',
   torus: 'Anneau', capsule: 'Capsule', diamond: 'Diamant',
@@ -24,7 +25,7 @@ function vector(value, fallback, min, max) {
 }
 
 export function normalizeModelPack(input) {
-  if (input?.version !== 1 || !Array.isArray(input.models) || input.models.length > modelLimits.models) {
+  if (input?.version !== 1 || !Array.isArray(input.models) || input.models.length > modelLimits.models || JSON.stringify(input).length>modelLimits.fileBytes) {
     throw new Error('Ce fichier ne contient pas un atelier de modèles Gorilla Lab valide.');
   }
   const ids = new Set();
@@ -50,6 +51,8 @@ export function normalizeModelPack(input) {
         scale: vector(part?.scale, .35, .02, 4),
         color: typeof part?.color === 'string' && colorPattern.test(part.color) ? part.color : '#51bdd2',
         surface: Object.hasOwn(modelSurfaces, part?.surface) ? part.surface : 'plain',
+        texture:typeof part?.texture==='string'&&part.texture.length<=modelLimits.textureBytes&&texturePattern.test(part.texture)
+          ?part.texture:null,
       })),
     };
   });
@@ -138,20 +141,35 @@ export function createModelPartGeometry(part) {
   const row = Math.floor(tile / atlasColumns);
   for (let index = 0; index < count; index++) {
     color.toArray(colors, index * 3);
-    uv.setXY(index, (column + .05 + uv.getX(index) * .90) / atlasColumns,
+    if(!part.texture)uv.setXY(index, (column + .05 + uv.getX(index) * .90) / atlasColumns,
       (row + .05 + uv.getY(index) * .90) / atlasRows);
   }
   geometry.setAttribute('color', new T.BufferAttribute(colors, 3));
   return geometry;
 }
 
-export function createModelMaterial() {
-  return new T.MeshStandardMaterial({ vertexColors: true, map: surfaceAtlas(), roughness: .68 });
+export function createModelPartMaterial(part){
+  if(!part?.texture)return new T.MeshStandardMaterial({vertexColors:true,map:surfaceAtlas(),roughness:.68});
+  const texture=new T.TextureLoader().load(part.texture);
+  texture.colorSpace=T.SRGBColorSpace;
+  texture.wrapS=texture.wrapT=T.RepeatWrapping;
+  return new T.MeshStandardMaterial({vertexColors:true,map:texture,roughness:.68});
 }
-
+export function createModelMaterial(model){
+  if(model?.parts?.some(part=>part.texture))
+    return model.parts.map(createModelPartMaterial);
+  return new T.MeshStandardMaterial({vertexColors:true,map:surfaceAtlas(),roughness:.68});
+}
+export function disposeModelMaterial(material){
+  for(const mat of Array.isArray(material)?material:[material]){
+    if(!mat)return;
+    if(mat.map&&mat.map!==atlas)mat.map.dispose();
+    mat.dispose();
+  }
+}
 function centeredGeometry(parts) {
   const pieces = parts.map(createModelPartGeometry);
-  const geometry = mergeGeometries(pieces);
+  const geometry = mergeGeometries(pieces,parts.some(part=>part.texture));
   pieces.forEach(piece => piece.dispose());
   geometry.center();
   geometry.computeBoundingBox();
@@ -184,7 +202,7 @@ export function createModelPropDefinitions(pack) {
     const size = geo.boundingBox.getSize(new T.Vector3());
     return {
       id: model.id, name: model.name, properties: model.properties, geo,
-      material: createModelMaterial(),
+      material: createModelMaterial(model),
       collisionGeo: new T.BoxGeometry(size.x, size.y, size.z),
       mass: T.MathUtils.clamp(size.x * size.y * size.z * 9, .18, 12),
     };
@@ -198,7 +216,7 @@ export function createModelAvatarHead(pack) {
   const size = geometry.boundingBox.getSize(new T.Vector3());
   const scale = .36 / Math.max(size.x, size.y, size.z);
   geometry.scale(scale, scale, scale);
-  const mesh = new T.Mesh(geometry, createModelMaterial());
+  const mesh = new T.Mesh(geometry, createModelMaterial(model));
   mesh.castShadow = true;
   const head = new T.Group();
   head.add(mesh);
