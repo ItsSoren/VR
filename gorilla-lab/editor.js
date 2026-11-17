@@ -3,7 +3,7 @@ import {buildArena} from './arena.js';
 import {addLabFixtures} from './fixtures.js';
 import {createArenaObjectSpecs,forEachStartupObject} from './arena-objects.js';
 import {labMirror} from './lab-layout.js';
-import {tiledBox} from './texture-geometry.js';
+import {tiledBox,transformUVs,decorPrimitiveGeometry} from './texture-geometry.js';
 import {readModelPack,createModelUnitGeometry,createModelMaterial,modelDimensions} from './model-pack.js';
 import {normalizeTerrain,resizeTerrain,sculptTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from './terrain-edit.js';
 import {texturePresets,seamlessTexture} from './seamless-texture.js';
@@ -11,11 +11,12 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   parseMap, arenaMap, exampleMap, makePiece, mapMaterials, materialColors, surfacePresets,
-  maxPieces, snapPlacement, downloadMap, storageKey,
+  maxPieces, maxWorldReach, maxObjectSize, snapPlacement, downloadMap, storageKey,
 } from './map-format.js';
 
 const $ = id => document.getElementById(id);
 const fields = ['name', 'x', 'y', 'z', 'w', 'h', 'd', 'pitch', 'yaw', 'roll', 'material', 'color', 'grip', 'gravity', 'bounce', 'solid'];
+const uvFields=['uvScale','uvRotation','uvOffsetX','uvOffsetY'];
 const toolButtons = [...document.querySelectorAll('.tool')];
 const draftKey = 'gorilla-lab-editor-draft';
 const modelPack = readModelPack(localStorage);
@@ -56,12 +57,43 @@ const toolHelp = {
   wall: 'Clique dans la vue 3D ou sur le plan pour poser un mur. Échap revient à la sélection.',
   terrain:'Clique pour poser un terrain. Sélectionne-le pour régler le bruit ou la végétation.',
   sculpt:'Clique ou glisse sur un terrain. Le pinceau est réglable dans Relief et végétation.',
+  preset:'Choisis une forme rapide et clique où la placer. Tu peux ensuite la modifier ou la remplacer par un modèle.',
   spawn: 'Clique sur une surface pour placer le départ du joueur.',
   model: 'Choisis un modèle dans la bibliothèque, puis clique dans la vue 3D ou sur le plan pour le poser.',
 };
 let map, selected = -1, tool = 'move', gesture = null, ghost = null;
 const undoStack = [];
 const screen = $('preview'), plan = $('plan'), context = plan.getContext('2d');
+function presetPiece(){
+  const presets={
+    slab:['Dalle',3,.12,3],column:['Colonne',.6,3,.6],beam:['Poutre',4,.4,.45],
+    platform:['Plateforme',7,.4,5],fence:['Barrière',4,1.3,.18],
+    stair:['Marche',1.7,.25,.8],tiny:['Petit décor',.35,.35,.35],
+    sphere:['Sphère',1,1,1],cylinder:['Cylindre',1,2,1],cone:['Cône',1.6,2,1.6],
+    torus:['Anneau',2,.65,2],capsule:['Capsule',1,2,1]
+  };
+  const [name,w,h,d]=presets[$('shape-preset').value]??presets.slab;
+  return makePiece({name,w,h,d,y:h/2,primitive:['sphere','cylinder','cone','torus','capsule'].includes($('shape-preset').value)?$('shape-preset').value:'box'});
+}
+const editorViews=$('editor-views');
+function applyLayout(){
+  editorViews.dataset.layout=$('layout-mode').value;
+  document.documentElement.style.setProperty('--view-fraction',$('view-split').value+'%');
+  document.documentElement.style.setProperty('--side-width',$('sidebar-width').value+'px');
+  requestAnimationFrame(()=>{resizeRenderer();resizePlan();});
+}
+for(const id of ['layout-mode','view-split','sidebar-width'])$(id).addEventListener('input',applyLayout);
+$('sidebar-toggle').onclick=()=>{document.body.classList.toggle('inspector-hidden');applyLayout();};
+$('workspace-fullscreen').onclick=()=>{
+  if(document.fullscreenElement)document.exitFullscreen();
+  else document.querySelector('main').requestFullscreen?.();
+};
+$('focus-3d').onclick=()=>{$('layout-mode').value='only-3d';applyLayout();};
+$('focus-plan').onclick=()=>{$('layout-mode').value='only-plan';applyLayout();};
+const modelOptions=[['','Géométrie simple (défaut)'],...modelLibrary.map(m=>[m.id,m.name])];
+for(const id of ['terrain-grassModel','terrain-shrubModel']){
+  $(id).replaceChildren(...modelOptions.map(([value,label])=>new Option(label,value)));
+}
 let planRange = { scale: 10, cx: 0, cz: -6, width: 30, height: 40 };
 
 const renderer = new T.WebGLRenderer({ canvas: screen, antialias: true });
@@ -223,6 +255,7 @@ function queueRender() {
   requestAnimationFrame(() => {
     renderRequested = false;
     renderer.render(scene, camera);
+    updateDebugStats();
   });
 }
 
@@ -319,8 +352,9 @@ function paintPlan() {
   context.fillRect(0, 0, plan.width, plan.height);
   context.strokeStyle = '#37505f';
   context.lineWidth = 1;
-  const gridStep = planRange.scale < 4 ? 5 : 1;
-  for (let i = -120; i <= 120; i += gridStep) {
+  const gridStep=planRange.scale<1?25:planRange.scale<4?10:planRange.scale<12?5:1;
+  const limit=(map.worldSize??240)/2;
+  for (let i = -Math.ceil(limit/gridStep)*gridStep; i <= limit; i += gridStep) {
     const [x, z] = transform(i, i);
     if (x >= 0 && x <= plan.width) {
       context.beginPath();
@@ -336,6 +370,9 @@ function paintPlan() {
     }
   }
 
+  const [edgeX,edgeZ]=transform(-limit,-limit);
+  context.strokeStyle='#ffda9077';context.lineWidth=2;
+  context.strokeRect(edgeX,edgeZ,limit*2*planRange.scale,limit*2*planRange.scale);
   const layers = map.pieces.map((piece, index) => ({ piece, index })).sort((a, b) => a.piece.y - b.piece.y);
   for (const { piece, index } of layers) {
     const color = piece.model?.parts[0]?.color ?? (piece.color === '#ffffff' ? materialColors[piece.material] : piece.color);
@@ -404,19 +441,33 @@ gizmo.addEventListener('objectChange',()=>{
   if(tool==='translate'){
     const axes=['x','y','z'].filter(axis=>(gizmo.axis??'XYZ').includes(axis.toUpperCase()));
     const next=alignTranslation(piece,{x:mesh.position.x,y:mesh.position.y,z:mesh.position.z},axes,altHeld);
-    piece.x=clamp(next.x,-120,120);
-    piece.y=clamp(next.y,-12,33);
-    piece.z=clamp(next.z,-120,120);
+    const limit=(map.worldSize??240)/2;
+    piece.x=clamp(next.x,-limit,limit);
+    piece.y=clamp(next.y,-256,256);
+    piece.z=clamp(next.z,-limit,limit);
     mesh.position.set(piece.x,piece.y,piece.z);
   }else if(tool==='rotate'){
     piece.pitch=T.MathUtils.radToDeg(mesh.rotation.x);
     piece.yaw=T.MathUtils.radToDeg(mesh.rotation.y);
     piece.roll=T.MathUtils.radToDeg(mesh.rotation.z);
   }else{
-    piece.w=clamp(mesh.scale.x*(piece.terrain?original.w:1),.2,64);
-    piece.d=clamp(mesh.scale.z*(piece.terrain?original.d:1),.2,64);
-    if(!piece.terrain)piece.h=clamp(mesh.scale.y,.12,36);
+    piece.w=clamp(mesh.scale.x*(piece.terrain?original.w:1),.05,maxObjectSize);
+    piece.d=clamp(mesh.scale.z*(piece.terrain?original.d:1),.05,maxObjectSize);
+    if(!piece.terrain)piece.h=clamp(mesh.scale.y,.05,256);
     mesh.scale.set(piece.terrain?piece.w/original.w:piece.w,piece.terrain?1:piece.h,piece.terrain?piece.d/original.d:piece.d);
+    const anchor=$('scale-anchor').value;
+    if(anchor!=='center'){
+      const sign=anchor==='positive'?1:-1;
+      const offset=new T.Vector3((piece.w-original.w)*sign/2,
+        piece.terrain?0:(piece.h-original.h)*sign/2,(piece.d-original.d)*sign/2);
+      const quaternion=new T.Quaternion().setFromEuler(
+        new T.Euler(T.MathUtils.degToRad(original.pitch),T.MathUtils.degToRad(original.yaw),T.MathUtils.degToRad(original.roll??0),'YXZ'));
+      offset.applyQuaternion(quaternion);
+      piece.x=clamp(original.x+offset.x,-maxWorldReach,maxWorldReach);
+      piece.y=clamp(original.y+offset.y,-256,256);
+      piece.z=clamp(original.z+offset.z,-maxWorldReach,maxWorldReach);
+      mesh.position.set(piece.x,piece.y,piece.z);
+    }
   }
   mesh.updateMatrixWorld(true);
   selectionBox?.update();
@@ -481,7 +532,10 @@ function rebuildScene() {
       material.map.wrapS = material.map.wrapT = T.RepeatWrapping;
       material.color.set(piece.color);
     }
-    const geometry=piece.terrain?terrainGeometry(piece):(piece.texture||map.arenaBase)?tiledBox(piece.w,piece.h,piece.d).scale(1/piece.w,1/piece.h,1/piece.d):sharedBox;
+    const geometry=piece.terrain?terrainGeometry(piece):
+      piece.primitive&&piece.primitive!=='box'?decorPrimitiveGeometry(piece.primitive):
+      (piece.texture||map.arenaBase)?tiledBox(piece.w,piece.h,piece.d).scale(1/piece.w,1/piece.h,1/piece.d):sharedBox;
+    if(geometry!==sharedBox)transformUVs(geometry,piece);
     const mesh = new T.Mesh(geometry, material);
     mesh.userData.ownsTexture=Boolean(piece.texture);
     if(piece.terrain){
@@ -492,6 +546,7 @@ function rebuildScene() {
     placeMesh(mesh, piece);
   }
   spawn.position.set(map.spawn.x, map.spawn.y + .38, map.spawn.z);
+  refreshDiagnostics();
   updateSceneSelection();
 }
 
@@ -553,9 +608,17 @@ function updateInspector() {
   $('delete').disabled = !piece || map.pieces.length === 1;
   $('texture-clear').disabled = !piece?.texture;
   const terrain=piece?.terrain;
+  for(const key of uvFields){const input=$('p-'+key);input.disabled=!piece||Boolean(piece?.model);input.value=piece?.[key]??(key==='uvScale'?1:0);}
+  $('uv-reset').disabled=!piece||Boolean(piece?.model);
   $('terrain-controls').hidden=!terrain;
   if(terrain){
     for(const key of terrainFields)$('terrain-'+key).value=terrain[key];
+    for(const name of ['grass','shrub']){
+      const select=$('terrain-'+name+'Model'),id=terrain[name+'Model']?.id??'';
+      if(id&&![...select.options].some(option=>option.value===id))select.add(new Option(terrain[name+'Model'].name+' (carte)',id));
+      select.value=id;
+    }
+    $('terrain-cell-size').textContent=(piece.w/terrain.detail).toFixed(2)+' × '+(piece.d/terrain.detail).toFixed(2)+' m';
     $('p-pitch').disabled=$('p-yaw').disabled=$('p-roll').disabled=true;
   }
   $('rotate').disabled=!piece||Boolean(terrain);
@@ -567,6 +630,7 @@ function updateInspector() {
 // Réconcilie le modèle, la 3D, le plan, le formulaire et le brouillon.
 function sync() {
   $('map-name').value = map.name;
+  $('map-world-size').value=map.worldSize??240;
   updateInspector();
   for (const key of ['x', 'y', 'z', 'yaw']) $('spawn-' + key).value = map.spawn[key];
   rebuildScene();
@@ -642,7 +706,7 @@ function setTool(next) {
   attachGizmo();
   queueRender();
   for (const button of toolButtons) button.setAttribute('aria-pressed', String(button.dataset.tool === tool));
-  for (const canvas of [screen, plan]) {
+for (const canvas of [screen, plan]) {
     canvas.dataset.tool = tool;
     canvas.removeAttribute('data-hit');
   }
@@ -661,8 +725,8 @@ function fitViews() {
   planRange = {
     cx: center.x,
     cz: center.z,
-    width: size.x + 5,
-    height: size.z + 5,
+    width: Math.max(size.x+5,Math.min(map.worldSize??240,500)),
+    height: Math.max(size.z+5,Math.min(map.worldSize??240,500)),
   };
   scalePlan();
   const gridScale = Math.max(1, Math.ceil(Math.max(size.x, size.z) / 40));
@@ -712,7 +776,8 @@ function snapStep() { return Number($('snap').value); }
 // Aligne un déplacement au sol sur le pas et les limites du monde.
 function snapCoordinate(value) {
   const step = snapStep();
-  return T.MathUtils.clamp(Math.round(value / step) * step, -120, 120);
+  const limit=(map.worldSize??240)/2;
+  return T.MathUtils.clamp(Math.round(value / step) * step, -limit, limit);
 }
 
 // Les deux vues produisent un rayon dans le même monde 3D pour placer et déplacer les pièces.
@@ -778,7 +843,9 @@ function placementAt(canvas, event) {
     midpointSnapped=$('magnet').checked&&!event.altKey&&$('magnet-mode').value==='edge'&&midpoint.point.distanceTo(point)<=range;
   }
   const step=midpointSnapped||event.altKey?.000001:snapStep();
-  return snapPlacement(midpointSnapped?edgeMidpoint:point, normal, tool==='model'?modelPiece():shapes[tool], step);
+  const chosen=tool==='model'?modelPiece():tool==='preset'?presetPiece():shapes[tool];
+  const placed=snapPlacement(midpointSnapped?edgeMidpoint:point, normal, chosen, step);
+  return placed&&Math.max(Math.abs(placed.x),Math.abs(placed.z))<=map.worldSize/2?placed:null;
 }
 
 // Locate the closest edge of the box face hit by the placement ray, in world metres.
@@ -890,7 +957,8 @@ function moveGesture(canvas, event) {
   if (!point) return;
   const piece = current();
   const next=alignTranslation(piece,{x:point.x-gesture.dx,y:piece.y,z:point.z-gesture.dz},['x','z'],event.altKey);
-  const x=T.MathUtils.clamp(next.x,-120,120),z=T.MathUtils.clamp(next.z,-120,120);
+  const limit=(map.worldSize??240)/2;
+  const x=T.MathUtils.clamp(next.x,-limit,limit),z=T.MathUtils.clamp(next.z,-limit,limit);
   if (x === piece.x && z === piece.z) return;
   if (!gesture.recorded) {
     remember();
@@ -928,6 +996,89 @@ function endGesture(canvas, event, commit) {
   }
 }
 
+// Pan and zoom the plan independently of the perspective view.
+let planPan=null,spaceHeld=false,rightStart=null;
+document.addEventListener('keydown',event=>{
+  if(event.code==='Space'&&!event.target.closest?.('input,select,textarea,button'))spaceHeld=true;
+});
+document.addEventListener('keyup',event=>{if(event.code==='Space')spaceHeld=false;});
+window.addEventListener('blur',()=>{planPan=null;spaceHeld=false;});
+plan.addEventListener('pointerdown',event=>{
+  if(event.button!==1&&!(spaceHeld&&event.button===0))return;
+  event.preventDefault();event.stopImmediatePropagation();
+  planPan={id:event.pointerId,x:event.clientX,y:event.clientY};
+  plan.setPointerCapture(event.pointerId);
+  plan.style.cursor='grabbing';
+},{capture:true});
+plan.addEventListener('pointermove',event=>{
+  if(!planPan||planPan.id!==event.pointerId)return;
+  event.stopImmediatePropagation();
+  planRange.cx-=(event.clientX-planPan.x)/planRange.scale;
+  planRange.cz-=(event.clientY-planPan.y)/planRange.scale;
+  planPan.x=event.clientX;planPan.y=event.clientY;
+  paintPlan();
+},{capture:true});
+function endPlanPan(event){
+  if(!planPan||planPan.id!==event.pointerId)return;
+  planPan=null;plan.style.cursor='';
+  if(plan.hasPointerCapture(event.pointerId))plan.releasePointerCapture(event.pointerId);
+  event.stopImmediatePropagation();
+}
+plan.addEventListener('pointerup',endPlanPan,{capture:true});
+plan.addEventListener('pointercancel',endPlanPan,{capture:true});
+function zoomPlan(factor,event){
+  const rect=plan.getBoundingClientRect();
+  const x=event?.clientX??rect.left+rect.width/2,z=event?.clientY??rect.top+rect.height/2;
+  const before=toWorld({clientX:x,clientY:z});
+  const nextWidth=T.MathUtils.clamp(planRange.width/factor,.75,4096);
+  const ratio=nextWidth/planRange.width;
+  planRange.width=nextWidth;planRange.height*=ratio;scalePlan();
+  const after=toWorld({clientX:x,clientY:z});
+  planRange.cx+=before.x-after.x;planRange.cz+=before.z-after.z;
+  paintPlan();
+}
+plan.addEventListener('wheel',event=>{
+  event.preventDefault();
+  zoomPlan(Math.exp(-Math.sign(event.deltaY)*.18),event);
+},{passive:false});
+$('plan-zoom-in').onclick=()=>zoomPlan(1.25);
+$('plan-zoom-out').onclick=()=>zoomPlan(.8);
+$('plan-fit').onclick=fitViews;
+
+// Context actions apply to the object under the mouse, not a stale selection.
+const quickMenu=$('context-actions');
+function closeQuickMenu(){quickMenu.hidden=true;}
+for(const canvas of [screen,plan]){
+  canvas.addEventListener('pointerdown',event=>{
+    if(event.button===2)rightStart={canvas,x:event.clientX,y:event.clientY};
+    else closeQuickMenu();
+  });
+  canvas.addEventListener('contextmenu',event=>{
+    event.preventDefault();
+    if(rightStart?.canvas!==canvas||Math.hypot(event.clientX-rightStart.x,event.clientY-rightStart.y)>6)return;
+    const hit=pointUnderPointer(canvas,event);
+    const index=hit?group.children.indexOf(hit.object):-1;
+    if(index<0){closeQuickMenu();return;}
+    choose(index);
+    $('context-title').textContent=current()?.name??'Pièce';
+    quickMenu.hidden=false;
+    const width=195,height=285;
+    quickMenu.style.left=Math.max(4,Math.min(event.clientX,innerWidth-width-6))+'px';
+    quickMenu.style.top=Math.max(4,Math.min(event.clientY,innerHeight-height-6))+'px';
+  });
+}
+document.addEventListener('pointerdown',event=>{if(!quickMenu.contains(event.target))closeQuickMenu();});
+document.addEventListener('keydown',event=>{if(event.key==='Escape')closeQuickMenu();});
+for(const button of quickMenu.querySelectorAll('[data-context-action]'))button.onclick=()=>{
+  const action=button.dataset.contextAction;closeQuickMenu();
+  if(action==='duplicate')duplicatePiece();
+  else if(action==='delete')removePiece();
+  else if(action==='focus')$('focus-piece').click();
+  else if(action==='select')setTool('move');
+  else setTool(action);
+};
+
+
 for (const canvas of [screen, plan]) {
   canvas.addEventListener('pointerdown', event => beginGesture(canvas, event), { capture: true });
   canvas.addEventListener('pointermove', event => moveGesture(canvas, event));
@@ -940,6 +1091,18 @@ for (const canvas of [screen, plan]) {
 }
 
 $('p-material').append(...mapMaterials.map((name, index) => new Option(name, index)));
+for(const key of uvFields){
+  $('p-'+key).addEventListener('change',event=>{
+    const piece=current();if(!piece||piece.model)return;
+    remember();piece[key]=Number(event.target.value);
+    map=parseMap(map);sync();
+  });
+}
+$('uv-reset').onclick=()=>{
+  const piece=current();if(!piece||piece.model)return;
+  remember();Object.assign(piece,{uvScale:1,uvRotation:0,uvOffsetX:0,uvOffsetY:0});
+  map=parseMap(map);sync();
+};
 for (const key of fields) {
   $('p-' + key).addEventListener('change', event => {
     const piece = current();
@@ -953,6 +1116,12 @@ for (const key of fields) {
   });
 }
 
+$('map-world-size').onchange=event=>{
+  remember();
+  map.worldSize=T.MathUtils.clamp(Number(event.target.value)||240,24,2048);
+  map=parseMap(map);sync();fitViews();
+  notice('Zone de construction : '+map.worldSize+' × '+map.worldSize+' m.');
+};
 $('map-name').onchange = event => {
   remember();
   map.name = event.target.value;
@@ -1000,10 +1169,14 @@ $('undo').onclick = undo;
 $('zoom-fit').onclick = fitViews;
 $('snap').onchange = () => showGhost(null);
 $('new-example').onclick = () => loadMap(defaultMap(), 'Arène de départ ouverte.');
-$('blank-map').onclick = () => loadMap({
-  format:'gorilla-lab-map',version:1,name: 'Ma nouvelle map', spawn: { x: 0, y: .025, z: 3, yaw: 0 },
-  pieces: [makePiece({ name: 'Sol', y: -.25, w: 24, d: 24 })],
-}, 'Nouvelle map créée. Sélectionne Bloc, Rampe ou Mur, puis clique où le poser.');
+$('blank-map').onclick = () => {
+  const size=T.MathUtils.clamp(Number($('map-world-size').value)||240,24,2048);
+  loadMap({
+    format:'gorilla-lab-map',version:1,name:'Ma nouvelle map',worldSize:size,
+    spawn:{x:0,y:.025,z:3,yaw:0},
+    pieces:[makePiece({name:'Sol',y:-.25,w:Math.min(size,maxObjectSize),d:Math.min(size,maxObjectSize)})],
+  },'Nouvelle carte : '+size+' × '+size+' m. Tu peux sélectionner et modeler le sol.');
+};
 $('surface').onchange = event => {
   const preset = surfacePresets[event.target.value];
   const piece = current();
@@ -1070,7 +1243,36 @@ $('test-map').onclick = () => {
   }
 };
 
-const terrainFields=['detail','seed','amplitude','frequency','grass','shrub'];
+const terrainFields=['detail','seed','amplitude','frequency','octaves','roughness','ridge','edgeFade','grass','shrub','grassSize','shrubSize'];
+for(const name of ['grass','shrub']){
+  $('terrain-'+name+'Model').addEventListener('change',event=>{
+    const piece=current();if(!piece?.terrain)return;
+    const model=modelLibrary.find(m=>m.id===event.target.value)??(piece.terrain[name+'Model']?.id===event.target.value?piece.terrain[name+'Model']:null);
+    remember();piece.terrain[name+'Model']=model?structuredClone(model):null;
+    map=parseMap(map);sync();notice('Végétation personnalisée mise à jour.');
+  });
+}
+$('terrain-grassTexture-file').onchange=async event=>{
+  const file=event.target.files?.[0],piece=current();
+  event.target.value='';if(!file||!piece?.terrain)return;
+  try{
+    if(!['image/png','image/jpeg','image/webp'].includes(file.type))throw Error('Format PNG, JPG ou WebP uniquement.');
+    const bitmap=await createImageBitmap(file),canvas=document.createElement('canvas');
+    const scale=Math.min(1,512/Math.max(bitmap.width,bitmap.height));
+    canvas.width=Math.round(bitmap.width*scale);canvas.height=Math.round(bitmap.height*scale);
+    canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close();
+    const texture=canvas.toDataURL('image/webp',.76);
+    if(texture.length>=500000)throw Error('Texture de végétation trop volumineuse (maximum 500 Ko).');
+    if(!map.pieces.includes(piece))return;
+    remember();piece.terrain.grassTexture=texture;
+    sync();notice('Texture d’herbe importée.');
+  }catch(error){notice(error.message);}
+};
+$('terrain-grassTexture-clear').onclick=()=>{
+  if(!current()?.terrain)return;
+  remember();current().terrain.grassTexture=null;
+  sync();
+};
 for(const key of terrainFields)$('terrain-'+key).onchange=event=>{
   const piece=current();if(!piece?.terrain)return;
   remember();
@@ -1144,6 +1346,33 @@ document.addEventListener('keydown', event => {
   event.preventDefault();
 });
 
+const diagnosticBoxes=new T.Group();scene.add(diagnosticBoxes);
+function updateDebugStats(){
+  if(!$('debug-stats'))return;
+  const tris=renderer.info.render.triangles;
+  const count=map?.pieces?.length??0;
+  $('debug-stats').textContent=count+' éléments · '+tris.toLocaleString('fr-FR')+' triangles au rendu · espace '+(map?.worldSize??240)+' m';
+}
+function refreshDiagnostics(){
+  for(const box of [...diagnosticBoxes.children]){diagnosticBoxes.remove(box);box.geometry.dispose();box.material.dispose();}
+  grid.visible=$('debug-grid').checked;
+  for(const mesh of group.children){
+    if(mesh.material)mesh.material.wireframe=$('debug-wire').checked;
+    if($('debug-hitboxes').checked){
+      diagnosticBoxes.add(new T.BoxHelper(mesh,'#fa9945'));
+    }
+  }
+  queueRender();
+}
+for(const id of ['debug-grid','debug-wire','debug-hitboxes'])$(id).onchange=refreshDiagnostics;
+$('debug-coords').onchange=()=>{if(!$('debug-coords').checked)updateDebugStats();};
+for(const canvas of [screen,plan])canvas.addEventListener('pointermove',event=>{
+  if(!$('debug-coords').checked||gesture||planPan)return;
+  const hit=pointUnderPointer(canvas,event);
+  if(!hit)return;
+  const point=hit.point;
+  $('debug-stats').textContent='X '+point.x.toFixed(2)+' · Y '+point.y.toFixed(2)+' · Z '+point.z.toFixed(2)+' m · '+map.pieces.length+' éléments';
+});
 try {
   const draft = localStorage.getItem(draftKey);
   if (draft) {

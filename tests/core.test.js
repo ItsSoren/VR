@@ -13,7 +13,8 @@ import {parseMap,exampleMap} from '../gorilla-lab/map-format.js';
 import {normalizeModelPack,createModelUnitGeometry,modelDimensions} from '../gorilla-lab/model-pack.js';
 import {createKeyboardState} from '../gorilla-lab/flat-controls.js';
 import {screenPixelRatio} from '../gorilla-lab/screen-render.js';
-import {terrainHeight,sculptTerrain} from '../gorilla-lab/terrain-edit.js';
+import {terrainHeight,sculptTerrain,normalizeTerrain,resizeTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from '../gorilla-lab/terrain-edit.js';
+import {transformUVs,tiledBox,decorPrimitiveGeometry} from '../gorilla-lab/texture-geometry.js';
 
 test('held trigger emits ten shots each second and stops on release',()=>{
   const scene=new T.Scene(),gun=createArcadeBlaster(scene,{});
@@ -382,4 +383,71 @@ test('a composite model survives map export with its decorative or physical iden
   const prop={...model,kind:'prop'};
   map.pieces.at(-1).model=prop;
   assert.equal(parseMap(JSON.stringify(map)).pieces.at(-1).model.kind,'prop');
+});
+
+test('large maps preserve dimensions and individual UV transforms',()=>{
+  const map=exampleMap();
+  map.worldSize=640;
+  const piece=map.pieces[0];
+  Object.assign(piece,{x:190,w:120,d:100,uvScale:2.5,uvRotation:45,uvOffsetX:.35,uvOffsetY:-.2});
+  const saved=parseMap(JSON.stringify(map));
+  assert.equal(saved.worldSize,640);
+  assert.equal(saved.pieces[0].w,120);
+  assert.equal(saved.pieces[0].x,190);
+  assert.equal(saved.pieces[0].uvRotation,45);
+  const geo=tiledBox(10,1,10);
+  const a=geo.attributes.uv.getX(0);
+  transformUVs(geo,saved.pieces[0]);
+  assert.notEqual(geo.attributes.uv.getX(0),a);
+  geo.dispose();
+});
+
+test('terrain detail and procedural noise options survive serialization and remeshing',()=>{
+  const piece=exampleMap().pieces[0];
+  piece.terrain=normalizeTerrain({
+    detail:64,amplitude:4,frequency:.2,octaves:5,roughness:.66,
+    ridge:.75,edgeFade:.4,grassSize:1.5,shrubSize:1.25
+  });
+  const map=exampleMap();map.pieces[0]=piece;
+  const saved=parseMap(JSON.stringify(map)).pieces[0];
+  assert.equal(saved.terrain.detail,64);
+  assert.equal(saved.terrain.octaves,5);
+  assert.equal(saved.terrain.ridge,.75);
+  const geo=terrainGeometry(saved);
+  assert.equal(geo.attributes.position.count,65*65);
+  geo.dispose();
+  const refined=resizeTerrain(saved.terrain,128);
+  assert.equal(refined.detail,128);
+  assert.equal(refined.heights,null);
+});
+
+test('decorative vegetation can use custom composite models',()=>{
+  const model=normalizeModelPack({version:1,models:[{
+    id:'custom-model-grass-2026',name:'Brin',kind:'structure',parts:[
+      {name:'Tige',shape:'box',position:[0,0,0],rotation:[0,0,0],scale:[.2,.8,.2],color:'#337744',surface:'plain'}
+    ]
+  }]}).models[0];
+  const piece=exampleMap().pieces[0];
+  piece.terrain=normalizeTerrain({detail:16,grass:.4,shrub:.2,grassModel:model,shrubModel:model});
+  const map=exampleMap();map.pieces[0]=piece;
+  const saved=parseMap(JSON.stringify(map)).pieces[0];
+  assert.equal(saved.terrain.grassModel.parts.length,1);
+  const vegetation=terrainVegetation(saved);
+  assert.equal(vegetation.children.length,2);
+  assert.ok(vegetation.children[0].count>0);
+  disposeVegetation(vegetation);
+});
+
+test('static decorative primitives survive map serialization and generate real meshes',()=>{
+  const shapes=['sphere','cylinder','cone','torus','capsule'];
+  for(const primitive of shapes){
+    const map=exampleMap();
+    map.pieces[0].primitive=primitive;
+    assert.equal(parseMap(JSON.stringify(map)).pieces[0].primitive,primitive);
+    const geo=decorPrimitiveGeometry(primitive);
+    assert.ok(geo.attributes.position.count>24);
+    geo.dispose();
+  }
+  const map=exampleMap();map.pieces[0].primitive='invalid';
+  assert.equal(parseMap(map).pieces[0].primitive,'box');
 });

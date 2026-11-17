@@ -7,8 +7,10 @@ import {normalizeTerrain} from './terrain-edit.js';
 export const mapMaterials=['Ardoise','Nacre','Brique','Sable','Marbre','Bois','Cuivre','Chrome','Carreaux','Béton','Verre bleu','Verre ambre','Glace','Caoutchouc','Émail','Mosaïque','Benchmark'];
 export const materialColors=['#555e6a','#537586','#855443','#a28e61','#bbb8b0','#664527','#794a36','#758291','#293e4b','#626664','#94cfdd','#d1a053','#7cb0cf','#45404b','#40468c','#455d62','#141414'];
 export const surfacePresets={normal:{grip:.8,gravity:1,bounce:1},ice:{grip:.035,gravity:1,bounce:1},rubber:{grip:1.15,gravity:1,bounce:1.52},moon:{grip:.8,gravity:.28,bounce:1}};
-export const maxMapBytes=3_000_000;
-export const maxPieces=240;
+export const maxMapBytes=8_000_000;
+export const maxPieces=512;
+export const maxWorldReach=1024;
+export const maxObjectSize=512;
 const number=(value,min,max,fallback)=>typeof value==='number'&&Number.isFinite(value)?Math.max(min,Math.min(max,value)):fallback;
 const text=(value,length,fallback)=>typeof value==='string'&&value.trim()?value.trim().slice(0,length):fallback;
 export function parseMap(input){
@@ -22,18 +24,22 @@ export function parseMap(input){
   const s=input.spawn??{};
   return {
     format:'gorilla-lab-map',version:1,...(input.arenaBase===true?{arenaBase:true}:{}),name:text(input.name,56,'Ma map'),
-    spawn:{x:number(s.x,-120,120,0),y:number(s.y,-10,30,.06),z:number(s.z,-120,120,3),yaw:number(s.yaw,-360,360,0)},
+    worldSize:number(input.worldSize,24,2048,240),
+    spawn:{x:number(s.x,-maxWorldReach,maxWorldReach,0),y:number(s.y,-256,256,.06),z:number(s.z,-maxWorldReach,maxWorldReach,3),yaw:number(s.yaw,-360,360,0)},
     pieces:input.pieces.map((p,i)=>{
       if(!p||typeof p!=='object')throw Error('Pièce invalide : '+(i+1));
       const terrain=p.terrain&&typeof p.terrain==='object'?normalizeTerrain(p.terrain):null;
       const model=p.model ? normalizeModelPack({version:1,models:[p.model]}).models[0] : null;
       if(model && !model.parts.length)throw Error('Le modèle doit contenir au moins une forme.');
       return {
-        name:text(p.name,36,'Pièce '+(i+1)),x:number(p.x,-120,120,0),y:number(p.y,-12,33,0),z:number(p.z,-120,120,0),
-        w:number(p.w,.2,64,3),h:number(p.h,.12,36,.5),d:number(p.d,.2,64,3),
+        name:text(p.name,36,'Pièce '+(i+1)),x:number(p.x,-maxWorldReach,maxWorldReach,0),y:number(p.y,-256,256,0),z:number(p.z,-maxWorldReach,maxWorldReach,0),
+        w:number(p.w,.05,maxObjectSize,3),h:number(p.h,.05,256,.5),d:number(p.d,.05,maxObjectSize,3),
         pitch:terrain?0:number(p.pitch,-180,180,0),yaw:terrain?0:number(p.yaw,-360,360,0),roll:terrain?0:number(p.roll,-180,180,0),
         ...(terrain?{terrain}:{}),
         ...(model?{model}:{}),
+        primitive:['sphere','cylinder','cone','torus','capsule'].includes(p.primitive)?p.primitive:'box',
+        uvScale:number(p.uvScale,.05,100,1),uvOffsetX:number(p.uvOffsetX,-100,100,0),
+        uvOffsetY:number(p.uvOffsetY,-100,100,0),uvRotation:number(p.uvRotation,-360,360,0),
         material:Math.round(number(p.material,0,16,0)),
         color:typeof p.color==='string'&&/^#[a-f0-9]{6}$/i.test(p.color)?p.color:'#ffffff',
         grip:number(p.grip,0,1.5,.8),gravity:number(p.gravity,.05,2.5,1),bounce:number(p.bounce,0,1.65,1),
@@ -89,7 +95,7 @@ export function snapPlacement(hit,normal,shape,step=.25){
   // Snap along the surface and preserve the exact face-to-face separation.
   const correction=extent-(x-hit.x)*n.x-(y-hit.y)*n.y-(z-hit.z)*n.z;
   x+=n.x*correction;y+=n.y*correction;z+=n.z*correction;
-  if(![x,y,z].every(Number.isFinite)||Math.abs(x)>120||Math.abs(z)>120||y<-12||y>33)return null;
+  if(![x,y,z].every(Number.isFinite)||Math.abs(x)>maxWorldReach||Math.abs(z)>maxWorldReach||y< -256||y>256)return null;
   return {...shape,x,y,z};
 }
 export const storageKey='gorilla-lab-custom-map-v1';

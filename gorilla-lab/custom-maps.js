@@ -1,6 +1,6 @@
 
 import * as T from 'three';
-import {tiledBox} from './texture-geometry.js';
+import {tiledBox,transformUVs,decorPrimitiveGeometry} from './texture-geometry.js';
 import {terrainGeometry,terrainCollider,terrainVegetation,disposeVegetation,sculptTerrain,normalizeTerrain,resizeTerrain} from './terrain-edit.js';
 import {boxCollider} from './physics.js';
 import {createModelUnitGeometry,createModelMaterial} from './model-pack.js';
@@ -85,7 +85,10 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
       return {mesh,collider,custom:true,model:true};
     }
     const {material,custom,ownTexture}=card(piece);
-    const mesh=new T.Mesh(piece.terrain?terrainGeometry(piece):tiledBox(piece.w,piece.h,piece.d),material);
+    const geometry=piece.terrain?terrainGeometry(piece):piece.primitive&&piece.primitive!=='box'
+      ?decorPrimitiveGeometry(piece.primitive).scale(piece.w,piece.h,piece.d)
+      :tiledBox(piece.w,piece.h,piece.d);
+    const mesh=new T.Mesh(transformUVs(geometry,piece),material);
     mesh.position.set(piece.x,piece.y,piece.z);
     mesh.rotation.set(T.MathUtils.degToRad(piece.pitch),T.MathUtils.degToRad(piece.yaw),T.MathUtils.degToRad(piece.roll??0),'YXZ');
     mesh.castShadow=mesh.receiveShadow=true;

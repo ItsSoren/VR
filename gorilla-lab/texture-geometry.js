@@ -11,3 +11,30 @@ export function tiledBox(w,h,d){
   }
   return geometry;
 }
+
+// Edit texture coordinates per piece, never mutate a shared texture used elsewhere.
+export function transformUVs(geometry,piece){
+  const uv=geometry.attributes.uv;
+  if(!uv)return geometry;
+  const scale=1/(piece.uvScale??1),angle=(piece.uvRotation??0)*Math.PI/180;
+  const ca=Math.cos(angle),sa=Math.sin(angle),x0=piece.uvOffsetX??0,y0=piece.uvOffsetY??0;
+  for(let i=0;i<uv.count;i++){
+    const u=uv.getX(i)*scale,v=uv.getY(i)*scale;
+    uv.setXY(i,u*ca-v*sa+x0,u*sa+v*ca+y0);
+  }
+  uv.needsUpdate=true;
+  return geometry;
+}
+
+// Basic decorative shapes. Geometry stays unit-sized in the editor and can be
+// baked to world dimensions when the game builds a static map.
+export function decorPrimitiveGeometry(kind){
+  switch(kind){
+    case 'sphere':return new T.SphereGeometry(.5,24,16);
+    case 'cylinder':return new T.CylinderGeometry(.5,.5,1,24);
+    case 'cone':return new T.ConeGeometry(.5,1,24);
+    case 'torus':return new T.TorusGeometry(.34,.14,12,32);
+    case 'capsule':return new T.CapsuleGeometry(.32,.36,8,16);
+    default:return new T.BoxGeometry(1,1,1);
+  }
+}
