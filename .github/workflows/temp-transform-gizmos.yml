@@ -1,0 +1,32 @@
+name: Temporary transform gizmos regression
+on:
+  push:
+    branches: [fix/transform-gizmos-model-map-r42]
+    paths:
+      - '.github/workflows/temp-transform-gizmos.yml'
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-package-lock
+      - run: npm test
+      - run: npm run build
+      - run: npm install --no-save --no-package-lock puppeteer-core
+      - run: node scripts/temp-transform-gizmos-browser.mjs
+      - name: Commit built workshop bundles
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add model-editor.html gorilla-model-editor-r26.js editor.html gorilla-editor-r37.js
+          if ! git diff --cached --quiet; then
+            git commit -m "Build transform-controls workshop fixes"
+            git push
+          fi
