@@ -1234,7 +1234,36 @@ $('test-map').onclick = () => {
   }
 };
 
-const terrainFields=['detail','seed','amplitude','frequency','grass','shrub'];
+const terrainFields=['detail','seed','amplitude','frequency','octaves','roughness','ridge','edgeFade','grass','shrub','grassSize','shrubSize'];
+for(const name of ['grass','shrub']){
+  $('terrain-'+name+'Model').addEventListener('change',event=>{
+    const piece=current();if(!piece?.terrain)return;
+    const model=modelLibrary.find(m=>m.id===event.target.value)??(piece.terrain[name+'Model']?.id===event.target.value?piece.terrain[name+'Model']:null);
+    remember();piece.terrain[name+'Model']=model?structuredClone(model):null;
+    map=parseMap(map);sync();notice('Végétation personnalisée mise à jour.');
+  });
+}
+$('terrain-grassTexture-file').onchange=async event=>{
+  const file=event.target.files?.[0],piece=current();
+  event.target.value='';if(!file||!piece?.terrain)return;
+  try{
+    if(!['image/png','image/jpeg','image/webp'].includes(file.type))throw Error('Format PNG, JPG ou WebP uniquement.');
+    const bitmap=await createImageBitmap(file),canvas=document.createElement('canvas');
+    const scale=Math.min(1,512/Math.max(bitmap.width,bitmap.height));
+    canvas.width=Math.round(bitmap.width*scale);canvas.height=Math.round(bitmap.height*scale);
+    canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close();
+    const texture=canvas.toDataURL('image/webp',.76);
+    if(texture.length>=500000)throw Error('Texture de végétation trop volumineuse (maximum 500 Ko).');
+    if(!map.pieces.includes(piece))return;
+    remember();piece.terrain.grassTexture=texture;
+    sync();notice('Texture d’herbe importée.');
+  }catch(error){notice(error.message);}
+};
+$('terrain-grassTexture-clear').onclick=()=>{
+  if(!current()?.terrain)return;
+  remember();current().terrain.grassTexture=null;
+  sync();
+};
 for(const key of terrainFields)$('terrain-'+key).onchange=event=>{
   const piece=current();if(!piece?.terrain)return;
   remember();
@@ -1308,6 +1337,33 @@ document.addEventListener('keydown', event => {
   event.preventDefault();
 });
 
+const diagnosticBoxes=new T.Group();scene.add(diagnosticBoxes);
+function updateDebugStats(){
+  if(!$('debug-stats'))return;
+  const tris=renderer.info.render.triangles;
+  const count=map?.pieces?.length??0;
+  $('debug-stats').textContent=count+' éléments · '+tris.toLocaleString('fr-FR')+' triangles au rendu · espace '+(map?.worldSize??240)+' m';
+}
+function refreshDiagnostics(){
+  for(const box of [...diagnosticBoxes.children]){diagnosticBoxes.remove(box);box.geometry.dispose();box.material.dispose();}
+  grid.visible=$('debug-grid').checked;
+  for(const mesh of group.children){
+    if(mesh.material)mesh.material.wireframe=$('debug-wire').checked;
+    if($('debug-hitboxes').checked){
+      diagnosticBoxes.add(new T.BoxHelper(mesh,'#fa9945'));
+    }
+  }
+  queueRender();
+}
+for(const id of ['debug-grid','debug-wire','debug-hitboxes'])$(id).onchange=refreshDiagnostics;
+$('debug-coords').onchange=()=>{if(!$('debug-coords').checked)updateDebugStats();};
+for(const canvas of [screen,plan])canvas.addEventListener('pointermove',event=>{
+  if(!$('debug-coords').checked||gesture||planPan)return;
+  const hit=pointUnderPointer(canvas,event);
+  if(!hit)return;
+  const point=hit.point;
+  $('debug-stats').textContent='X '+point.x.toFixed(2)+' · Y '+point.y.toFixed(2)+' · Z '+point.z.toFixed(2)+' m · '+map.pieces.length+' éléments';
+});
 try {
   const draft = localStorage.getItem(draftKey);
   if (draft) {
