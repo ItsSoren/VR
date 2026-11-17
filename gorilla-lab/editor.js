@@ -7,6 +7,7 @@ import {tiledBox,transformUVs,decorPrimitiveGeometry} from './texture-geometry.j
 import {readModelPack,createModelUnitGeometry,createModelMaterial,modelDimensions} from './model-pack.js';
 import {normalizeTerrain,resizeTerrain,sculptTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from './terrain-edit.js';
 import {texturePresets,seamlessTexture} from './seamless-texture.js';
+import {openTextureStudio} from './texture-studio.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import {resizedCenter} from './editor-scale.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -763,6 +764,8 @@ function updateInspector() {
   for (const id of ['rotate', 'duplicate', 'texture-file', 'surface', 'spawn-here']) $(id).disabled = !piece;
   $('delete').disabled = !piece || map.pieces.length === 1;
   $('texture-clear').disabled = !piece?.texture;
+  $('texture-paint').disabled = !piece||Boolean(piece.model);
+  $('terrain-grassTexture-paint').disabled = !terrain;
   const terrain=piece?.terrain;
   for(const key of uvFields){const input=$('p-'+key);input.disabled=!piece||Boolean(piece?.model);input.value=piece?.[key]??(key==='uvScale'?1:0);}
   $('uv-reset').disabled=!piece||Boolean(piece?.model);
@@ -1367,6 +1370,33 @@ $('texture-file').onchange = async event => {
   } finally {
     event.target.value = '';
   }
+};
+$('texture-paint').onclick=()=>{
+  const piece=current();
+  if(!piece||piece.model)return notice('Peins les pièces d’un modèle depuis GORILLA / FOUNDRY.');
+  openTextureStudio({
+    name:piece.name||'Élément du décor',initial:piece.texture,
+    tint:piece.color&&piece.color!=='#ffffff'?piece.color:'#75838a',
+    maxDataBytes:850000,
+    onApply:async data=>{
+      if(!map.pieces.includes(piece))throw Error('La pièce sélectionnée a changé ou été supprimée.');
+      remember();piece.texture=data;
+      map=parseMap(map);sync();notice('Texture peinte appliquée. Export JSON pour la conserver dans la carte.');
+    }
+  });
+};
+$('terrain-grassTexture-paint').onclick=()=>{
+  const piece=current();
+  if(!piece?.terrain)return;
+  openTextureStudio({
+    name:'Herbe / '+piece.name,initial:piece.terrain.grassTexture,
+    tint:'#63814e',maxDataBytes:450000,
+    onApply:async data=>{
+      if(!map.pieces.includes(piece))throw Error('Terrain supprimé avant application.');
+      remember();piece.terrain.grassTexture=data;
+      map=parseMap(map);sync();notice('Texture d’herbe peinte et appliquée.');
+    }
+  });
 };
 $('texture-clear').onclick = () => {
   if (!current()?.texture) return;
