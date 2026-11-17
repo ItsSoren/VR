@@ -73,7 +73,7 @@ async function dragRing(mode,preferred='Z'){
  const dx=p.x-p.cx,dy=p.y-p.cy;
  const factor=mode==='scale'?1:mode==='translate'?1:1;
  let vx,vy;
- if(mode==='rotate'){
+ if(mode.endsWith('rotate')){
    const length=Math.max(1,Math.hypot(dx,dy));vx=-dy/length*85;vy=dx/length*85;
  }else{
    const length=Math.max(1,Math.hypot(dx,dy));vx=dx/length*100;vy=dy/length*100;
