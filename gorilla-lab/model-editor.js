@@ -375,7 +375,8 @@ function partMesh(part){
 }
 function attachGizmo(){
   if(!gizmo)return;
-  const mesh=viewMode==='select'?null:previews.children[partIndex]??null;
+  const selectedMesh=previews.children[partIndex];
+  const mesh=viewMode==='select'||!selectedMesh?.visible?null:selectedMesh;
   // Keep the same attachment while dragging. Re-attaching resets the
   // TransformControls axis and quietly aborts rotate/scale/translate.
   if(gizmo.object!==mesh){
@@ -395,7 +396,7 @@ function attachGizmo(){
 }
 function updateSelectionOutline(){
   const mesh=previews.children[partIndex];
-  selection.visible=!!mesh;
+  selection.visible=!!mesh?.visible;
   if(mesh)selection.box.setFromObject(mesh);
   render();
 }
@@ -409,6 +410,8 @@ function frameModel(onlySelected=false){
   const box=onlySelected&&modelPart
     ?new T.Box3().setFromObject(modelPart)
     :new T.Box3().setFromObject(previews);
+  if(!onlySelected&&referencePreviews.children.length)
+    box.union(new T.Box3().setFromObject(referencePreviews));
   const center=new T.Vector3(),size=new T.Vector3();
   if(!box.isEmpty()){box.getCenter(center);box.getSize(size);}
   const halfH=T.MathUtils.degToRad(camera.fov/2);
@@ -419,21 +422,45 @@ function frameModel(onlySelected=false){
   camera.position.copy(center).addScaledVector(direction,distance);
   orbit.update();render();
 }
+function updateReferencePreview(){
+  for(const mesh of [...referencePreviews.children]){
+    referencePreviews.remove(mesh);mesh.geometry.dispose();mesh.material.dispose();
+  }
+  if(!renderer)return;
+  const models=pack.models.filter(entry=>references.has(entry.id)&&entry.id!==modelId&&entry.parts.length);
+  models.forEach((entry,index)=>{
+    const geometry=createModelUnitGeometry(entry);
+    const material=new T.MeshBasicMaterial({color:'#8bd1dc',side:T.DoubleSide,
+      transparent:true,opacity:.25,depthWrite:false});
+    const ghost=new T.Mesh(geometry,material);
+    ghost.name='Référence : '+entry.name;
+    const angle=(index/models.length)*Math.PI*2-Math.PI/2;
+    const radius=2.2+Math.floor(index/5)*1.6;
+    ghost.position.set(Math.cos(angle)*radius,0,Math.sin(angle)*radius);
+    ghost.renderOrder=3;
+    referencePreviews.add(ghost);
+  });
+}
 function updatePreview(frame=false){
   gizmo?.detach();
   for(const mesh of [...previews.children]){
     previews.remove(mesh);mesh.geometry.dispose();
     if(mesh.userData.ownMaterial)disposeModelMaterial(mesh.material);
   }
-  const parts=currentModel()?.parts??[];
-  if(renderer)for(const part of parts)previews.add(partMesh(part));
+  const parts=currentModel()?.parts??[],hidden=hiddenParts();
+  if(renderer)parts.forEach((part,index)=>{
+    const mesh=partMesh(part);mesh.visible=!hidden.has(index);previews.add(mesh);
+  });
+  updateReferencePreview();
   $('preview-empty').hidden=Boolean(parts.length&&renderer);
   $('preview-empty').textContent=!renderer?'Prévisualisation 3D indisponible : les valeurs restent modifiables.'
     :currentModel()?'Ajoute une forme avec la barre à gauche pour commencer.'
-    :'Crée un modèle avec ＋ puis assemble tes pièces.';
-  $('preview-tag').textContent=parts.length+' PIÈCE'+(parts.length>1?'S':'')+' / '+(currentModel()?.kind==='structure'?'DÉCOR':'OBJET');
+    :'Crée un modèle avec + Nouveau modèle puis assemble tes pièces.';
+  $('preview-tag').textContent=parts.length+' PIÈCE'+(parts.length>1?'S':'')+
+    ' / '+(currentModel()?.kind==='structure'?'DÉCOR':'OBJET')+
+    (referencePreviews.children.length?' · '+referencePreviews.children.length+' RÉF.':'');
   showSelection();
-  if(frame&&parts.length)frameModel();
+  if(frame&&(parts.length||referencePreviews.children.length))frameModel();
   else render();
 }
 function refreshModel(){
@@ -444,6 +471,23 @@ function refreshModel(){
 function selectPart(index){
   if(!currentModel()?.parts[index])return;
   partIndex=index;updateParts();updateInspector();showSelection();
+}
+function switchModel(id){
+  if(!pack.models.some(entry=>entry.id===id)||id===modelId)return;
+  modelId=id;partIndex=0;
+  refreshModel();
+  status('Modèle actif : '+currentModel().name);
+}
+function toggleReference(id){
+  if(id===modelId||!pack.models.some(entry=>entry.id===id))return;
+  if(references.has(id))references.delete(id);
+  else references.add(id);
+  storeWorkspace();updateModelLists();updateReferencePreview();frameModel();
+}
+function changeMask(slot){
+  if(!modelId)return;
+  workspace.active[modelId]=slot;storeWorkspace();
+  updateParts();updatePreview();
 }
 function setTool(tool){
   viewMode=tool;
@@ -514,16 +558,36 @@ function exampleParts(){
     makePart('sphere','Nez',[0,-.025,-.181],[.071,.039,.033],dark),
   ];
 }
+function newModelId(){
+  return 'custom-model-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10);
+}
 function addModel(example=false){
   if(pack.models.length>=modelLimits.models)return;
   remember();
-  const id='custom-model-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10);
+  const id=newModelId();
   const name=example?'Singe de pierre':'Modèle '+(pack.models.length+1);
   pack.models.push({id,name,kind:'structure',inGame:false,
     properties:{...defaultModelProperties},parts:example?exampleParts():[]});
   modelId=id;partIndex=0;
   markDirty();refreshModel();
   setPanel('geometry');
+  if(!example){
+    $('model-title').focus({preventScroll:true});
+    $('model-title').select();
+  }
+}
+function duplicateModel(){
+  const model=currentModel();
+  if(!model||pack.models.length>=modelLimits.models)return;
+  remember();
+  const copied=structuredClone(model);
+  copied.id=newModelId();
+  copied.name=(model.name.slice(0,37)+' · variante').slice(0,48);
+  pack.models.push(copied);
+  modelId=copied.id;partIndex=0;
+  markDirty();refreshModel();
+  $('model-title').focus({preventScroll:true});$('model-title').select();
+  status('Variante créée : modifie-la sans toucher au modèle original.');
 }
 function addPart(shape=$('new-shape').value){
   const model=currentModel();
