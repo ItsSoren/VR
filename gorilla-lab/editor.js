@@ -706,88 +706,6 @@ function setTool(next) {
   attachGizmo();
   queueRender();
   for (const button of toolButtons) button.setAttribute('aria-pressed', String(button.dataset.tool === tool));
-  // Pan and zoom the plan independently of the perspective view.
-let planPan=null,spaceHeld=false,rightStart=null;
-document.addEventListener('keydown',event=>{
-  if(event.code==='Space'&&!event.target.closest?.('input,select,textarea,button'))spaceHeld=true;
-});
-document.addEventListener('keyup',event=>{if(event.code==='Space')spaceHeld=false;});
-window.addEventListener('blur',()=>{planPan=null;spaceHeld=false;});
-plan.addEventListener('pointerdown',event=>{
-  if(event.button!==1&&!(spaceHeld&&event.button===0))return;
-  event.preventDefault();event.stopImmediatePropagation();
-  planPan={id:event.pointerId,x:event.clientX,y:event.clientY};
-  plan.setPointerCapture(event.pointerId);
-  plan.style.cursor='grabbing';
-},{capture:true});
-plan.addEventListener('pointermove',event=>{
-  if(!planPan||planPan.id!==event.pointerId)return;
-  event.stopImmediatePropagation();
-  planRange.cx-=(event.clientX-planPan.x)/planRange.scale;
-  planRange.cz-=(event.clientY-planPan.y)/planRange.scale;
-  planPan.x=event.clientX;planPan.y=event.clientY;
-  paintPlan();
-},{capture:true});
-function endPlanPan(event){
-  if(!planPan||planPan.id!==event.pointerId)return;
-  planPan=null;plan.style.cursor='';
-  if(plan.hasPointerCapture(event.pointerId))plan.releasePointerCapture(event.pointerId);
-  event.stopImmediatePropagation();
-}
-plan.addEventListener('pointerup',endPlanPan,{capture:true});
-plan.addEventListener('pointercancel',endPlanPan,{capture:true});
-function zoomPlan(factor,event){
-  const rect=plan.getBoundingClientRect();
-  const x=event?.clientX??rect.left+rect.width/2,z=event?.clientY??rect.top+rect.height/2;
-  const before=toWorld({clientX:x,clientY:z});
-  const nextWidth=T.MathUtils.clamp(planRange.width/factor,.75,4096);
-  const ratio=nextWidth/planRange.width;
-  planRange.width=nextWidth;planRange.height*=ratio;scalePlan();
-  const after=toWorld({clientX:x,clientY:z});
-  planRange.cx+=before.x-after.x;planRange.cz+=before.z-after.z;
-  paintPlan();
-}
-plan.addEventListener('wheel',event=>{
-  event.preventDefault();
-  zoomPlan(Math.exp(-Math.sign(event.deltaY)*.18),event);
-},{passive:false});
-$('plan-zoom-in').onclick=()=>zoomPlan(1.25);
-$('plan-zoom-out').onclick=()=>zoomPlan(.8);
-$('plan-fit').onclick=fitViews;
-
-// Context actions apply to the object under the mouse, not a stale selection.
-const quickMenu=$('context-actions');
-function closeQuickMenu(){quickMenu.hidden=true;}
-for(const canvas of [screen,plan]){
-  canvas.addEventListener('pointerdown',event=>{
-    if(event.button===2)rightStart={canvas,x:event.clientX,y:event.clientY};
-    else closeQuickMenu();
-  });
-  canvas.addEventListener('contextmenu',event=>{
-    event.preventDefault();
-    if(rightStart?.canvas!==canvas||Math.hypot(event.clientX-rightStart.x,event.clientY-rightStart.y)>6)return;
-    const hit=pointUnderPointer(canvas,event);
-    const index=hit?group.children.indexOf(hit.object):-1;
-    if(index<0){closeQuickMenu();return;}
-    choose(index);
-    $('context-title').textContent=current()?.name??'Pièce';
-    quickMenu.hidden=false;
-    const width=195,height=285;
-    quickMenu.style.left=Math.max(4,Math.min(event.clientX,innerWidth-width-6))+'px';
-    quickMenu.style.top=Math.max(4,Math.min(event.clientY,innerHeight-height-6))+'px';
-  });
-}
-document.addEventListener('pointerdown',event=>{if(!quickMenu.contains(event.target))closeQuickMenu();});
-document.addEventListener('keydown',event=>{if(event.key==='Escape')closeQuickMenu();});
-for(const button of quickMenu.querySelectorAll('[data-context-action]'))button.onclick=()=>{
-  const action=button.dataset.contextAction;closeQuickMenu();
-  if(action==='duplicate')duplicatePiece();
-  else if(action==='delete')removePiece();
-  else if(action==='focus')$('focus-piece').click();
-  else if(action==='select')setTool('move');
-  else setTool(action);
-};
-
 for (const canvas of [screen, plan]) {
     canvas.dataset.tool = tool;
     canvas.removeAttribute('data-hit');
@@ -1077,6 +995,89 @@ function endGesture(canvas, event, commit) {
     if (moved < 6) commitPlacement(canvas, event);
   }
 }
+
+// Pan and zoom the plan independently of the perspective view.
+let planPan=null,spaceHeld=false,rightStart=null;
+document.addEventListener('keydown',event=>{
+  if(event.code==='Space'&&!event.target.closest?.('input,select,textarea,button'))spaceHeld=true;
+});
+document.addEventListener('keyup',event=>{if(event.code==='Space')spaceHeld=false;});
+window.addEventListener('blur',()=>{planPan=null;spaceHeld=false;});
+plan.addEventListener('pointerdown',event=>{
+  if(event.button!==1&&!(spaceHeld&&event.button===0))return;
+  event.preventDefault();event.stopImmediatePropagation();
+  planPan={id:event.pointerId,x:event.clientX,y:event.clientY};
+  plan.setPointerCapture(event.pointerId);
+  plan.style.cursor='grabbing';
+},{capture:true});
+plan.addEventListener('pointermove',event=>{
+  if(!planPan||planPan.id!==event.pointerId)return;
+  event.stopImmediatePropagation();
+  planRange.cx-=(event.clientX-planPan.x)/planRange.scale;
+  planRange.cz-=(event.clientY-planPan.y)/planRange.scale;
+  planPan.x=event.clientX;planPan.y=event.clientY;
+  paintPlan();
+},{capture:true});
+function endPlanPan(event){
+  if(!planPan||planPan.id!==event.pointerId)return;
+  planPan=null;plan.style.cursor='';
+  if(plan.hasPointerCapture(event.pointerId))plan.releasePointerCapture(event.pointerId);
+  event.stopImmediatePropagation();
+}
+plan.addEventListener('pointerup',endPlanPan,{capture:true});
+plan.addEventListener('pointercancel',endPlanPan,{capture:true});
+function zoomPlan(factor,event){
+  const rect=plan.getBoundingClientRect();
+  const x=event?.clientX??rect.left+rect.width/2,z=event?.clientY??rect.top+rect.height/2;
+  const before=toWorld({clientX:x,clientY:z});
+  const nextWidth=T.MathUtils.clamp(planRange.width/factor,.75,4096);
+  const ratio=nextWidth/planRange.width;
+  planRange.width=nextWidth;planRange.height*=ratio;scalePlan();
+  const after=toWorld({clientX:x,clientY:z});
+  planRange.cx+=before.x-after.x;planRange.cz+=before.z-after.z;
+  paintPlan();
+}
+plan.addEventListener('wheel',event=>{
+  event.preventDefault();
+  zoomPlan(Math.exp(-Math.sign(event.deltaY)*.18),event);
+},{passive:false});
+$('plan-zoom-in').onclick=()=>zoomPlan(1.25);
+$('plan-zoom-out').onclick=()=>zoomPlan(.8);
+$('plan-fit').onclick=fitViews;
+
+// Context actions apply to the object under the mouse, not a stale selection.
+const quickMenu=$('context-actions');
+function closeQuickMenu(){quickMenu.hidden=true;}
+for(const canvas of [screen,plan]){
+  canvas.addEventListener('pointerdown',event=>{
+    if(event.button===2)rightStart={canvas,x:event.clientX,y:event.clientY};
+    else closeQuickMenu();
+  });
+  canvas.addEventListener('contextmenu',event=>{
+    event.preventDefault();
+    if(rightStart?.canvas!==canvas||Math.hypot(event.clientX-rightStart.x,event.clientY-rightStart.y)>6)return;
+    const hit=pointUnderPointer(canvas,event);
+    const index=hit?group.children.indexOf(hit.object):-1;
+    if(index<0){closeQuickMenu();return;}
+    choose(index);
+    $('context-title').textContent=current()?.name??'Pièce';
+    quickMenu.hidden=false;
+    const width=195,height=285;
+    quickMenu.style.left=Math.max(4,Math.min(event.clientX,innerWidth-width-6))+'px';
+    quickMenu.style.top=Math.max(4,Math.min(event.clientY,innerHeight-height-6))+'px';
+  });
+}
+document.addEventListener('pointerdown',event=>{if(!quickMenu.contains(event.target))closeQuickMenu();});
+document.addEventListener('keydown',event=>{if(event.key==='Escape')closeQuickMenu();});
+for(const button of quickMenu.querySelectorAll('[data-context-action]'))button.onclick=()=>{
+  const action=button.dataset.contextAction;closeQuickMenu();
+  if(action==='duplicate')duplicatePiece();
+  else if(action==='delete')removePiece();
+  else if(action==='focus')$('focus-piece').click();
+  else if(action==='select')setTool('move');
+  else setTool(action);
+};
+
 
 for (const canvas of [screen, plan]) {
   canvas.addEventListener('pointerdown', event => beginGesture(canvas, event), { capture: true });
