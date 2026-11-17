@@ -7,6 +7,8 @@ import {
   modelLimits,modelShapes,modelStorageKey,modelSurfaces,normalizeModelPack,readModelPack,
 } from './model-pack.js';
 import {openTextureStudio} from './texture-studio.js';
+import {openShapeStudio} from './shape-studio.js';
+import {startingSketch} from './custom-shape.js';
 
 // GORILLA / FOUNDRY. Geometry remains in the Gorilla model-pack v1 format:
 // the editor transforms local part geometry without changing the game's schema.
@@ -179,6 +181,8 @@ function updateInspector(){
   $('drop-to-grid').disabled=!part;
   $('focus-part').disabled=!part;
   $('reset-part').disabled=!part;
+  $('custom-shape-controls').hidden=part?.shape!=='custom';
+  $('edit-profile').disabled=!part||part.shape!=='custom';
   $('part-paint').disabled=!part;
   $('part-texture-clear').disabled=!part?.texture;
   $('part-texture-status').textContent=part?.texture?'Texture peinte appliquée à cette pièce.':'Aucune texture personnalisée. La finition pré-définie reste active.';
@@ -401,7 +405,9 @@ document.addEventListener('pointerdown',event=>{
 
 function makePart(shape,name=modelShapes[shape],position=[0,0,0],scale=[.35,.35,.35],
   color='#51bdd2',surface='plain',rotation=[0,0,0]){
-  return {name,shape,position,scale,rotation,surface,color};
+  return {name,shape,position,scale,rotation,surface,color,
+    ...(shape==='custom'?{profile:startingSketch()}:{}),
+  };
 }
 function exampleParts(){
   const blue='#678fb4',light='#c1d7de',dark='#233241';
@@ -436,6 +442,7 @@ function addPart(shape=$('new-shape').value){
   partIndex=model.parts.length-1;
   markDirty();updateParts();updateInspector();updatePreview(model.parts.length===1);
   setTool('translate');setPanel('geometry');
+  if(shape==='custom')editProfile();
 }
 function duplicatePart(){
   const model=currentModel(),part=currentPart();
@@ -624,6 +631,20 @@ $('avatar').onchange=event=>{
 setOptions($('new-shape'),Object.entries(modelShapes),'box');
 setOptions($('part-shape'),Object.entries(modelShapes),'box');
 setOptions($('part-surface'),Object.entries(modelSurfaces),'plain');
+function editProfile(){
+  const part=currentPart();if(!part||part.shape!=='custom')return;
+  openShapeStudio({
+    name:part.name,initial:part.profile??startingSketch(),
+    onApply:profile=>{
+      if(!currentModel()?.parts.includes(part))throw Error('La pièce n’existe plus.');
+      remember();
+      part.profile=profile;
+      markDirty();updateInspector();updatePreview();
+      status('Forme personnelle appliquée · modèle prêt à enregistrer.');
+    },
+  });
+}
+$('edit-profile').onclick=editProfile;
 $('add-part').onclick=()=>addPart();
 for(const button of document.querySelectorAll('[data-shape]')){
   button.onclick=()=>{$('new-shape').value=button.dataset.shape;addPart(button.dataset.shape);};
@@ -672,10 +693,16 @@ for(const key of ['name','shape','color','surface']){
   $('part-'+key).addEventListener(key==='name'||key==='color'?'input':'change',event=>{
     const part=currentPart();if(!part)return;
     beforeChange(event.target);
+    if(key==='shape'&&event.target.value==='custom'&&part.shape!=='custom'){
+      part.profile=startingSketch(part.shape);
+    }
     part[key]=event.target.value;
     markDirty();updateParts();
     if(key==='name')updateInspector();
-    else updatePreview();
+    else {
+      updateInspector();updatePreview();
+      if(key==='shape'&&part.shape==='custom')editProfile();
+    }
   });
 }
 for(const button of document.querySelectorAll('[data-color]')){
@@ -719,8 +746,8 @@ window.addEventListener('keydown',event=>{
   else if(key==='m')mirrorPart();
   else if(key==='delete'||key==='backspace')deletePart();
   else if(key==='d'&&event.shiftKey)duplicatePart();
-  else if('1234567'.includes(key)&&key.length===1){
-    const shape=['box','sphere','cylinder','cone','torus','capsule','diamond'][Number(key)-1];
+  else if('12345678'.includes(key)&&key.length===1){
+    const shape=['box','sphere','cylinder','cone','torus','capsule','diamond','custom'][Number(key)-1];
     if(shape)addPart(shape);
   }else return;
   event.preventDefault();
