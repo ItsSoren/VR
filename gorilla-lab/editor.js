@@ -8,6 +8,7 @@ import {readModelPack,createModelUnitGeometry,createModelMaterial,modelDimension
 import {normalizeTerrain,resizeTerrain,sculptTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from './terrain-edit.js';
 import {texturePresets,seamlessTexture} from './seamless-texture.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import {resizedCenter} from './editor-scale.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   parseMap, arenaMap, exampleMap, makePiece, mapMaterials, materialColors, surfacePresets,
@@ -50,7 +51,7 @@ const toolHelp = {
   move: 'Clique ou touche une pièce pour la sélectionner. Glisse-la pour la déplacer au sol.',
   translate: 'Sélectionne une pièce et tire une flèche pour la déplacer sur un axe. La grille fixe le pas.',
   rotate: 'Sélectionne une pièce puis tire un anneau coloré pour la tourner par crans de 5°.',
-  scale: 'Tire un cube coloré pour modifier un axe. Sur un terrain, les poignées X et Z règlent son emprise.',
+  scale: 'Tire une poignée pour agrandir depuis une face. Maintiens Ctrl pendant le geste pour redimensionner symétriquement autour du centre.',
   view: 'Glisse dans la vue 3D pour tourner. Utilise la molette ou pince à deux doigts pour zoomer.',
   block: 'Clique dans la vue 3D ou sur le plan pour poser un bloc. Échap revient à la sélection.',
   ramp: 'Clique dans la vue 3D ou sur le plan pour poser une rampe. Échap revient à la sélection.',
@@ -94,6 +95,147 @@ const modelOptions=[['','Géométrie simple (défaut)'],...modelLibrary.map(m=>[
 for(const id of ['terrain-grassModel','terrain-shrubModel']){
   $(id).replaceChildren(...modelOptions.map(([value,label])=>new Option(label,value)));
 }
+
+// A single viewport-first workspace, inspired by desktop 3D editors.
+// All existing editor controls are reparented (never duplicated), keeping their
+// original IDs, keyboard shortcuts, and event listeners.
+function buildWorkspaceShell(){
+  const main=document.querySelector('main'),aside=main.querySelector('aside.panel');
+  aside.id='scene-sidebar';
+  const make=(tag,className,text)=>{
+    const node=document.createElement(tag);
+    if(className)node.className=className;
+    if(text!==undefined)node.textContent=text;
+    return node;
+  };
+  const rail=make('nav','tool-rail');
+  rail.id='tool-rail';
+  rail.setAttribute('aria-label','Outils de l’atelier');
+  main.prepend(rail);
+  const toolIcons={move:'⌖',translate:'✣',rotate:'↻',scale:'⤢',
+    view:'◉',block:'▣',ramp:'◩',wall:'▥',terrain:'▦',
+    sculpt:'〰',model:'⬡',preset:'⊞',spawn:'⊕'};
+  const groups={translate:'transforms',block:'build',terrain:'terrain',model:'library',spawn:'spawn'};
+  for(const button of toolButtons){
+    const type=button.dataset.tool;
+    const name=button.textContent.trim().replace(/\s+[VG RSC1234]$/,'').trim();
+    if(groups[type]){
+      const divider=make('div','rail-divider');
+      divider.title={transforms:'Transformations',build:'Construction',terrain:'Terrain',library:'Bibliothèque',spawn:'Départ'}[groups[type]];
+      rail.append(divider);
+    }
+    button.classList.add('rail-tool');
+    button.title=name+' · '+(toolHelp[type]??'');
+    button.setAttribute('aria-label',name);
+    button.replaceChildren(make('span','rail-glyph',toolIcons[type]??'□'),
+      make('span','rail-caption',name==='Redimensionner'?'Échelle':name==='Sélectionner'?'Sélect.':name==='Déplacer'?'Déplacer':name==='Atelier'?'Modèle':name));
+    rail.append(button);
+  }
+  const insert=make('div','insert-palette');
+  insert.id='insert-palette';
+  insert.hidden=true;
+  insert.append(make('h2','', 'Ajouter un élément'));
+  const oldTools=document.querySelector('.command-bar .tools');
+  const shapeLabel=$('shape-preset').closest('label');
+  const modelSection=$('model-library').closest('.inspector-section');
+  const modelLink=oldTools.querySelector('a[href*="model-editor"]');
+  insert.append(shapeLabel,modelSection);
+  if(modelLink)insert.append(modelLink);
+  const insertHint=make('p','palette-help','Choisis une forme puis l’outil ⊞, ou sélectionne un modèle puis ⬡. Clique ensuite dans la scène.');
+  insert.append(insertHint);
+  main.append(insert);
+  const toolRow=document.querySelector('.command-bar .command-row');
+  oldTools.remove();
+  const actions=toolRow.querySelector('.actions');
+  actions.classList.add('viewport-actions');
+  const layout=$('layout-mode').closest('label');
+  layout.classList.add('viewport-layout');
+  toolRow.prepend(layout);
+  const status=make('span','active-selection','Aucune sélection');
+  status.id='active-selection';
+  layout.after(status);
+  const settings=make('details','precision-menu');
+  settings.id='precision-menu';
+  settings.append(make('summary','','Accrochage ▾'));
+  const inner=make('div','precision-options');
+  const precisionIds=['snap','magnet','magnet-mode','magnet-distance','view-split'];
+  for(const id of precisionIds){const input=$(id);if(input)inner.append(input.closest('label'));}
+  settings.append(inner);
+  toolRow.append(settings);
+  const showInsert=(mode)=>{
+    if(mode==='close'){insert.hidden=true;return;}
+    insert.hidden=false;
+    const target=mode==='model'?'model-library':'shape-preset';
+    $(target).focus({preventScroll:true});
+  };
+  for(const type of ['model','preset']){
+    const btn=toolButtons.find(node=>node.dataset.tool===type);
+    btn?.addEventListener('click',()=>showInsert(type));
+  }
+  window.addEventListener('pointerdown',event=>{
+    if(!insert.hidden&&!insert.contains(event.target)&&!event.target.closest('.rail-tool'))showInsert('close');
+  });
+  window.addEventListener('keydown',event=>{if(event.key==='Escape')showInsert('close');});
+
+  // Scene hierarchy above the contextual inspector: the viewport never scrolls.
+  const outline=make('section','outliner');
+  outline.id='scene-outline';
+  const outlineHead=make('header','side-section-head');
+  outlineHead.append(make('strong','','Hiérarchie de la scène'));
+  outlineHead.append(make('span','outline-meta','Objets'));
+  outline.append(outlineHead);
+  const pieceSection=aside.querySelector('#pieces').closest('.inspector-section');
+  pieceSection.id='outline-content';
+  outline.append(pieceSection);
+  const detailsPane=make('section','property-pane');
+  const tabs=make('nav','inspector-tabs');
+  tabs.setAttribute('aria-label','Propriétés');
+  const specs=[['object','Objet'],['terrain','Terrain'],['material','Matériaux'],['scene','Scène']];
+  for(const [key,label] of specs){
+    const button=make('button','inspector-tab',label);
+    button.type='button';
+    button.dataset.tab=key;
+    button.setAttribute('aria-pressed',String(key==='object'));
+    tabs.append(button);
+  }
+  const content=make('div','property-content');
+  content.id='property-content';
+  const objectSection=$('piece-inspector').closest('.inspector-section');
+  objectSection.id='object-section';
+  const surfaceControls=$('surface').closest('details');
+  surfaceControls.id='surface-controls';
+  content.append(objectSection);
+  const sceneOptions=make('section','scene-options');
+  sceneOptions.id='scene-options';
+  sceneOptions.append(make('h2','','Paramètres de carte'));
+  const mapName=$('map-name').closest('label');
+  const mapDims=$('map-world-size').closest('.fields');
+  const draft=$('draft-status');
+  sceneOptions.append(mapName,mapDims,draft);
+  const misc=[...aside.children].filter(node=>node.tagName==='DETAILS');
+  for(const detail of misc)sceneOptions.append(detail);
+  content.append(sceneOptions);
+  detailsPane.append(tabs,content);
+  aside.replaceChildren(outline,detailsPane);
+  const setTab=(tab)=>{
+    const piece=map?.pieces?.[selected];
+    if(tab==='terrain'&&!piece?.terrain)tab='object';
+    if(tab==='material'&&!piece)tab='object';
+    aside.dataset.tab=tab;
+    for(const button of tabs.querySelectorAll('button')){
+      button.setAttribute('aria-pressed',String(button.dataset.tab===tab));
+      button.disabled=button.dataset.tab==='terrain'&&!piece?.terrain;
+    }
+    if(tab==='terrain')$('terrain-controls').open=true;
+    if(tab==='material')surfaceControls.open=true;
+    content.scrollTop=0;
+  };
+  for(const button of tabs.querySelectorAll('button'))button.addEventListener('click',()=>setTab(button.dataset.tab));
+  window.setInspectorTab=setTab;
+  setTab('object');
+}
+buildWorkspaceShell();
+
 let planRange = { scale: 10, cx: 0, cz: -6, width: 30, height: 40 };
 
 const renderer = new T.WebGLRenderer({ canvas: screen, antialias: true });
@@ -427,11 +569,37 @@ function attachGizmo() {
   $('tool-help').textContent=toolHelp[tool];
 }
 
+// Default scaling moves one face while preserving the opposite face.
+// Ctrl temporarily fixes the centre and grows/shrinks symmetrically.
+let ctrlScaleHeld=false;
+function syncScaleAnchor(){
+  if(tool!=='scale')return;
+  const piece=current(),original=beforeTransform?.map.pieces[selected],mesh=gizmo.object;
+  if(!piece||!original||!mesh)return;
+  const next=resizedCenter(original,piece,ctrlScaleHeld);
+  const limit=(map.worldSize??240)/2;
+  piece.x=T.MathUtils.clamp(next.x,-limit,limit);
+  piece.y=T.MathUtils.clamp(next.y,-256,256);
+  piece.z=T.MathUtils.clamp(next.z,-limit,limit);
+  mesh.position.set(piece.x,piece.y,piece.z);
+  selectionBox?.update();
+  for(const key of ['x','y','z'])$('p-'+key).value=piece[key].toFixed(2);
+  paintPlan();queueRender();
+}
+function trackScaleControl(event){
+  const wasHeld=ctrlScaleHeld;
+  ctrlScaleHeld=event.ctrlKey;
+  if(wasHeld!==ctrlScaleHeld&&gizmo.dragging)syncScaleAnchor();
+}
+for(const type of ['keydown','keyup'])window.addEventListener(type,trackScaleControl);
+screen.addEventListener('pointermove',trackScaleControl,{capture:true});
+
 gizmo.addEventListener('change',queueRender);
 gizmo.addEventListener('mouseDown',()=>{
   const piece=current();
   heldSnap=null;
   if(piece)beforeTransform={map:structuredClone(map),selected};
+  ctrlScaleHeld=Boolean(ctrlScaleHeld||window.event?.ctrlKey);
 });
 // Reflète la transformation de Three.js dans le modèle et l’inspecteur à chaque mouvement.
 gizmo.addEventListener('objectChange',()=>{
@@ -455,19 +623,7 @@ gizmo.addEventListener('objectChange',()=>{
     piece.d=clamp(mesh.scale.z*(piece.terrain?original.d:1),.05,maxObjectSize);
     if(!piece.terrain)piece.h=clamp(mesh.scale.y,.05,256);
     mesh.scale.set(piece.terrain?piece.w/original.w:piece.w,piece.terrain?1:piece.h,piece.terrain?piece.d/original.d:piece.d);
-    const anchor=$('scale-anchor').value;
-    if(anchor!=='center'){
-      const sign=anchor==='positive'?1:-1;
-      const offset=new T.Vector3((piece.w-original.w)*sign/2,
-        piece.terrain?0:(piece.h-original.h)*sign/2,(piece.d-original.d)*sign/2);
-      const quaternion=new T.Quaternion().setFromEuler(
-        new T.Euler(T.MathUtils.degToRad(original.pitch),T.MathUtils.degToRad(original.yaw),T.MathUtils.degToRad(original.roll??0),'YXZ'));
-      offset.applyQuaternion(quaternion);
-      piece.x=clamp(original.x+offset.x,-maxWorldReach,maxWorldReach);
-      piece.y=clamp(original.y+offset.y,-256,256);
-      piece.z=clamp(original.z+offset.z,-maxWorldReach,maxWorldReach);
-      mesh.position.set(piece.x,piece.y,piece.z);
-    }
+    syncScaleAnchor();
   }
   mesh.updateMatrixWorld(true);
   selectionBox?.update();
@@ -625,6 +781,9 @@ function updateInspector() {
   $('texture-create').disabled=!piece;
   $('surface').value = '';
   $('undo').disabled = undoStack.length === 0;
+  $('active-selection').textContent=piece?piece.name:'Aucune sélection';
+  if(document.querySelector('#scene-sidebar').dataset.tab==='terrain'&&!terrain)window.setInspectorTab('object');
+  document.querySelector('.inspector-tab[data-tab="terrain"]').disabled=!terrain;
 }
 
 // Réconcilie le modèle, la 3D, le plan, le formulaire et le brouillon.
@@ -1386,3 +1545,4 @@ sync();
 resizeRenderer();
 resizePlan();
 fitViews();
+applyLayout();
