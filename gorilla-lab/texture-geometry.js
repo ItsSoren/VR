@@ -11,3 +11,17 @@ export function tiledBox(w,h,d){
   }
   return geometry;
 }
+
+// Edit texture coordinates per piece, never mutate a shared texture used elsewhere.
+export function transformUVs(geometry,piece){
+  const uv=geometry.attributes.uv;
+  if(!uv)return geometry;
+  const scale=1/(piece.uvScale??1),angle=(piece.uvRotation??0)*Math.PI/180;
+  const ca=Math.cos(angle),sa=Math.sin(angle),x0=piece.uvOffsetX??0,y0=piece.uvOffsetY??0;
+  for(let i=0;i<uv.count;i++){
+    const u=uv.getX(i)*scale,v=uv.getY(i)*scale;
+    uv.setXY(i,u*ca-v*sa+x0,u*sa+v*ca+y0);
+  }
+  uv.needsUpdate=true;
+  return geometry;
+}
