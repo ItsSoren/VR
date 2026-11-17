@@ -31,7 +31,7 @@ try{
  assert.equal(await page.$eval('[data-field=mode]',el=>el.value),'extrude');
  await page.select('[data-field=preset]','angle');
  await new Promise(resolve=>setTimeout(resolve,350));
- const shapeError=await page.$eval('[data-error]',el=>el.textContent);
+ const shapeError=await page.$eval('.forge-sketch [data-error]',el=>el.textContent);
  console.log('SKETCH_VALIDATION',JSON.stringify(shapeError));
  assert.equal(shapeError,'','angle preset should be a valid contour');
  const canvas=await page.$eval('#sketch-2d',el=>{const r=el.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height};});
