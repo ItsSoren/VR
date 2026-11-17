@@ -278,7 +278,7 @@ export function modelHitboxGeometry(model){
 export function modelCollisionGeometry(model,mapDimensions=null){
   const hitbox=modelHitbox(model),geometry=modelHitboxGeometry(model);
   const dimensions=hitbox.boundsSize.clone().max(new T.Vector3(.00001,.00001,.00001));
-  const worldDimensions=mapDimensions?new T.Vector3(mapDimensions.x,mapDimensions.y,mapDimensions.z):new T.Vector3(1,1,1);
+  const worldDimensions=mapDimensions?new T.Vector3(mapDimensions.x,mapDimensions.y,mapDimensions.z):dimensions.clone();
   const scale=hitbox.size.clone().multiply(worldDimensions).divide(dimensions);
   const offset=hitbox.center.clone().sub(hitbox.boundsCenter).multiply(worldDimensions).divide(dimensions);
   geometry.scale(scale.x,scale.y,scale.z);
