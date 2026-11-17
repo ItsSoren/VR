@@ -101,7 +101,7 @@ export function createBuiltinModelTemplates(){
       ['spawn-wheel','Roue'],['spawn-cup','Tasse'],['spawn-flashlight','Lampe torche'],
       ['spawn-soda','Canette de soda'],['spawn-cone','Cône de chantier'],['spawn-radio','Talkie-walkie'],
     ].map(([id,name])=>template(id,name,'prop',id==='spawn-coconut'?{frozen:true}:{})),
-    template('chrome-sphere','Sphère chrome','prop'),
+    template('chrome-sphere','Sphère chrome','prop',{frozen:true}),
   ];
   const tree=template('palm-tree','Cocotier','structure',{grabbable:false});
   tree.parts=[
@@ -115,7 +115,7 @@ export function createBuiltinModelTemplates(){
       [.91,1.16,.91],[0,0,-8]));
   }
   templates.push(tree);
-  const target=template('range-target','Cible de tir','structure',{grabbable:false});
+  const target=template('range-target','Cible de tir','structure',{grabbable:false,collidable:false});
   target.parts=[
     part('Anneau extérieur','target-ring-outer'),
     part('Anneau intermédiaire','target-ring-middle',[0,0,.012]),
