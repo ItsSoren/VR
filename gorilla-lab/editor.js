@@ -4,7 +4,7 @@ import {addLabFixtures} from './fixtures.js';
 import {createArenaObjectSpecs,forEachStartupObject} from './arena-objects.js';
 import {labMirror} from './lab-layout.js';
 import {tiledBox,transformUVs,decorPrimitiveGeometry} from './texture-geometry.js';
-import {readModelPack,createModelUnitGeometry,createModelMaterial,modelDimensions} from './model-pack.js';
+import {readModelPack,createModelUnitGeometry,createModelMaterial,disposeModelMaterial,modelDimensions} from './model-pack.js';
 import {normalizeTerrain,resizeTerrain,sculptTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from './terrain-edit.js';
 import {texturePresets,seamlessTexture} from './seamless-texture.js';
 import {openTextureStudio} from './texture-studio.js';
@@ -656,7 +656,7 @@ function rebuildScene() {
     if(mesh.geometry!==sharedBox)mesh.geometry.dispose();
     if(mesh.userData.vegetation)disposeVegetation(mesh.userData.vegetation);
     if(mesh.userData.ownsTexture)mesh.material.map?.dispose();
-    mesh.material.dispose();
+    disposeModelMaterial(mesh.material);
   }
   arenaBackdrop.visible=Boolean(map.arenaBase);
   sun.visible=ambient.visible=!map.arenaBase;
