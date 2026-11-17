@@ -818,7 +818,8 @@ async function doExport(){
           imageMap.colorSpace=T.SRGBColorSpace;
           imageMap.wrapS=imageMap.wrapT=T.RepeatWrapping;
         }
-        const m=new T.MeshStandardMaterial({vertexColors:true,roughness:.67,metalness:.08,map:imageMap});
+        const m=createModelPartMaterial({...part,texture:null});
+        if(imageMap){m.map=imageMap;m.needsUpdate=true;}
         const mesh=new T.Mesh(createModelPartGeometry(part),m);
         mesh.name=part.name;root.add(mesh);meshes.push(mesh);
       }
