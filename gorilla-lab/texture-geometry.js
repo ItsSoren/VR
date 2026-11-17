@@ -25,3 +25,16 @@ export function transformUVs(geometry,piece){
   uv.needsUpdate=true;
   return geometry;
 }
+
+// Basic decorative shapes. Geometry stays unit-sized in the editor and can be
+// baked to world dimensions when the game builds a static map.
+export function decorPrimitiveGeometry(kind){
+  switch(kind){
+    case 'sphere':return new T.SphereGeometry(.5,24,16);
+    case 'cylinder':return new T.CylinderGeometry(.5,.5,1,24);
+    case 'cone':return new T.ConeGeometry(.5,1,24);
+    case 'torus':return new T.TorusGeometry(.34,.14,12,32);
+    case 'capsule':return new T.CapsuleGeometry(.32,.36,8,16);
+    default:return new T.BoxGeometry(1,1,1);
+  }
+}
