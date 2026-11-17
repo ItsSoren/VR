@@ -2,8 +2,8 @@
 import * as T from 'three';
 import {tiledBox,transformUVs,decorPrimitiveGeometry} from './texture-geometry.js';
 import {terrainGeometry,terrainCollider,terrainVegetation,disposeVegetation,sculptTerrain,normalizeTerrain,resizeTerrain} from './terrain-edit.js';
-import {boxCollider} from './physics.js';
-import {createModelUnitGeometry,createModelMaterial,modelHitbox,disposeModelMaterial} from './model-pack.js';
+import {boxCollider,colliderFor} from './physics.js';
+import {createModelUnitGeometry,createModelMaterial,modelCollisionGeometry,disposeModelMaterial} from './model-pack.js';
 import {mapCode} from './cloud-link.js';
 import {parseMap,makePiece,snapPlacement,maxPieces,maxMapBytes,storageKey,downloadMap} from './map-format.js';
 
@@ -79,16 +79,14 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
       mesh.userData.mapIndex=index;
       if(piece.model.kind==='prop')mesh.visible=false; // Dynamic prop is spawned by the object physics system.
       group.add(mesh);
-      const hitbox=modelHitbox(piece.model);
       const dimensions=new T.Vector3(piece.w,piece.h,piece.d);
-      const relativeScale=dimensions.clone().divide(hitbox.boundsSize.clone()
-        .max(new T.Vector3(.00001,.00001,.00001)));
-      const half=hitbox.size.clone().multiply(relativeScale).multiplyScalar(.5);
-      const collisionOffset=hitbox.center.clone().sub(hitbox.boundsCenter).multiply(relativeScale)
-        .applyQuaternion(mesh.quaternion);
-      const colliderPosition=mesh.position.clone().add(collisionOffset);
-      const collider={mesh,position:colliderPosition,quaternion:mesh.quaternion,half,min:half.clone().negate(),
-        shape:boxCollider(half),friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:true,type:piece.material};
+      const collisionGeometry=modelCollisionGeometry(piece.model,dimensions);
+      collisionGeometry.computeBoundingBox();const bounds=collisionGeometry.boundingBox;
+      const half=new T.Vector3(Math.max(Math.abs(bounds.min.x),Math.abs(bounds.max.x)),
+        Math.max(Math.abs(bounds.min.y),Math.abs(bounds.max.y)),Math.max(Math.abs(bounds.min.z),Math.abs(bounds.max.z)));
+      const shape=colliderFor(collisionGeometry);collisionGeometry.dispose();
+      const collider={mesh,position:mesh.position,quaternion:mesh.quaternion,half,min:half.clone().negate(),
+        shape,radius:shape.radius,friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:true,type:piece.material};
       return {mesh,collider,custom:true,model:true};
     }
     const {material,custom,ownTexture}=card(piece);
@@ -127,16 +125,18 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     signature=map?'custom-'+mapCode(JSON.stringify(map)):'';
     // Asset-backed map pieces replace their matching built-in fixture instead of stacking on it.
     const mappedAssets=new Set(nodes.map(piece=>piece.model?.assetId).filter(Boolean));
+    const mappedScenery=new Set(nodes.map(piece=>piece.sceneryId).filter(Boolean));
     defaultObjects.forEach(mesh=>{
       const assetId=mesh.userData?.editorAssetId;
-      mesh.visible=!map||map.arenaBase&&!replaceableMeshes.has(mesh)&&(!assetId||!mappedAssets.has(assetId));
+      mesh.visible=!map||map.arenaBase&&!replaceableMeshes.has(mesh)&&(!assetId||(!mappedAssets.has(assetId)&&!mappedScenery.has(assetId)));
       if(map?.assetLayer&&mesh.userData?.editorAssetId==='palm-tree')
         mesh.traverse(child=>{if(child.userData?.editorFixtureCoconut)child.visible=false;});
     });
     for(let i=0;i<nodes.length;i++)meshRows.push(makeRow(nodes[i],i));
     pruneTextures();
     if(map){
-      const retained=map.arenaBase?builtBoxes.filter(box=>!replaceableMeshes.has(box.mesh)&&(!box.editorAssetId||!mappedAssets.has(box.editorAssetId))):[];
+      const retained=map.arenaBase?builtBoxes.filter(box=>!replaceableMeshes.has(box.mesh)&&
+        (!box.editorAssetId||(!mappedAssets.has(box.editorAssetId)&&!mappedScenery.has(box.editorAssetId)))):[];
       arena.boxes.splice(0,arena.boxes.length,...retained,...meshRows.filter((row,i)=>nodes[i].solid&&nodes[i].model?.kind!=='prop'&&nodes[i].model?.properties?.collidable!==false).map(row=>row.collider));
     }
     else arena.boxes.splice(0,arena.boxes.length,...builtBoxes);
@@ -183,7 +183,8 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   function edit(origin,direction,click,{mode,piece,head,feet}){
     trace.set(origin,direction);trace.far=12;
     const targets=meshRows.map(row=>row.mesh);
-    if(mode===1&&map?.arenaBase)targets.push(...builtBoxes.filter(box=>box.heightfield).map(box=>box.mesh));
+    if(mode===1&&map?.arenaBase)targets.push(...builtBoxes.filter(box=>box.heightfield&&
+      !map.pieces.some(piece=>piece.sceneryId===box.editorAssetId)).map(box=>box.mesh));
     const hits=trace.intersectObjects(targets,false);
     const hit=mode>=5?hits.find(item=>map?.pieces[item.object.userData.mapIndex]?.terrain):hits[0];
     ghost.visible=false;

@@ -89,7 +89,7 @@ function part(name,assetId,position=[0,0,0],scale=[1,1,1],rotation=[0,0,0]){
 function template(assetId,name,kind='prop',properties={}){
   return {id:'custom-model-game-'+assetId,name,assetId,kind,inGame:false,
     properties:{grabbable:kind==='prop',frozen:false,collidable:true,supportWhileHeld:false,...properties},
-    hitbox:{mode:'auto'},parts:[part(name,assetId)]};
+    hitbox:{mode:'auto',shape:'convex',precision:48},parts:[part(name,assetId)]};
 }
 export function createBuiltinModelTemplates(){
   const templates=[

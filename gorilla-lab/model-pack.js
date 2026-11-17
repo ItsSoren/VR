@@ -1,5 +1,6 @@
 import * as T from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
 import {normalizeSketch,createSketchGeometry} from './custom-shape.js';
 import {getBuiltinAsset,isBuiltinAsset} from './model-assets.js';
 
@@ -25,7 +26,15 @@ function label(value, fallback) {
 function vector(value, fallback, min, max) {
   return [0, 1, 2].map(index => Number.isFinite(value?.[index]) ? T.MathUtils.clamp(value[index], min, max) : fallback);
 }
-
+const hitboxShapes=new Set(['box','sphere','capsule','convex']);
+function normalizeHitbox(raw){
+  if(raw?.mode==='box')return {mode:'box',center:vector(raw.center,0,-6,6),size:vector(raw.size,.5,.025,12)};
+  const precision=Math.round(T.MathUtils.clamp(Number.isFinite(raw?.precision)?raw.precision:48,8,96));
+  if(raw?.mode==='custom')return {mode:'custom',shape:hitboxShapes.has(raw.shape)?raw.shape:'box',
+    center:vector(raw.center,0,-6,6),size:vector(raw.size,.5,.025,12),rotation:vector(raw.rotation,0,-360,360),precision};
+  if(raw?.mode==='auto'&&hitboxShapes.has(raw.shape))return {mode:'auto',shape:raw.shape,precision};
+  return {mode:'auto'};
+}
 export function normalizeModelPack(input) {
   if (input?.version !== 1 || !Array.isArray(input.models) || input.models.length > modelLimits.models || JSON.stringify(input).length>modelLimits.fileBytes) {
     throw new Error('Ce fichier ne contient pas un atelier de modèles Gorilla Lab valide.');
@@ -46,11 +55,7 @@ export function normalizeModelPack(input) {
       properties: Object.fromEntries(Object.entries(defaultModelProperties).map(([key, fallback]) => [
         key, typeof raw.properties?.[key] === 'boolean' ? raw.properties[key] : fallback,
       ])),
-      hitbox:raw?.hitbox?.mode==='box'?{
-        mode:'box',
-        center:vector(raw.hitbox.center,0,-6,6),
-        size:vector(raw.hitbox.size,.5,.025,12)
-      }:{mode:'auto'},
+      hitbox:normalizeHitbox(raw?.hitbox),
       parts: raw.parts.map((part, index) => ({
         name: label(part?.name, `Pièce ${index + 1}`),
         shape: part?.shape==='asset'&&isBuiltinAsset(part?.assetId)?'asset':Object.hasOwn(modelShapes, part?.shape)&&part.shape!=='asset'?part.shape:'box',
@@ -230,27 +235,57 @@ export function modelBounds(model){
 export function modelDimensions(model) {
   return modelBounds(model).getSize(new T.Vector3());
 }
-// Hitbox settings use the model workshop's *unscaled* local units.
-// The model geometry is visually centered before it goes into the game.
+// Local units in the workshop; runtime models are recentered and scaled.
 export function modelHitbox(model){
   const bounds=modelBounds(model),center=bounds.getCenter(new T.Vector3()),
-    size=bounds.getSize(new T.Vector3());
-  if(model.hitbox?.mode==='box')return {
-    mode:'box',center:new T.Vector3(...model.hitbox.center),
-    size:new T.Vector3(...model.hitbox.size),boundsCenter:center,boundsSize:size
-  };
-  return {mode:'auto',center,size,boundsCenter:center,boundsSize:size};
+    size=bounds.getSize(new T.Vector3()),raw=model.hitbox??{};
+  const custom=raw.mode==='box'||raw.mode==='custom';
+  return {mode:custom?'custom':'auto',shape:raw.mode==='box'?'box':hitboxShapes.has(raw.shape)?raw.shape:'box',
+    precision:Number.isFinite(raw.precision)?T.MathUtils.clamp(raw.precision,8,96):48,
+    center:custom?new T.Vector3(...raw.center):center,size:custom?new T.Vector3(...raw.size):size,
+    rotation:custom?new T.Vector3(...(raw.rotation??[0,0,0])):new T.Vector3(),
+    boundsCenter:center,boundsSize:size};
+}
+function sampleHullPoints(geometry,budget){
+  const position=geometry.attributes.position,unique=[],seen=new Set();
+  for(let i=0;i<position.count;i++){
+    const point=new T.Vector3().fromBufferAttribute(position,i),key=point.toArray().map(v=>v.toFixed(4)).join(',');
+    if(!seen.has(key)){seen.add(key);unique.push(point);}
+  }
+  if(unique.length<=budget)return unique;
+  const selected=[unique[0]],used=new Set([0]),distances=unique.map(p=>p.distanceToSquared(selected[0]));
+  while(selected.length<budget){
+    let best=-1,bestDistance=-1;
+    for(let i=0;i<unique.length;i++)if(!used.has(i)&&distances[i]>bestDistance){best=i;bestDistance=distances[i];}
+    if(best<0)break;used.add(best);selected.push(unique[best]);
+    for(let i=0;i<unique.length;i++)distances[i]=Math.min(distances[i],unique[i].distanceToSquared(unique[best]));
+  }
+  return selected;
+}
+export function modelHitboxGeometry(model){
+  const hitbox=modelHitbox(model),radial=Math.max(8,Math.min(24,Math.round(Math.sqrt(hitbox.precision)*2)));
+  if(hitbox.shape==='sphere')return new T.SphereGeometry(.5,radial,Math.max(6,Math.floor(radial/2)));
+  if(hitbox.shape==='capsule')return new T.CapsuleGeometry(.5,0,Math.max(2,Math.round(radial/8)),radial);
+  if(hitbox.shape==='convex'&&model.parts?.length){
+    const source=centeredGeometry(model.parts),points=sampleHullPoints(source,hitbox.precision);source.dispose();
+    if(points.length>=4)try{
+      const hull=new ConvexGeometry(points),dimensions=hitbox.boundsSize.clone().max(new T.Vector3(.00001,.00001,.00001));
+      hull.scale(1/dimensions.x,1/dimensions.y,1/dimensions.z);hull.computeVertexNormals();return hull;
+    }catch{/* Flat models fall back to a box. */}
+  }
+  return new T.BoxGeometry(1,1,1);
 }
 export function modelCollisionGeometry(model,mapDimensions=null){
-  const hitbox=modelHitbox(model);
-  const offset=hitbox.center.clone().sub(hitbox.boundsCenter);
-  const size=hitbox.size.clone();
-  if(mapDimensions){
-    const s=new T.Vector3(mapDimensions.x, mapDimensions.y, mapDimensions.z)
-      .divide(hitbox.boundsSize.clone().max(new T.Vector3(.00001,.00001,.00001)));
-    offset.multiply(s);size.multiply(s);
-  }
-  return new T.BoxGeometry(size.x,size.y,size.z).translate(offset.x,offset.y,offset.z);
+  const hitbox=modelHitbox(model),geometry=modelHitboxGeometry(model);
+  const dimensions=hitbox.boundsSize.clone().max(new T.Vector3(.00001,.00001,.00001));
+  const worldDimensions=mapDimensions?new T.Vector3(mapDimensions.x,mapDimensions.y,mapDimensions.z):new T.Vector3(1,1,1);
+  const scale=hitbox.size.clone().multiply(worldDimensions).divide(dimensions);
+  const offset=hitbox.center.clone().sub(hitbox.boundsCenter).multiply(worldDimensions).divide(dimensions);
+  geometry.scale(scale.x,scale.y,scale.z);
+  geometry.rotateX(T.MathUtils.degToRad(hitbox.rotation.x));
+  geometry.rotateY(T.MathUtils.degToRad(hitbox.rotation.y));
+  geometry.rotateZ(T.MathUtils.degToRad(hitbox.rotation.z));
+  geometry.translate(offset.x,offset.y,offset.z);geometry.computeBoundingBox();return geometry;
 }
 
 export function createModelPropDefinitions(pack) {

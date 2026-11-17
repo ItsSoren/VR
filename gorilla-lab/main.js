@@ -737,7 +737,7 @@ function saveVRModel(asHead){
   const id='custom-model-vr-'+Date.now().toString(36);
   const model={id,name:'Modèle VR '+(pack.models.length+1),inGame:!asHead,properties:{
     grabbable:settings.modelGrab,frozen:settings.modelFrozen,collidable:settings.modelCollidable,supportWhileHeld:settings.modelSupport,
-  },parts:pieces.map(p=>({shape:'box',name:p.name,position:[(p.x-center.x)*ratio,(p.y-center.y)*ratio,(p.z-center.z)*ratio],
+  },hitbox:{mode:'auto',shape:'convex',precision:48},parts:pieces.map(p=>({shape:'box',name:p.name,position:[(p.x-center.x)*ratio,(p.y-center.y)*ratio,(p.z-center.z)*ratio],
     rotation:[p.pitch,p.yaw,0],scale:[p.w*ratio,p.h*ratio,p.d*ratio],color:p.color==='#ffffff'?materialColors[p.material]:p.color,
     surface:'plain'}))};
   pack.models.push(model);

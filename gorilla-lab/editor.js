@@ -4,7 +4,7 @@ import {addLabFixtures} from './fixtures.js';
 import {createArenaObjectSpecs,forEachStartupObject} from './arena-objects.js';
 import {labMirror,labProbe,labTree,labTarget} from './lab-layout.js';
 import {tiledBox,transformUVs,decorPrimitiveGeometry} from './texture-geometry.js';
-import {readModelPack,modelStorageKey,normalizeModelPack,createModelUnitGeometry,createModelMaterial,disposeModelMaterial,modelDimensions,modelBounds} from './model-pack.js';
+import {readModelPack,modelStorageKey,normalizeModelPack,createModelUnitGeometry,createModelMaterial,modelCollisionGeometry,disposeModelMaterial,modelDimensions,modelBounds} from './model-pack.js';
 import {createBuiltinModelTemplates,spawnAssetIds} from './model-assets.js';
 import {normalizeTerrain,resizeTerrain,sculptTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from './terrain-edit.js';
 import {texturePresets,seamlessTexture} from './seamless-texture.js';
@@ -357,6 +357,18 @@ function assetPiece(assetId,position,sourceModel=null,name=null){
 }
 const defaultMap=()=>{
   const next=arenaMap(previewArena.boxes);
+  const hillBox=previewArena.boxes.find(box=>box.heightfield);
+  if(hillBox){
+    const {xMin,xMax,zMin,zMax}=hillBox,detail=64,w=xMax-xMin,d=zMax-zMin;
+    const heights=Array.from({length:(detail+1)**2},(_,index)=>{
+      const x=xMin+(index%(detail+1))/detail*w;
+      const z=zMin+Math.floor(index/(detail+1))/detail*d;
+      return hillBox.height(x,z);
+    });
+    next.pieces.push(makePiece({name:'Relief principal',sceneryId:'lab-hill',
+      x:(xMin+xMax)/2,y:0,z:(zMin+zMax)/2,w,h:2,d,material:3,grip:.81,solid:true,
+      terrain:normalizeTerrain({detail,seed:1,amplitude:0,heights})}));
+  }
   next.assetLayer=true;
   forEachStartupObject((type,position)=>{
     const assetId=spawnAssetIds[type];
@@ -386,6 +398,7 @@ const arenaBackdrop=new T.Group();
 arenaBackdrop.add(...[...referenceScene.children]);
 scene.add(arenaBackdrop);
 const previewHill=previewArena.boxes.find(box=>box.heightfield).mesh;
+previewHill.userData.editorAssetId='lab-hill';
 previewArena.visual(7,0,7,true,true,true,512,false);
 
 const grid = new T.GridHelper(60, 60, '#d7e2e5', '#5e7b8a');
@@ -768,9 +781,10 @@ function rebuildScene() {
   }
   arenaBackdrop.visible=Boolean(map.arenaBase);
   const mappedAssets=new Set(map.pieces.map(piece=>piece.model?.assetId).filter(Boolean));
+  const mappedScenery=new Set(map.pieces.map(piece=>piece.sceneryId).filter(Boolean));
   arenaBackdrop.traverse(node=>{
     const assetId=node.userData.editorAssetId;
-    if(assetId)node.visible=Boolean(map.arenaBase)&&!mappedAssets.has(assetId);
+    if(assetId)node.visible=Boolean(map.arenaBase)&&!mappedAssets.has(assetId)&&!mappedScenery.has(assetId);
   });
   sun.visible=ambient.visible=!map.arenaBase;
   scene.fog=map.arenaBase?referenceScene.fog:null;
@@ -1757,7 +1771,12 @@ function refreshDiagnostics(){
   for(const mesh of group.children){
     if(mesh.material)for(const mat of Array.isArray(mesh.material)?mesh.material:[mesh.material])mat.wireframe=$('debug-wire').checked;
     if($('debug-hitboxes').checked){
-      diagnosticBoxes.add(new T.BoxHelper(mesh,'#fa9945'));
+      const index=group.children.indexOf(mesh),piece=map.pieces[index];
+      if(piece?.model){
+        const geometry=modelCollisionGeometry(piece.model,new T.Vector3(piece.w,piece.h,piece.d));
+        const wire=new T.Mesh(geometry,new T.MeshBasicMaterial({color:'#fa9945',wireframe:true,transparent:true,opacity:.95}));
+        wire.position.copy(mesh.position);wire.rotation.copy(mesh.rotation);diagnosticBoxes.add(wire);
+      }else diagnosticBoxes.add(new T.BoxHelper(mesh,'#fa9945'));
     }
   }
   queueRender();
@@ -1777,12 +1796,14 @@ try {
     const saved=parseMap(draft);
     // Previously just opening the editor automatically saved the demo as a draft.
     if(JSON.stringify(saved)!==JSON.stringify(exampleMap())){
-      if(saved.arenaBase&&!saved.assetLayer&&!saved.pieces.some(piece=>piece.model?.assetId)){
-        const defaults=defaultMap();
-        saved.pieces.push(...defaults.pieces.filter(piece=>piece.model?.assetId));
-        saved.assetLayer=true;
-        map=parseMap(saved);
-        notice('Carte mise à niveau : objets du Spawn et éléments de test désormais éditables.');
+      if(saved.arenaBase){
+        const defaults=defaultMap(),knownAssets=new Set(saved.pieces.map(piece=>piece.model?.assetId).filter(Boolean));
+        const knownScenery=new Set(saved.pieces.map(piece=>piece.sceneryId).filter(Boolean));
+        const additions=defaults.pieces.filter(piece=>(piece.model?.assetId&&!knownAssets.has(piece.model.assetId))||
+          (piece.sceneryId&&!knownScenery.has(piece.sceneryId)));
+        if(additions.length){saved.pieces.push(...additions);saved.assetLayer=true;map=parseMap(saved);
+          notice('Carte mise à niveau : relief, objets et éléments du Spawn désormais éditables.');
+        }else map=saved;
       }else map=saved;
     }
   }

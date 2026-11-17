@@ -3,7 +3,7 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {TransformControls} from 'three/addons/controls/TransformControls.js';
 import {GLTFExporter} from 'three/addons/exporters/GLTFExporter.js';
 import {
-  createModelMaterial,createModelPartMaterial,disposeModelMaterial,createModelPartGeometry,createModelUnitGeometry,modelHitbox,defaultModelProperties,
+  createModelMaterial,createModelPartMaterial,disposeModelMaterial,createModelPartGeometry,createModelUnitGeometry,modelHitbox,modelHitboxGeometry,defaultModelProperties,
   modelLimits,modelShapes,modelStorageKey,modelSurfaces,normalizeModelPack,readModelPack,
 } from './model-pack.js';
 import {createBuiltinModelTemplates} from './model-assets.js';
@@ -286,58 +286,50 @@ function updateInspector(){
 // The visual preview uses Foundry's uncentred model coordinates.
 // When exported, physics recentres the geometry and applies the same offset.
 function updateHitboxControls(){
-  const model=currentModel(),manual=model?.hitbox?.mode==='box';
+  const model=currentModel(),manual=model?.hitbox?.mode==='box'||model?.hitbox?.mode==='custom';
   $('hitbox-auto').setAttribute('aria-pressed',String(!manual));
   $('hitbox-manual').setAttribute('aria-pressed',String(!!manual));
-  $('hitbox-geometry').hidden=!manual;
-  $('hitbox-auto').disabled=$('hitbox-manual').disabled=!model?.parts.length;
+  $('hitbox-geometry').hidden=!manual;$('hitbox-auto').disabled=$('hitbox-manual').disabled=!model?.parts.length;
+  $('hitbox-shape').disabled=!model?.parts.length;
   $('hitbox-drag').setAttribute('aria-pressed',String(!!hitboxEditing&&viewMode==='translate'));
   $('hitbox-scale').setAttribute('aria-pressed',String(!!hitboxEditing&&viewMode==='scale'));
-  if(!model?.parts.length){
-    $('hitbox-info').textContent='Ajoute une pièce pour générer sa hitbox.';
-    return;
-  }
-  $('hitbox-info').textContent=manual
-    ?'Hitbox personnalisée : déplace la boîte orange ou modifie les valeurs.'
-    :'Hitbox automatique : une boîte ajustée autour du modèle entier.';
+  $('hitbox-rotate').setAttribute('aria-pressed',String(!!hitboxEditing&&viewMode==='rotate'));
+  if(!model?.parts.length){$('hitbox-info').textContent='Ajoute une pièce pour générer sa hitbox.';return;}
+  const shape=model.hitbox?.shape??'box',precision=Math.round(model.hitbox?.precision??48);
+  if($('hitbox-shape').value!==shape)$('hitbox-shape').value=shape;
+  $('hitbox-precision').value=String(precision);$('hitbox-precision-value').textContent=String(precision);
+  $('hitbox-precision-wrap').hidden=shape!=='convex';
+  $('hitbox-info').textContent=manual?'Hitbox personnalisée : déplace, tourne et redimensionne la forme orange.'
+    :shape==='convex'?'Auto : enveloppe convexe calculée depuis la géométrie du modèle.'
+    :'Auto : collision simple ajustée aux dimensions du modèle.';
   if(!manual)return;
-  for(const key of ['center','size'])for(let index=0;index<3;index++){
-    const input=$('hitbox-'+key+'-'+['x','y','z'][index]);
-    if(document.activeElement!==input)input.value=Number(model.hitbox[key][index].toFixed(3));
+  for(const key of ['center','size'])for(let i=0;i<3;i++){
+    const input=$('hitbox-'+key+'-'+['x','y','z'][i]);
+    if(document.activeElement!==input)input.value=Number(model.hitbox[key][i].toFixed(3));
   }
 }
 function updateHitboxPreview(){
-  const model=currentModel();
-  const show=!!model?.parts.length&&$('model-inspector').dataset.tab==='collision'&&
-    $('hitbox-preview-toggle').checked;
+  const model=currentModel(),show=!!model?.parts.length&&$('model-inspector').dataset.tab==='collision'&&$('hitbox-preview-toggle').checked;
   hitboxPreview.visible=show;
   if(show){
-    const hitbox=modelHitbox(model);
+    const hitbox=modelHitbox(model),geometry=modelHitboxGeometry(model);
+    hitboxPreview.geometry.dispose();hitboxPreview.geometry=geometry;
     hitboxPreview.position.copy(hitbox.center);
-    hitboxPreview.scale.copy(hitbox.size);
-    hitboxPreview.material.color.set(model.properties.collidable?'#ffb55e':'#9b9fa5');
+    hitboxPreview.rotation.set(...hitbox.rotation.toArray().map(T.MathUtils.degToRad));
+    hitboxPreview.scale.copy(hitbox.size);hitboxPreview.material.color.set(model.properties.collidable?'#ffb55e':'#9b9fa5');
   }
-  if(!gizmo?.dragging)attachGizmo();
-  render();
+  if(!gizmo?.dragging)attachGizmo();render();
 }
 function setHitboxMode(mode){
-  const model=currentModel();
-  if(!model?.parts.length)return;
-  const hb=modelHitbox(model);
-  remember();
+  const model=currentModel();if(!model?.parts.length)return;
+  const hb=modelHitbox(model);remember();
   model.hitbox=mode==='box'
-    ?{mode:'box',center:hb.center.toArray(),size:hb.size.toArray()}
-    :{mode:'auto'};
-  hitboxEditing=false;
-  markDirty();
-  updateHitboxControls();
-  updateHitboxPreview();
-  if(mode==='box'){
-    $('hitbox-preview-toggle').checked=true;
-    hitboxEditing=true;
-    setTool('scale');
-    updateHitboxPreview();
-  }else setTool('select');
+    ?{mode:'custom',shape:$('hitbox-shape').value||'box',center:hb.center.toArray(),size:hb.size.toArray(),
+      rotation:hb.rotation.toArray(),precision:Number($('hitbox-precision').value)||48}
+    :{mode:'auto',shape:'convex',precision:Number($('hitbox-precision').value)||48};
+  hitboxEditing=mode==='box';markDirty();updateHitboxControls();
+  $('hitbox-preview-toggle').checked=true;updateHitboxPreview();
+  if(mode==='box')setTool('scale');else setTool('select');
 }
 function setPanel(tab){
   if(tab!=='collision'&&hitboxEditing){
@@ -387,12 +379,12 @@ try{
   gizmo.addEventListener('objectChange',()=>{
     const mesh=gizmo.object,part=currentPart();
     if(!mesh)return;
-    if(hitboxEditing&&mesh===hitboxPreview&&currentModel()?.hitbox?.mode==='box'){
+    if(hitboxEditing&&mesh===hitboxPreview&&['box','custom'].includes(currentModel()?.hitbox?.mode)){
       const hitbox=currentModel().hitbox;
       hitbox.center=mesh.position.toArray().map(v=>clamp(v,-6,6));
       hitbox.size=mesh.scale.toArray().map(v=>clamp(Math.abs(v),.025,12));
-      mesh.position.fromArray(hitbox.center);
-      mesh.scale.fromArray(hitbox.size);
+      hitbox.rotation=[mesh.rotation.x,mesh.rotation.y,mesh.rotation.z].map(rad=>clamp(T.MathUtils.radToDeg(rad),-360,360));
+      mesh.position.fromArray(hitbox.center);mesh.scale.fromArray(hitbox.size);
       transformMoved=true;
       updateHitboxControls();
       render();
@@ -467,7 +459,7 @@ function attachGizmo(){
   if(!gizmo)return;
   const selectedMesh=previews.children[partIndex];
   const mesh=viewMode==='select'?null:
-    hitboxEditing&&hitboxPreview.visible&&['translate','scale'].includes(viewMode)?hitboxPreview:
+    hitboxEditing&&hitboxPreview.visible&&['translate','scale','rotate'].includes(viewMode)?hitboxPreview:
     !selectedMesh?.visible?null:selectedMesh;
   // Keep the same attachment while dragging. Re-attaching resets the
   // TransformControls axis and quietly aborts rotate/scale/translate.
@@ -584,7 +576,7 @@ function changeMask(slot){
   updateParts();updatePreview();
 }
 function setTool(tool){
-  if(hitboxEditing&&!['translate','scale'].includes(tool))hitboxEditing=false;
+  if(hitboxEditing&&!['translate','scale','rotate'].includes(tool))hitboxEditing=false;
   viewMode=tool;
   for(const button of document.querySelectorAll('.rail-btn[data-tool]'))
     button.setAttribute('aria-pressed',String(button.dataset.tool===tool));
@@ -675,7 +667,8 @@ function addModel(example=false){
   const id=newModelId();
   const name=example?'Singe de pierre':'Modèle '+(pack.models.length+1);
   pack.models.push({id,name,kind:'structure',inGame:false,
-    properties:{...defaultModelProperties},parts:example?exampleParts():[]});
+    properties:{...defaultModelProperties},hitbox:{mode:'auto',shape:'convex',precision:48},
+    parts:example?exampleParts():[]});
   modelId=id;partIndex=0;
   markDirty();refreshModel();
   setPanel('geometry');
@@ -907,31 +900,44 @@ for(const id of ['model-name','model-title'])
 $('hitbox-auto').onclick=()=>setHitboxMode('auto');
 $('hitbox-manual').onclick=()=>setHitboxMode('box');
 $('hitbox-preview-toggle').onchange=updateHitboxPreview;
-for(const [id,mode] of [['hitbox-drag','translate'],['hitbox-scale','scale']]){
+$('hitbox-shape').onchange=event=>{
+  const model=currentModel();if(!model)return;beforeChange(event.target);
+  const value=event.target.value;if(!['box','sphere','capsule','convex'].includes(value))return;
+  const old=modelHitbox(model),manual=['box','custom'].includes(model.hitbox?.mode);
+  model.hitbox={mode:manual?'custom':'auto',shape:value,
+    ...(manual?{center:old.center.toArray(),size:old.size.toArray(),rotation:old.rotation.toArray()}:{}),
+    precision:Number($('hitbox-precision').value)||48};
+  hitboxEditing=manual;markDirty();updateHitboxControls();updateHitboxPreview();
+};
+$('hitbox-precision').oninput=event=>{
+  const model=currentModel();if(!model)return;
+  const value=clamp(Math.round(Number(event.target.value)||48),8,96),old=modelHitbox(model);
+  const manual=['box','custom'].includes(model.hitbox?.mode);
+  model.hitbox={mode:manual?'custom':'auto',shape:model.hitbox?.shape??'convex',precision:value,
+    ...(manual?{center:old.center.toArray(),size:old.size.toArray(),rotation:old.rotation.toArray()}: {})};
+  $('hitbox-precision-value').textContent=String(value);markDirty();updateHitboxPreview();
+};
+for(const [id,mode] of [['hitbox-drag','translate'],['hitbox-scale','scale'],['hitbox-rotate','rotate']]){
   $(id).onclick=()=>{
-    const model=currentModel();
-    if(!model?.parts.length||model.hitbox?.mode!=='box')return;
-    $('hitbox-preview-toggle').checked=true;
-    hitboxEditing=true;
-    setTool(mode);
-    updateHitboxControls();
-    updateHitboxPreview();
+    const model=currentModel();if(!model?.parts.length||!['box','custom'].includes(model.hitbox?.mode))return;
+    $('hitbox-preview-toggle').checked=true;hitboxEditing=true;
+    setTool(mode);updateHitboxControls();updateHitboxPreview();
   };
 }
 $('hitbox-fit').onclick=()=>{
-  const model=currentModel();
-  if(!model?.parts.length)return;
-  const hitbox=modelHitbox({...model,hitbox:{mode:'auto'}});
-  remember();
-  model.hitbox={mode:'box',center:hitbox.center.toArray(),size:hitbox.size.toArray()};
-  markDirty();updateHitboxControls();updateHitboxPreview();
+  const model=currentModel();if(!model?.parts.length)return;
+  const precision=Number($('hitbox-precision').value)||48;
+  const hitbox=modelHitbox({...model,hitbox:{mode:'auto',shape:'convex',precision}});
+  remember();model.hitbox={mode:'custom',shape:$('hitbox-shape').value||'convex',center:hitbox.center.toArray(),
+    size:hitbox.size.toArray(),rotation:[0,0,0],precision};
+  hitboxEditing=true;markDirty();updateHitboxControls();updateHitboxPreview();
   status('Hitbox ajustée à la géométrie actuelle.');
 };
 for(const key of ['center','size'])for(let i=0;i<3;i++){
   const input=$('hitbox-'+key+'-'+['x','y','z'][i]);
   input.oninput=event=>{
     const model=currentModel(),value=event.target.valueAsNumber;
-    if(model?.hitbox?.mode!=='box'||!Number.isFinite(value))return;
+    if(!['box','custom'].includes(model?.hitbox?.mode)||!Number.isFinite(value))return;
     beforeChange(event.target);
     model.hitbox[key][i]=clamp(value,key==='size'?.025:-6,key==='size'?12:6);
     markDirty();updateHitboxPreview();

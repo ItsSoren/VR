@@ -32,7 +32,9 @@ export function parseMap(input){
       const model=p.model ? normalizeModelPack({version:1,models:[p.model]}).models[0] : null;
       if(model && !model.parts.length)throw Error('Le modèle doit contenir au moins une forme.');
       return {
-        name:text(p.name,36,'Pièce '+(i+1)),x:number(p.x,-maxWorldReach,maxWorldReach,0),y:number(p.y,-256,256,0),z:number(p.z,-maxWorldReach,maxWorldReach,0),
+        name:text(p.name,36,'Pièce '+(i+1)),
+        ...(typeof p.sceneryId==='string'&&/^[a-z0-9-]{1,48}$/i.test(p.sceneryId)?{sceneryId:p.sceneryId}:{}),
+        x:number(p.x,-maxWorldReach,maxWorldReach,0),y:number(p.y,-256,256,0),z:number(p.z,-maxWorldReach,maxWorldReach,0),
         w:number(p.w,.05,maxObjectSize,3),h:number(p.h,.05,256,.5),d:number(p.d,.05,maxObjectSize,3),
         pitch:terrain?0:number(p.pitch,-180,180,0),yaw:terrain?0:number(p.yaw,-360,360,0),roll:terrain?0:number(p.roll,-180,180,0),
         ...(terrain?{terrain}:{}),

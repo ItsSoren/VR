@@ -237,6 +237,7 @@ export function buildArena(scene,renderer) {
   }
   setHillSeed(labHillSeed);
   const hill=new T.Mesh(hillGeometry,tiles[3]);
+  hill.userData.editorAssetId='lab-hill';
   hill.receiveShadow=hill.castShadow=true;scene.add(hill);
   const height=(x,z)=>{
     const gx=T.MathUtils.clamp((x-hillX)/hillWidth*hillCols,0,hillCols-1e-6);
@@ -246,7 +247,7 @@ export function buildArena(scene,renderer) {
     const a=hillPositions.getY(idx),b=hillPositions.getY(idx+1),c=hillPositions.getY(idx+row),d=hillPositions.getY(idx+row+1);
     return u+v<=1?a+(b-a)*u+(c-a)*v:d+(c-d)*(1-u)+(b-d)*(1-v);
   };
-  boxes.push({heightfield:true,mesh:hill,height,...labZones.hills.bounds,friction:.81,gravity:1});
+  boxes.push({heightfield:true,mesh:hill,editorAssetId:'lab-hill',height,...labZones.hills.bounds,friction:.81,gravity:1});
 
   function sign(text,x,z,color,y=1.45) {
     const texture=canvasTexture(384,72,(c,w,h)=>{

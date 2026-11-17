@@ -10,7 +10,7 @@ import {createToolVisual} from '../gorilla-lab/tool-visual.js';
 import {createArcadeBlaster,createBlasterModel} from '../gorilla-lab/arcade-blaster.js';
 import {updateGroundHaptics} from '../gorilla-lab/ground-haptics.js';
 import {parseMap,exampleMap} from '../gorilla-lab/map-format.js';
-import {normalizeModelPack,createModelUnitGeometry,modelDimensions,modelHitbox,modelCollisionGeometry,createModelPropDefinitions,disposeModelMaterial} from '../gorilla-lab/model-pack.js';
+import {normalizeModelPack,createModelUnitGeometry,modelDimensions,modelHitbox,modelHitboxGeometry,modelCollisionGeometry,createModelPropDefinitions,disposeModelMaterial} from '../gorilla-lab/model-pack.js';
 import {createKeyboardState} from '../gorilla-lab/flat-controls.js';
 import {screenPixelRatio} from '../gorilla-lab/screen-render.js';
 import {terrainHeight,sculptTerrain,normalizeTerrain,resizeTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from '../gorilla-lab/terrain-edit.js';
@@ -591,6 +591,30 @@ test('custom hitbox offset and size survive JSON, dynamic physics and map scalin
   const map=exampleMap();map.pieces[0].model=clean;
   assert.deepEqual(parseMap(JSON.stringify(map)).pieces[0].model.hitbox,model.hitbox);
   dynamic.dispose();mapGeo.dispose();
+});
+test('custom sphere, capsule and convex hitboxes build persisted collision geometry',()=>{
+  const model={id:'custom-model-hitbox-shapes',name:'Formes',kind:'prop',parts:[
+    {name:'Corps',shape:'box',position:[0,0,0],rotation:[0,0,0],scale:[2,1,.5],color:'#ffffff',surface:'plain'}
+  ]};
+  for(const shape of ['sphere','capsule','convex']){
+    const clean=normalizeModelPack({version:1,models:[{...model,hitbox:{
+      mode:'custom',shape,center:[.2,0,0],size:[1.2,.8,.6],rotation:[0,25,0],precision:96
+    }}]}).models[0],preview=modelHitboxGeometry(clean),collision=modelCollisionGeometry(clean,new T.Vector3(4,2,1));
+    preview.computeBoundingBox();collision.computeBoundingBox();
+    assert.ok(preview.attributes.position.count>=12);assert.ok(collision.boundingBox.getSize(new T.Vector3()).x>0);
+    assert.equal(clean.hitbox.shape,shape);assert.equal(clean.hitbox.precision,96);
+    preview.dispose();collision.dispose();
+  }
+});
+test('automatic convex precision constrains source mesh points',()=>{
+  const model={id:'custom-model-hitbox-budget',name:'Enveloppe',kind:'prop',hitbox:{mode:'auto',shape:'convex',precision:24},parts:[
+    {name:'Corps',shape:'box',position:[0,0,0],rotation:[0,0,0],scale:[1,1,1],color:'#ffffff',surface:'plain'},
+    {name:'Bras',shape:'box',position:[.7,0,0],rotation:[0,0,0],scale:[.3,.3,.3],color:'#ffffff',surface:'plain'}
+  ]},clean=normalizeModelPack({version:1,models:[model]}).models[0],geometry=modelHitboxGeometry(clean);
+  assert.ok(geometry.attributes.position.count/3>0);assert.ok(geometry.attributes.position.count/3<=44);geometry.dispose();
+});
+test('editable scenery identifiers round-trip inside map pieces',()=>{
+  const map=exampleMap();map.pieces[0].sceneryId='lab-hill';assert.equal(parseMap(JSON.stringify(map)).pieces[0].sceneryId,'lab-hill');
 });
 test('model hitbox values are clamped and invalid modes use automatic collision',()=>{
   const model={id:'custom-model-hitbox-normal',name:'Test',parts:[
