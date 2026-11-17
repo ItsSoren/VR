@@ -3,9 +3,10 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {TransformControls} from 'three/addons/controls/TransformControls.js';
 import {GLTFExporter} from 'three/addons/exporters/GLTFExporter.js';
 import {
-  createModelMaterial,createModelPartGeometry,defaultModelProperties,
+  createModelMaterial,createModelPartMaterial,disposeModelMaterial,createModelPartGeometry,defaultModelProperties,
   modelLimits,modelShapes,modelStorageKey,modelSurfaces,normalizeModelPack,readModelPack,
 } from './model-pack.js';
+import {openTextureStudio} from './texture-studio.js';
 
 // GORILLA / FOUNDRY. Geometry remains in the Gorilla model-pack v1 format:
 // the editor transforms local part geometry without changing the game's schema.
@@ -178,6 +179,9 @@ function updateInspector(){
   $('drop-to-grid').disabled=!part;
   $('focus-part').disabled=!part;
   $('reset-part').disabled=!part;
+  $('part-paint').disabled=!part;
+  $('part-texture-clear').disabled=!part?.texture;
+  $('part-texture-status').textContent=part?.texture?'Texture peinte appliquée à cette pièce.':'Aucune texture personnalisée. La finition pré-définie reste active.';
   $('center-part').disabled=!part;
   $('delete-part').disabled=!part;
   $('viewport-title').textContent=model
@@ -270,7 +274,11 @@ for(const [key,settings] of Object.entries(limits)){
 
 function partMesh(part){
   const source={...part,position:[0,0,0],rotation:[0,0,0],scale:[1,1,1]};
-  const mesh=new T.Mesh(createModelPartGeometry(source),material);
+  const partMaterial=part.texture?createModelPartMaterial(source):material;
+  const mesh=new T.Mesh(createModelPartGeometry(source),partMaterial);
+  mesh.userData.ownMaterial=Boolean(part.texture);
+  const image=partMaterial?.map?.image;
+  if(image?.addEventListener&&!image.complete)image.addEventListener('load',render,{once:true});
   mesh.position.fromArray(part.position);
   mesh.rotation.order='ZYX';
   mesh.rotation.set(...part.rotation.map(T.MathUtils.degToRad));
@@ -316,7 +324,10 @@ function frameModel(onlySelected=false){
 }
 function updatePreview(frame=false){
   gizmo?.detach();
-  for(const mesh of [...previews.children]){previews.remove(mesh);mesh.geometry.dispose();}
+  for(const mesh of [...previews.children]){
+    previews.remove(mesh);mesh.geometry.dispose();
+    if(mesh.userData.ownMaterial)disposeModelMaterial(mesh.material);
+  }
   const parts=currentModel()?.parts??[];
   if(renderer)for(const part of parts)previews.add(partMesh(part));
   $('preview-empty').hidden=Boolean(parts.length&&renderer);
@@ -518,16 +529,25 @@ async function doExport(){
       root.name=model.name;
       const meshes=[];
       for(const part of model.parts){
-        const mesh=new T.Mesh(createModelPartGeometry(part),
-          new T.MeshStandardMaterial({vertexColors:true,roughness:.67,metalness:.08}));
+        const m=part.texture?createModelPartMaterial(part)
+          :new T.MeshStandardMaterial({vertexColors:true,roughness:.67,metalness:.08});
+        const mesh=new T.Mesh(createModelPartGeometry(part),m);
         mesh.name=part.name;root.add(mesh);meshes.push(mesh);
       }
       try{
+        // Wait for painted image textures before GLTFExporter serializes the model.
+        await Promise.all(meshes.map(mesh=>new Promise((resolve,reject)=>{
+          const img=mesh.material.map?.image;
+          if(!img||img.complete&&img.naturalWidth>0)return resolve();
+          if(!img.addEventListener)return resolve();
+          img.addEventListener('load',resolve,{once:true});
+          img.addEventListener('error',()=>reject(Error('Une texture GLB ne peut pas être chargée.')),{once:true});
+        })));
         const data=await new Promise((resolve,reject)=>
           new GLTFExporter().parse(root,resolve,reject,{binary:true,onlyVisible:true}));
         download(new Blob([data],{type:'model/gltf-binary'}),name+'.glb');
       }finally{
-        for(const mesh of meshes){mesh.geometry.dispose();mesh.material.dispose();}
+        for(const mesh of meshes){mesh.geometry.dispose();disposeModelMaterial(mesh.material);}
       }
     }
     status('Export '+format.toUpperCase()+' généré');
@@ -601,6 +621,29 @@ $('add-part').onclick=()=>addPart();
 for(const button of document.querySelectorAll('[data-shape]')){
   button.onclick=()=>{$('new-shape').value=button.dataset.shape;addPart(button.dataset.shape);};
 }
+$('part-paint').onclick=()=>{
+  const part=currentPart();
+  if(!part)return;
+  const patterns={plain:'solid',grid:'grid',stripes:'stripes',wood:'wood',speckle:'rock'};
+  openTextureStudio({
+    initial:part.texture,name:'Pièce / '+part.name,tint:part.color,
+    pattern:patterns[part.surface]??'grain',maxDataBytes:modelLimits.textureBytes-2000,
+    onApply:async data=>{
+      if(!currentModel()?.parts.includes(part))throw Error('La pièce modifiée n’existe plus dans ce modèle.');
+      remember();
+      if(!part.texture)part.color='#ffffff'; // Avoid unwanted tint over the painted pixels.
+      part.texture=data;
+      // Fail early if all texture assets exceed the pack's JSON budget.
+      normalizeModelPack(pack);
+      markDirty();updateInspector();updatePreview();
+      status('Texture peinte appliquée à '+part.name+'. Enregistre pour la retrouver en jeu.');
+    },
+  });
+};
+$('part-texture-clear').onclick=()=>{
+  const part=currentPart();if(!part?.texture)return;
+  remember();part.texture=null;markDirty();updateInspector();updatePreview();
+};
 $('duplicate-part').onclick=duplicatePart;
 $('delete-part').onclick=deletePart;
 $('mirror').onclick=mirrorPart;
