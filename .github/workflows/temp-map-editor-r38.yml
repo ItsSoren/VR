@@ -19,6 +19,8 @@ jobs:
       - run: npm install --no-package-lock
       - run: npm test
       - run: npm run build
+      - run: npm install --no-save --no-package-lock puppeteer-core
+      - run: node scripts/temp-editor-smoke.mjs
       - name: Commit generated static site files
         run: |
           git config user.name "github-actions[bot]"
