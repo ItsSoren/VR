@@ -63,9 +63,11 @@ try{
   const stored=JSON.parse(localStorage.getItem(workspaceKey)||'null');
   if(stored&&typeof stored==='object'&&stored.masks&&stored.active){
     workspace={active:stored.active,masks:stored.masks,
-      references:Array.isArray(stored.references)?stored.references:[]};
+      references:Array.isArray(stored.references)?stored.references:[],
+      lastModel:typeof stored.lastModel==='string'?stored.lastModel:null};
   }
 }catch{}
+if(pack.models.some(model=>model.id===workspace.lastModel))modelId=workspace.lastModel;
 const references=new Set(workspace.references);
 function storeWorkspace(){
   try{workspace.references=[...references];localStorage.setItem(workspaceKey,JSON.stringify(workspace));}catch{}
@@ -464,6 +466,7 @@ function updatePreview(frame=false){
   else render();
 }
 function refreshModel(){
+  workspace.lastModel=modelId;storeWorkspace();
   updateModelLists();
   $('new-model').disabled=$('example').disabled=pack.models.length>=modelLimits.models;
   updateParts();updateInspector();updatePreview(true);updateHistoryButtons();
@@ -507,7 +510,7 @@ function pick(event){
   const rect=canvas.getBoundingClientRect();
   pointer.set(2*(event.clientX-rect.left)/rect.width-1,1-2*(event.clientY-rect.top)/rect.height);
   raycaster.setFromCamera(pointer,camera);
-  const hit=raycaster.intersectObjects(previews.children,false)[0];
+  const hit=raycaster.intersectObjects(previews.children.filter(mesh=>mesh.visible),false)[0];
   return hit?previews.children.indexOf(hit.object):-1;
 }
 canvas.addEventListener('pointerdown',event=>{
