@@ -4,7 +4,7 @@ import {addLabFixtures} from './fixtures.js';
 import {createArenaObjectSpecs,forEachStartupObject} from './arena-objects.js';
 import {labMirror} from './lab-layout.js';
 import {tiledBox,transformUVs,decorPrimitiveGeometry} from './texture-geometry.js';
-import {readModelPack,createModelUnitGeometry,createModelMaterial,disposeModelMaterial,modelDimensions} from './model-pack.js';
+import {readModelPack,modelStorageKey,normalizeModelPack,createModelUnitGeometry,createModelMaterial,disposeModelMaterial,modelDimensions} from './model-pack.js';
 import {normalizeTerrain,resizeTerrain,sculptTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from './terrain-edit.js';
 import {texturePresets,seamlessTexture} from './seamless-texture.js';
 import {openTextureStudio} from './texture-studio.js';
@@ -23,14 +23,26 @@ const toolButtons = [...document.querySelectorAll('.tool')];
 const draftKey = 'gorilla-lab-editor-draft';
 const modelPack = readModelPack(localStorage);
 const modelLibrary = modelPack.models.filter(model => model.parts.length);
-$('model-library').replaceChildren(
-  new Option('Sélectionner un modèle…', ''),
-  ...modelLibrary.map(model => new Option(model.name + (model.kind === 'structure' ? ' · Décor' : ' · Objet'), model.id))
-);
+function refreshModelSelectors(preferredModel){
+  const selected=preferredModel??$('model-library').value;
+  $('model-library').replaceChildren(
+    new Option('Sélectionner un modèle…', ''),
+    ...modelLibrary.map(model=>new Option(model.name+(model.kind==='structure'?' · Décor':' · Objet'),model.id))
+  );
+  if(modelLibrary.some(model=>model.id===selected))$('model-library').value=selected;
+  else if(modelLibrary.length===1)$('model-library').value=modelLibrary[0].id;
+  $('place-model').disabled=!modelLibrary.length;
+  for(const id of ['terrain-grassModel','terrain-shrubModel']){
+    const input=$(id),previous=input.value;
+    input.replaceChildren(
+      new Option('Géométrie simple (défaut)',''),
+      ...modelLibrary.map(model=>new Option(model.name,model.id))
+    );
+    if(modelLibrary.some(model=>model.id===previous))input.value=previous;
+  }
+}
 const requestedModel = new URLSearchParams(location.search).get('model');
-if (modelLibrary.some(model => model.id === requestedModel)) $('model-library').value = requestedModel;
-else if(modelLibrary.length===1)$('model-library').value=modelLibrary[0].id;
-$('place-model').disabled = !modelLibrary.length;
+refreshModelSelectors(requestedModel);
 function selectedModel() { return modelLibrary.find(model => model.id === $('model-library').value); }
 function modelPiece() {
   const model = selectedModel();
@@ -42,7 +54,10 @@ function modelPiece() {
     color:'#ffffff',solid:model.properties.collidable!==false
   });
 }
-$('model-library').addEventListener('change',()=>{if(tool==='model')showGhost(null);});
+$('model-library').addEventListener('change',()=>{
+  if(tool==='model')showGhost(null);
+  updateToolHelp();
+});
 const shapes = {
   block: makePiece(),
   ramp: makePiece({ name: 'Rampe', w: 3, h: .30, d: 4, pitch: 16, material: 5 }),
@@ -93,10 +108,6 @@ $('workspace-fullscreen').onclick=()=>{
 };
 $('focus-3d').onclick=()=>{$('layout-mode').value='only-3d';applyLayout();};
 $('focus-plan').onclick=()=>{$('layout-mode').value='only-plan';applyLayout();};
-const modelOptions=[['','Géométrie simple (défaut)'],...modelLibrary.map(m=>[m.id,m.name])];
-for(const id of ['terrain-grassModel','terrain-shrubModel']){
-  $(id).replaceChildren(...modelOptions.map(([value,label])=>new Option(label,value)));
-}
 
 // A single viewport-first workspace, inspired by desktop 3D editors.
 // All existing editor controls are reparented (never duplicated), keeping their
@@ -142,11 +153,17 @@ function buildWorkspaceShell(){
   const shapeLabel=$('shape-preset').closest('label');
   const modelSection=$('model-library').closest('.inspector-section');
   const modelLink=oldTools.querySelector('a[href*="model-editor"]');
+  if(modelLink)modelLink.textContent='✎ Modifier dans l’atelier des modèles';
   insert.append(shapeLabel,modelSection);
   const modelAction=make('button','model-place-action','⬡ Placer ce modèle dans la scène');
   modelAction.id='model-place-action';
   modelAction.type='button';
   insert.append(modelAction);
+  const deleteLibraryButton=make('button','delete-library-model','Supprimer de la bibliothèque');
+  deleteLibraryButton.type='button';
+  deleteLibraryButton.id='delete-library-model';
+  deleteLibraryButton.title='Effacer cette création de la bibliothèque locale, sans retirer les exemplaires déjà posés sur la carte';
+  insert.append(deleteLibraryButton);
   if(modelLink)insert.append(modelLink);
   const insertHint=make('p','palette-help','Choisis une forme, puis clique dans la scène.');
   insert.append(insertHint);
@@ -180,6 +197,7 @@ function buildWorkspaceShell(){
     modelSection.hidden=!showingModels;
     shapeLabel.hidden=showingModels;
     modelAction.hidden=!showingModels;
+    deleteLibraryButton.hidden=!showingModels;
     if(modelLink)modelLink.hidden=!showingModels;
     insertHint.textContent=showingModels
       ?'Sélectionne un modèle, puis clique sur le terrain ou le plan pour le placer. Il sera intégré à la carte.'
@@ -191,6 +209,8 @@ function buildWorkspaceShell(){
     const name=selectedModel();
     modelAction.disabled=!name;
     modelAction.textContent=name?'⬡ Placer « '+name.name+' »':'Aucun modèle à placer';
+    deleteLibraryButton.disabled=!name;
+    if(modelLink)modelLink.href='./model-editor.html'+(name?'?model='+encodeURIComponent(name.id):'');
     const target=showingModels?'model-library':'shape-preset';
     $(target).focus({preventScroll:true});
   };
@@ -200,6 +220,29 @@ function buildWorkspaceShell(){
     showInsert('close');
     screen.focus({preventScroll:true});
     notice('Clique dans la scène pour placer « '+selectedModel().name+' ».');
+  };
+  deleteLibraryButton.onclick=()=>{
+    const model=selectedModel();
+    if(!model)return;
+    if(!confirm('Supprimer définitivement « '+model.name+' » de la bibliothèque de ce navigateur ?\\n\\nLes exemplaires déjà placés dans cette carte resteront en place.'))return;
+    try{
+      const updated=normalizeModelPack({
+        ...modelPack,models:modelPack.models.filter(entry=>entry.id!==model.id),
+        avatarId:modelPack.avatarId===model.id?null:modelPack.avatarId
+      });
+      localStorage.setItem(modelStorageKey,JSON.stringify(updated));
+      Object.assign(modelPack,updated);
+      const index=modelLibrary.findIndex(entry=>entry.id===model.id);
+      if(index>=0)modelLibrary.splice(index,1);
+      refreshModelSelectors();
+      if(tool==='model'&&!modelLibrary.length)setTool('move');
+      showGhost(null);
+      updateToolHelp();
+      showInsert('model');
+      notice('« '+model.name+' » supprimé de la bibliothèque. Les exemplaires de la carte sont conservés.');
+    }catch(error){
+      notice('Suppression impossible : '+(error.message||'stockage local indisponible'));
+    }
   };
   $('model-library').addEventListener('change',()=>{
     if(insert.dataset.mode==='model'&&!insert.hidden)showInsert('model');
@@ -798,6 +841,9 @@ function updateInspector() {
   }
   for (const id of ['rotate', 'duplicate', 'texture-file', 'surface', 'spawn-here']) $(id).disabled = !piece;
   $('delete').disabled = !piece || map.pieces.length === 1;
+  $('delete').title=piece?.model
+    ?'Retirer cet exemplaire de la carte (le modèle restera dans la bibliothèque)'
+    :'Supprimer cette pièce de la carte';
   $('texture-clear').disabled = !piece?.texture;
   $('texture-paint').disabled = !piece||Boolean(piece.model);
   const terrain=piece?.terrain;
@@ -897,6 +943,17 @@ function undo() {
 }
 
 // Synchronise le mode actif, les entrées, les poignées et l’aide affichée.
+function updateToolHelp(){
+  const tip=toolHelp[tool]??'';
+  if(tool!=='model'||!selectedModel()){
+    $('tool-help').textContent=tip;
+    return;
+  }
+  const piece=modelPiece();
+  const format=value=>new Intl.NumberFormat('fr-FR',{maximumFractionDigits:2}).format(value);
+  $('tool-help').textContent='Dimensions initiales : '+[piece.w,piece.h,piece.d].map(format).join(' × ')+
+    ' m (largeur × hauteur × profondeur). '+tip;
+}
 function setTool(next) {
   tool = next;
   controls.mouseButtons.LEFT=tool==='view'?T.MOUSE.ROTATE:null;
@@ -907,7 +964,7 @@ for (const canvas of [screen, plan]) {
     canvas.dataset.tool = tool;
     canvas.removeAttribute('data-hit');
   }
-  $('tool-help').textContent = toolHelp[tool];
+  updateToolHelp();
   attachGizmo();
   queueRender();
   showGhost(null);
@@ -1066,12 +1123,6 @@ function nearestEdgeMidpoint(hit){
 function showGhost(preview) {
   if (!preview && !ghost) return;
   ghost = preview;
-  const measures=$('placement-measures');
-  measures.hidden=!ghost||tool==='spawn';
-  if(!measures.hidden){
-    const metres=value=>new Intl.NumberFormat('fr-FR',{maximumFractionDigits:2}).format(value);
-    measures.textContent=[ghost.w,ghost.h,ghost.d].map(metres).join(' × ')+' m (L × H × P)'+(edgeMidpoint?(midpointSnapped?' · Milieu accroché':' · Repère : milieu de l’arête'):'');
-  }
   midpointMarker.visible=Boolean(ghost&&edgeMidpoint);
   if(midpointMarker.visible)midpointMarker.position.copy(edgeMidpoint);
   ghostMarker.visible = Boolean(ghost && tool === 'spawn');
