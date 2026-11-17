@@ -1296,6 +1296,7 @@ $('plan-fit').onclick=fitViews;
 
 // Context actions apply to the object under the mouse, not a stale selection.
 const quickMenu=$('context-actions');
+let dismissRightContextMenu=false;
 function closeQuickMenu(){quickMenu.hidden=true;}
 for(const canvas of [screen,plan]){
   canvas.addEventListener('pointerdown',event=>{
@@ -1304,6 +1305,8 @@ for(const canvas of [screen,plan]){
   });
   canvas.addEventListener('contextmenu',event=>{
     event.preventDefault();
+    // A second right-click outside should dismiss, not immediately reopen.
+    if(dismissRightContextMenu){dismissRightContextMenu=false;return;}
     if(rightStart?.canvas!==canvas||Math.hypot(event.clientX-rightStart.x,event.clientY-rightStart.y)>6)return;
     const hit=pointUnderPointer(canvas,event);
     const index=hit?group.children.indexOf(hit.object):-1;
@@ -1321,9 +1324,15 @@ for(const canvas of [screen,plan]){
 // Dismiss on the very first mouse press anywhere outside, including right
 // clicks on menus or a different part of the 3D view.
 document.addEventListener('pointerdown',event=>{
-  if(!quickMenu.hidden&&!quickMenu.contains(event.target))closeQuickMenu();
+  if(quickMenu.hidden||quickMenu.contains(event.target))return;
+  dismissRightContextMenu=event.button===2;
+  closeQuickMenu();
 },{capture:true});
 document.addEventListener('contextmenu',event=>{
+  if(dismissRightContextMenu&&event.target!==screen&&event.target!==plan){
+    dismissRightContextMenu=false;
+    event.preventDefault();
+  }
   if(!quickMenu.hidden&&!quickMenu.contains(event.target)&&event.target!==screen&&event.target!==plan)
     closeQuickMenu();
 },{capture:true});
