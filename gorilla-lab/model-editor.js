@@ -528,21 +528,28 @@ async function doExport(){
       const root=new T.Group();
       root.name=model.name;
       const meshes=[];
+      status('Préparation du GLB et des textures…');
       for(const part of model.parts){
-        const m=part.texture?createModelPartMaterial(part)
-          :new T.MeshStandardMaterial({vertexColors:true,roughness:.67,metalness:.08});
+        let imageMap=null;
+        if(part.texture){
+          // CanvasTexture is synchronously ready for GLTFExporter, unlike a
+          // TextureLoader image whose load event may already have fired.
+          const response=await fetch(part.texture);
+          if(!response.ok)throw Error('Image du modèle impossible à charger.');
+          const bitmap=await createImageBitmap(await response.blob());
+          const textureCanvas=document.createElement('canvas');
+          textureCanvas.width=bitmap.width;textureCanvas.height=bitmap.height;
+          textureCanvas.getContext('2d').drawImage(bitmap,0,0);
+          bitmap.close();
+          imageMap=new T.CanvasTexture(textureCanvas);
+          imageMap.colorSpace=T.SRGBColorSpace;
+          imageMap.wrapS=imageMap.wrapT=T.RepeatWrapping;
+        }
+        const m=new T.MeshStandardMaterial({vertexColors:true,roughness:.67,metalness:.08,map:imageMap});
         const mesh=new T.Mesh(createModelPartGeometry(part),m);
         mesh.name=part.name;root.add(mesh);meshes.push(mesh);
       }
       try{
-        // Wait for painted image textures before GLTFExporter serializes the model.
-        await Promise.all(meshes.map(mesh=>new Promise((resolve,reject)=>{
-          const img=mesh.material.map?.image;
-          if(!img||img.complete&&img.naturalWidth>0)return resolve();
-          if(!img.addEventListener)return resolve();
-          img.addEventListener('load',resolve,{once:true});
-          img.addEventListener('error',()=>reject(Error('Une texture GLB ne peut pas être chargée.')),{once:true});
-        })));
         const data=await new Promise((resolve,reject)=>
           new GLTFExporter().parse(root,resolve,reject,{binary:true,onlyVisible:true}));
         download(new Blob([data],{type:'model/gltf-binary'}),name+'.glb');
