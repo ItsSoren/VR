@@ -39,6 +39,11 @@ try{
   await page.focus('#map-world-size');
   await page.$eval('#map-world-size',n=>{n.value='640';n.dispatchEvent(new Event('change',{bubbles:true}));});
   assert.equal(await page.$eval('#map-world-size',n=>n.value),'640');
+  await page.click('#blank-map');
+  await page.select('#pieces','0');
+  const enlarged=await page.evaluate(()=>JSON.parse(localStorage.getItem('gorilla-lab-editor-draft')));
+  assert.equal(enlarged.worldSize,640);
+  assert.equal(enlarged.pieces[0].w,512);
   await page.$eval('#p-uvScale',n=>{n.value='2';n.dispatchEvent(new Event('change',{bubbles:true}));});
   assert.equal(await page.$eval('#p-uvScale',n=>n.value),'2');
   await page.click('#new-example');
