@@ -1,6 +1,7 @@
 import * as T from 'three';
+import {normalizeModelPack,createModelUnitGeometry,createModelMaterial} from './model-pack.js';
 
-export const terrainDetails = Object.freeze([8, 16, 32, 48]);
+export const terrainDetails = Object.freeze([8, 16, 32, 48, 64, 96, 128]);
 const defaultDetail = 16;
 const maxSculptHeight = 24;
 const grids = new WeakMap();
@@ -12,6 +13,12 @@ function bounded(value, min, max, fallback) {
   return Number.isFinite(value) ? clamp(value, min, max) : fallback;
 }
 
+function validVegetationModel(raw) {
+  if(!raw)return null;
+  const normalized=normalizeModelPack({version:1,models:[raw]});
+  return normalized.models[0]?.parts.length ? normalized.models[0] : null;
+}
+const texturePattern=/^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=\r\n]+$/i;
 export function normalizeTerrain(value = {}) {
   const detail = terrainDetails.includes(value?.detail) ? value.detail : defaultDetail;
   const heights = value?.heights;
@@ -20,8 +27,15 @@ export function normalizeTerrain(value = {}) {
     seed: Math.round(bounded(value?.seed, 0, 2147483647, 1)),
     amplitude: bounded(value?.amplitude, 0, 12, 0),
     frequency: bounded(value?.frequency, .015, 2, .12),
+    octaves:Math.round(bounded(value?.octaves,1,5,3)),
+    roughness:bounded(value?.roughness,.15,.95,.42),
+    ridge:bounded(value?.ridge,0,1,0),
+    edgeFade:bounded(value?.edgeFade,0,1,0),
     grass: bounded(value?.grass, 0, 1, 0),
     shrub: bounded(value?.shrub, 0, 1, 0),
+    grassSize:bounded(value?.grassSize,.1,5,1),shrubSize:bounded(value?.shrubSize,.1,5,1),
+    grassModel:validVegetationModel(value?.grassModel),shrubModel:validVegetationModel(value?.shrubModel),
+    grassTexture:typeof value?.grassTexture==='string'&&value.grassTexture.length<500000&&texturePattern.test(value.grassTexture)?value.grassTexture:null,
     heights: Array.isArray(heights) && heights.length === (detail + 1) ** 2
       ? Array.from(heights, height => bounded(height, -maxSculptHeight, maxSculptHeight, 0))
       : null,
@@ -65,10 +79,11 @@ function noise(x, z, seed) {
 
 function gridFor(piece) {
   const { w, d, terrain } = piece;
-  const { detail, seed, amplitude, frequency, heights } = terrain;
+  const { detail, seed, amplitude, frequency, octaves, roughness, ridge, edgeFade, heights } = terrain;
   const cached = grids.get(piece);
   const sameNoise = cached && cached.w === w && cached.d === d && cached.detail === detail &&
-    cached.seed === seed && cached.amplitude === amplitude && cached.frequency === frequency;
+    cached.seed === seed && cached.amplitude === amplitude && cached.frequency === frequency &&
+    cached.octaves === octaves && cached.roughness === roughness && cached.ridge === ridge && cached.edgeFade === edgeFade;
   if (sameNoise && cached.heights === heights) return cached;
 
   const stride = detail + 1;
@@ -78,14 +93,20 @@ function gridFor(piece) {
       for (let col = 0; col <= detail; col++) {
         const x = (col / detail - .5) * w * frequency;
         const z = (row / detail - .5) * d * frequency;
-        procedural[row * stride + col] = amplitude * (.62 * noise(x, z, seed) +
-          .26 * noise(x * 2.03, z * 2.03, seed + 13) +
-          .12 * noise(x * 4.13, z * 4.13, seed + 37));
+        let height=0,weight=1,total=0;
+        for(let octave=0;octave<octaves;octave++){
+          const n=noise(x*2**octave,z*2**octave,seed+octave*13);
+          height+=weight*lerp(n,1-2*Math.abs(n),ridge);
+          total+=weight;weight*=roughness;
+        }
+        const fade=edgeFade?Math.pow(Math.max(0,Math.min(1,(.5-Math.abs(col/detail-.5))*2,
+          (.5-Math.abs(row/detail-.5))*2)),edgeFade*2):1;
+        procedural[row*stride+col]=amplitude*height/total*fade;
       }
     }
   }
   const surface = heights ? procedural.map((height, i) => height + heights[i]) : procedural;
-  const grid = { w, d, detail, seed, amplitude, frequency, heights, procedural, surface };
+  const grid = { w, d, detail, seed, amplitude, frequency, octaves, roughness, ridge, edgeFade, heights, procedural, surface };
   grids.set(piece, grid);
   return grid;
 }
@@ -254,6 +275,7 @@ function grassGeometry() {
   }
   const geometry = new T.BufferGeometry();
   geometry.setAttribute('position', new T.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv',new T.Float32BufferAttribute(Array.from({length:5},()=>[0,0,1,0,.5,1]).flat(),2));
   geometry.computeVertexNormals();
   return geometry;
 }
@@ -274,9 +296,28 @@ export function terrainVegetation(piece) {
     if (!density) continue;
     // Cap the area first so the density slider still spans its full range on large plots.
     const count = Math.max(1, Math.round(Math.min(max,piece.w*piece.d*perMetre)*density));
-    const material = new T.MeshLambertMaterial({ color, side: name === 'grass' ? T.DoubleSide : T.FrontSide });
-    material.flatShading = true;
-    const plants = new T.InstancedMesh(geometry(), material, count);
+    const imported=piece.terrain[name+'Model'];
+    const size=piece.terrain[name+'Size']??1;
+    let plantGeometry, material;
+    if(imported){
+      const base=name==='grass'?.42:.85;
+      plantGeometry=createModelUnitGeometry(imported);
+      plantGeometry.scale(base*size,base*size,base*size);
+      plantGeometry.translate(0,base*size/2,0);
+      material=createModelMaterial();
+    }else{
+      plantGeometry=geometry();
+      plantGeometry.scale(size,size,size);
+      material=new T.MeshLambertMaterial({color,side:name==='grass'?T.DoubleSide:T.FrontSide,flatShading:true});
+      if(name==='grass'&&piece.terrain.grassTexture){
+        const map=new T.TextureLoader().load(piece.terrain.grassTexture);
+        map.colorSpace=T.SRGBColorSpace;
+        material.map=map;
+        material.color.set('#ffffff');
+        material.userData.ownTexture=true;
+      }
+    }
+    const plants = new T.InstancedMesh(plantGeometry, material, count);
     plants.name = name;
     plants.instanceMatrix.setUsage(T.DynamicDrawUsage);
     plants.userData.salt = salt;
@@ -316,6 +357,7 @@ export function disposeVegetation(group) {
   if (!group) return;
   for (const plants of group.children) {
     plants.geometry.dispose();
+    if(plants.material.userData.ownTexture)plants.material.map?.dispose();
     plants.material.dispose();
     plants.dispose();
   }
