@@ -15,7 +15,7 @@ import { avatarPalettes,createAvatarStyle } from './avatar-style.js';
 import {createArenaObjectSpecs,forEachStartupObject} from './arena-objects.js';
 import {spawnAssetIds} from './model-assets.js';
 import { makeAnimatedProps,clonePropMaterial } from './animated-props.js';
-import {readModelPack,createModelPropDefinitions,createModelAvatarHead,createModelUnitGeometry,createModelMaterial,modelCollisionGeometry,normalizeModelPack,modelLimits,modelStorageKey} from './model-pack.js';
+import {readModelPack,createModelPropDefinitions,createModelAvatarHead,createModelUnitGeometry,createModelMaterial,modelCollisionGeometry,modelBounds,normalizeModelPack,modelLimits,modelStorageKey} from './model-pack.js';
 import {mapCode,publicRooms} from './cloud-link.js';
 import { createHandSkin,palmCenter } from './hand-skin.js';
 import {placeTrackedPalm} from './xr-palm.js';
@@ -205,6 +205,34 @@ function makePropMesh(type,ownMaterial=false){
 }
 let maps=null;
 const objects=[],noBodies=[];
+const targetFrameCache={model:null,bounds:null,center:new T.Vector3(),size:new T.Vector3()};
+const targetFrame={position:new T.Vector3(),right:new T.Vector3(),up:new T.Vector3(),normal:new T.Vector3(),scaleX:1,scaleY:1};
+const targetRotation=new T.Quaternion(),targetOffset=new T.Vector3(),targetEuler=new T.Euler(0,0,0,'YXZ');
+function editableTargetFrame(){
+  const piece=maps?.getAssetPiece?.('range-target');
+  if(!piece)return null;
+  if(targetFrameCache.model!==piece.model){
+    targetFrameCache.model=piece.model;
+    const bounds=modelBounds(piece.model);
+    bounds.getCenter(targetFrameCache.center);bounds.getSize(targetFrameCache.size);
+  }
+  const {center,size}=targetFrameCache;
+  targetEuler.set(T.MathUtils.degToRad(piece.pitch),T.MathUtils.degToRad(piece.yaw),T.MathUtils.degToRad(piece.roll??0),'YXZ');
+  targetRotation.setFromEuler(targetEuler);
+  targetFrame.position.set(piece.x,piece.y,piece.z);
+  targetOffset.set(
+    -center.x/Math.max(.0001,size.x)*piece.w,
+    -center.y/Math.max(.0001,size.y)*piece.h,
+    -center.z/Math.max(.0001,size.z)*piece.d
+  ).applyQuaternion(targetRotation);
+  targetFrame.position.add(targetOffset);
+  targetFrame.right.set(1,0,0).applyQuaternion(targetRotation);
+  targetFrame.up.set(0,1,0).applyQuaternion(targetRotation);
+  targetFrame.normal.set(0,0,1).applyQuaternion(targetRotation);
+  targetFrame.scaleX=piece.w/Math.max(.0001,size.x);
+  targetFrame.scaleY=piece.h/Math.max(.0001,size.y);
+  return targetFrame;
+}
 const desktopActor={held:null},remoteActors=new Map();
 let remoteHeld=0;
 let nextNetId=1;
@@ -1624,7 +1652,7 @@ renderer.setAnimationLoop((time,frame)=>{
     // La cible compare le début et la fin du pas pour repérer les impacts rapides.
     for(const object of objects)object.beforePhysics.copy(object.mesh.position);
     solveObjects(objects,arena.boxes,dt,9.81*settings.gravity/5,.12+settings.bounce*.064,surfaceAt);
-    if(maps.builtIn)fixtures.updateTarget(objects);
+    if(maps.builtIn)fixtures.updateTarget(objects,editableTargetFrame());
   }
   if(inVR&&!menu&&spectator.role!=='pc')for(const hand of hands)touchFixture(hand);
   arena.probe.rotation.y+=dt*.29;
