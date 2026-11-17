@@ -1,5 +1,5 @@
 import * as T from 'three';
-import {normalizeModelPack,createModelUnitGeometry,createModelMaterial} from './model-pack.js';
+import {normalizeModelPack,createModelUnitGeometry,createModelMaterial,disposeModelMaterial} from './model-pack.js';
 
 export const terrainDetails = Object.freeze([8, 16, 32, 48, 64, 96, 128]);
 const defaultDetail = 16;
@@ -309,7 +309,7 @@ export function terrainVegetation(piece) {
       plantGeometry=createModelUnitGeometry(imported);
       plantGeometry.scale(base*size,base*size,base*size);
       plantGeometry.translate(0,base*size/2,0);
-      material=createModelMaterial();
+      material=createModelMaterial(imported);
     }else{
       plantGeometry=geometry();
       plantGeometry.scale(size,size,size);
@@ -363,7 +363,7 @@ export function disposeVegetation(group) {
   for (const plants of group.children) {
     plants.geometry.dispose();
     if(plants.material.userData.ownTexture)plants.material.map?.dispose();
-    plants.material.dispose();
+    disposeModelMaterial(plants.material);
     plants.dispose();
   }
   group.clear();
