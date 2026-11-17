@@ -76,6 +76,8 @@ try{
   }
 }catch{}
 if(pack.models.some(model=>model.id===workspace.lastModel))modelId=workspace.lastModel;
+const requestedModel=new URLSearchParams(location.search).get('model');
+if(pack.models.some(model=>model.id===requestedModel))modelId=requestedModel;
 const references=new Set(workspace.references);
 function storeWorkspace(){
   try{workspace.references=[...references];localStorage.setItem(workspaceKey,JSON.stringify(workspace));}catch{}
