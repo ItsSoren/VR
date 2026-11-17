@@ -14,7 +14,7 @@ import {normalizeModelPack,createModelUnitGeometry,modelDimensions} from '../gor
 import {createKeyboardState} from '../gorilla-lab/flat-controls.js';
 import {screenPixelRatio} from '../gorilla-lab/screen-render.js';
 import {terrainHeight,sculptTerrain,normalizeTerrain,resizeTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from '../gorilla-lab/terrain-edit.js';
-import {transformUVs,tiledBox} from '../gorilla-lab/texture-geometry.js';
+import {transformUVs,tiledBox,decorPrimitiveGeometry} from '../gorilla-lab/texture-geometry.js';
 
 test('held trigger emits ten shots each second and stops on release',()=>{
   const scene=new T.Scene(),gun=createArcadeBlaster(scene,{});
@@ -436,4 +436,18 @@ test('decorative vegetation can use custom composite models',()=>{
   assert.equal(vegetation.children.length,2);
   assert.ok(vegetation.children[0].count>0);
   disposeVegetation(vegetation);
+});
+
+test('static decorative primitives survive map serialization and generate real meshes',()=>{
+  const shapes=['sphere','cylinder','cone','torus','capsule'];
+  for(const primitive of shapes){
+    const map=exampleMap();
+    map.pieces[0].primitive=primitive;
+    assert.equal(parseMap(JSON.stringify(map)).pieces[0].primitive,primitive);
+    const geo=decorPrimitiveGeometry(primitive);
+    assert.ok(geo.attributes.position.count>24);
+    geo.dispose();
+  }
+  const map=exampleMap();map.pieces[0].primitive='invalid';
+  assert.equal(parseMap(map).pieces[0].primitive,'box');
 });
