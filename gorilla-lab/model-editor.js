@@ -37,6 +37,7 @@ let transformMoved=false;
 let pendingDraft=0,gestureStart=null,fieldHistory=null;
 const undoStack=[],redoStack=[],maxUndo=48;
 const previews=new T.Group();
+const referencePreviews=new T.Group();
 const scene=new T.Scene();
 scene.background=new T.Color('#152229');
 const camera=new T.PerspectiveCamera(45,1,.005,110);
@@ -45,7 +46,7 @@ guide.position.y=-.002;
 const selection=new T.Box3Helper(new T.Box3(),'#eeb578');
 selection.visible=false;
 const material=createModelMaterial();
-scene.add(previews,guide,selection,new T.HemisphereLight('#ecf7ff','#4c5960',2.4));
+scene.add(previews,referencePreviews,guide,selection,new T.HemisphereLight('#ecf7ff','#4c5960',2.4));
 const sun=new T.DirectionalLight('#ffe5c2',2.05);
 sun.position.set(-2.5,4,-3);
 scene.add(sun);
@@ -55,6 +56,35 @@ camera.lookAt(0,0,0);
 const clamp=T.MathUtils.clamp;
 const currentModel=()=>pack.models.find(model=>model.id===modelId);
 const currentPart=()=>currentModel()?.parts[partIndex];
+// Display masks are editor-only views, never deleted from the model export.
+const workspaceKey='gorilla-foundry-visibility-v1';
+let workspace={active:{},masks:{},references:[]};
+try{
+  const stored=JSON.parse(localStorage.getItem(workspaceKey)||'null');
+  if(stored&&typeof stored==='object'&&stored.masks&&stored.active){
+    workspace={active:stored.active,masks:stored.masks,
+      references:Array.isArray(stored.references)?stored.references:[]};
+  }
+}catch{}
+const references=new Set(workspace.references);
+function storeWorkspace(){
+  try{workspace.references=[...references];localStorage.setItem(workspaceKey,JSON.stringify(workspace));}catch{}
+}
+function activeMask(){return workspace.active[modelId]||'all';}
+function hiddenParts(){
+  const indices=workspace.masks[modelId]?.[activeMask()]||[];
+  return new Set(Array.isArray(indices)?indices.filter(x=>Number.isInteger(x)&&x>=0):[]);
+}
+function setHiddenParts(indices){
+  if(!modelId)return;
+  if(!workspace.masks[modelId])workspace.masks[modelId]={};
+  workspace.masks[modelId][activeMask()]=[...indices].sort((a,b)=>a-b);
+  storeWorkspace();updateParts();updatePreview();
+}
+function resetModelMasks(){
+  if(modelId)delete workspace.masks[modelId];
+  storeWorkspace();
+}
 const snapshot=()=>({data:structuredClone(pack),modelId,partIndex});
 function status(message,error=false){
   $('status').textContent=message;
@@ -131,18 +161,49 @@ function setOptions(select,entries,value){
   select.value=value??'';
 }
 function updateModelLists(){
-  const list=pack.models.map(model=>[model.id,model.name]);
+  const list=pack.models.map(model=>[model.id,model.name||'Sans nom']);
   setOptions($('models'),list.length?list:[['','Aucun modèle']],modelId);
   $('models').disabled=!list.length;
+  const model=currentModel();
+  $('model-title').disabled=!model;
+  if(document.activeElement!==$('model-title'))$('model-title').value=model?.name??'';
+  $('duplicate-model').disabled=!model||pack.models.length>=modelLimits.models;
+  $('model-count').textContent=pack.models.length+' / '+modelLimits.models;
   setOptions($('avatar'),[['','Singe d’origine'],...list.filter(([id])=>pack.models.find(m=>m.id===id)?.parts.length)],pack.avatarId);
+  const container=$('model-list'),scroll=container.scrollTop;
+  const rows=pack.models.map(entry=>{
+    const row=document.createElement('div');row.className='model-entry-wrap';
+    const button=document.createElement('button');button.type='button';button.className='model-entry';
+    button.setAttribute('aria-pressed',String(entry.id===modelId));
+    button.title='Éditer '+entry.name;
+    button.textContent=entry.name||'Sans nom';
+    const count=document.createElement('small');count.textContent=' · '+entry.parts.length+' p.';
+    button.append(count);
+    button.onclick=()=>switchModel(entry.id);
+    const eye=document.createElement('button');eye.type='button';eye.className='model-visibility';
+    eye.disabled=entry.id===modelId||!entry.parts.length;
+    eye.setAttribute('aria-pressed',String(references.has(entry.id)));
+    eye.textContent=entry.id===modelId?'●':references.has(entry.id)?'◉':'◎';
+    eye.title=entry.id===modelId?'Modèle actif':'Afficher/masquer comme référence 3D sans modifier ce modèle';
+    eye.setAttribute('aria-label',eye.title+' : '+entry.name);
+    eye.onclick=()=>toggleReference(entry.id);
+    row.append(button,eye);return row;
+  });
+  container.replaceChildren(...rows);
+  container.scrollTop=scroll;
 }
 function updateParts(){
   const parts=currentModel()?.parts??[];
   $('part-count').textContent=parts.length+' / '+modelLimits.parts;
   $('add-part').disabled=parts.length>=modelLimits.parts||!currentModel();
   $('duplicate-part').disabled=parts.length>=modelLimits.parts||!currentPart();
+  const hidden=hiddenParts();
+  $('mask-set').value=activeMask();
+  $('solo-part').disabled=!parts.length||!currentPart();
+  $('show-all-parts').disabled=!hidden.size;
   const currentScroll=$('part-list').scrollTop;
   $('part-list').replaceChildren(...parts.map((part,index)=>{
+    const row=document.createElement('div');row.className='part-row';
     const button=document.createElement('button');
     button.type='button';button.className='part-entry';
     button.setAttribute('aria-pressed',String(index===partIndex));
@@ -152,8 +213,18 @@ function updateParts(){
     const color=document.createElement('span');
     color.className='swatch';color.style.setProperty('--swatch',part.color);
     button.append(title,color);
+    if(hidden.has(index))button.style.opacity='.48';
     button.onclick=()=>selectPart(index);
-    return button;
+    const eye=document.createElement('button');eye.type='button';eye.className='part-visibility';
+    eye.textContent=hidden.has(index)?'◌':'◉';
+    eye.setAttribute('aria-pressed',String(!hidden.has(index)));
+    eye.title=hidden.has(index)?'Afficher cette pièce dans la vue':'Masquer cette pièce dans la vue';
+    eye.setAttribute('aria-label',eye.title+' : '+part.name);
+    eye.onclick=()=>{
+      const next=hiddenParts();if(next.has(index))next.delete(index);else next.add(index);
+      setHiddenParts(next);
+    };
+    row.append(button,eye);return row;
   }));
   $('part-list').scrollTop=currentScroll;
 }
@@ -163,10 +234,11 @@ function updateInspector(){
   $('part-inspector').hidden=!part;
   $('part-empty').hidden=!!part||$('model-inspector').dataset.tab==='settings';
   if(model){
-    $('model-name').value=model.name;
+    if(document.activeElement!==$('model-name'))$('model-name').value=model.name;
     $('model-kind').value=model.kind||'prop';
     $('in-game').checked=model.inGame;
-    $('send-to-map').href='./editor.html?model='+encodeURIComponent(model.id);
+    const destination='./editor.html?model='+encodeURIComponent(model.id);
+    for(const id of ['send-to-map','quick-send-to-map','go-cards'])$(id).href=destination;
     for(const key of Object.keys(defaultModelProperties))$(key).checked=!!model.properties[key];
   }
   if(part){
@@ -192,6 +264,8 @@ function updateInspector(){
   $('viewport-title').textContent=model
     ?'ATELIER / '+model.name.toUpperCase()
     :'ESPACE DE CONSTRUCTION / 3D';
+  $('quick-send-to-map').setAttribute('aria-disabled',String(!model?.parts.length));
+  $('send-to-map').setAttribute('aria-disabled',String(!model?.parts.length));
 }
 function setPanel(tab){
   $('model-inspector').dataset.tab=tab;
