@@ -63,6 +63,7 @@ export function addLabFixtures(scene,boxes,actions) {
   for(let i=0;i<5;i++){
     const a=i*Math.PI*2/5;
     const mesh=new T.Mesh(new T.IcosahedronGeometry(.124,1),shell);
+    mesh.userData.editorFixtureCoconut=true;
     mesh.position.set(Math.cos(a)*(.25+(i%2)*.10),2.88+(i%3)*.06,Math.sin(a)*(.25+(i%2)*.10));
     mesh.scale.set(.91,1.16,.91);mesh.castShadow=true;tree.add(mesh);
     coconuts.push(mesh);
