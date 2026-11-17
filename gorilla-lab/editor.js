@@ -2,9 +2,10 @@ import * as T from 'three';
 import {buildArena} from './arena.js';
 import {addLabFixtures} from './fixtures.js';
 import {createArenaObjectSpecs,forEachStartupObject} from './arena-objects.js';
-import {labMirror} from './lab-layout.js';
+import {labMirror,labProbe,labTree,labTarget} from './lab-layout.js';
 import {tiledBox,transformUVs,decorPrimitiveGeometry} from './texture-geometry.js';
-import {readModelPack,modelStorageKey,normalizeModelPack,createModelUnitGeometry,createModelMaterial,disposeModelMaterial,modelDimensions} from './model-pack.js';
+import {readModelPack,modelStorageKey,normalizeModelPack,createModelUnitGeometry,createModelMaterial,disposeModelMaterial,modelDimensions,modelBounds} from './model-pack.js';
+import {createBuiltinModelTemplates,spawnAssetIds} from './model-assets.js';
 import {normalizeTerrain,resizeTerrain,sculptTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from './terrain-edit.js';
 import {texturePresets,seamlessTexture} from './seamless-texture.js';
 import {openTextureStudio} from './texture-studio.js';
@@ -22,7 +23,8 @@ const uvFields=['uvScale','uvRotation','uvOffsetX','uvOffsetY'];
 const toolButtons = [...document.querySelectorAll('.tool')];
 const draftKey = 'gorilla-lab-editor-draft';
 const modelPack = readModelPack(localStorage);
-const modelLibrary = modelPack.models.filter(model => model.parts.length);
+const builtinModelLibrary=createBuiltinModelTemplates();
+const modelLibrary=[...new Map([...builtinModelLibrary,...modelPack.models].map(model=>[model.id,model])).values()].filter(model=>model.parts.length);
 function refreshModelSelectors(preferredModel){
   const selected=preferredModel??$('model-library').value;
   $('model-library').replaceChildren(
@@ -209,8 +211,8 @@ function buildWorkspaceShell(){
     const name=selectedModel();
     modelAction.disabled=!name;
     modelAction.textContent=name?'⬡ Placer « '+name.name+' »':'Aucun modèle à placer';
-    deleteLibraryButton.disabled=!name;
-    if(modelLink)modelLink.href='./model-editor.html'+(name?'?model='+encodeURIComponent(name.id):'');
+    deleteLibraryButton.disabled=!name||!modelPack.models.some(entry=>entry.id===name.id);
+    if(modelLink)modelLink.href='./model-editor.html'+(name?(name.assetId?'?asset='+encodeURIComponent(name.assetId):'?model='+encodeURIComponent(name.id)):'');
     const target=showingModels?'model-library':'shape-preset';
     $(target).focus({preventScroll:true});
   };
@@ -223,7 +225,7 @@ function buildWorkspaceShell(){
   };
   deleteLibraryButton.onclick=()=>{
     const model=selectedModel();
-    if(!model)return;
+    if(!model||!modelPack.models.some(entry=>entry.id===model.id))return;
     if(!confirm('Supprimer définitivement « '+model.name+' » de la bibliothèque de ce navigateur ?\\n\\nLes exemplaires déjà placés dans cette carte resteront en place.'))return;
     try{
       const updated=normalizeModelPack({
@@ -336,21 +338,44 @@ scene.add(ambient);
 const sun = new T.DirectionalLight('#fff1d2', 1.8);
 sun.position.set(-9, 18, 6);
 scene.add(sun);
-// Reuse the actual game arena. Editable boxes are rebuilt from its colliders;
-// scenery and props are previewed with the same geometry and textures as play.
+// Reuse the game arena. Dynamic props and fixtures are serialized as normal map pieces,
+// so selection, transforms, undo and saves all use the same data path.
 const referenceScene=new T.Scene();
 referenceScene.fog=new T.Fog('#a6d4ea',55,135);
 const previewArena=buildArena(referenceScene,renderer);
-const defaultMap=()=>arenaMap(previewArena.boxes);
+previewArena.probe.userData.editorAssetId='chrome-sphere';
+const labFixtures=addLabFixtures(referenceScene,previewArena.boxes,{quality:()=> '7/10',resolution:()=> '7/10',textureSize:()=> '512 px'});
+const builtinByAsset=new Map(createBuiltinModelTemplates().map(model=>[model.assetId,model]));
+function assetPiece(assetId,position,sourceModel=null,name=null){
+  const model=structuredClone(sourceModel??builtinByAsset.get(assetId));
+  if(!model)throw new Error('Asset intégré introuvable : '+assetId);
+  const bounds=modelBounds(model),size=bounds.getSize(new T.Vector3()),center=bounds.getCenter(new T.Vector3());
+  return makePiece({name:(name??model.name).slice(0,36),model,
+    x:position.x+center.x,y:position.y+center.y,z:position.z+center.z,
+    w:Math.max(.05,size.x),h:Math.max(.05,size.y),d:Math.max(.05,size.z),
+    color:'#ffffff',solid:model.properties?.collidable!==false});
+}
+const defaultMap=()=>{
+  const next=arenaMap(previewArena.boxes);
+  forEachStartupObject((type,position)=>{
+    const assetId=spawnAssetIds[type];
+    if(assetId)next.pieces.push(assetPiece(assetId,position));
+  });
+  next.pieces.push(assetPiece('chrome-sphere',new T.Vector3(labProbe.x,labProbe.y,labProbe.z)));
+  const treeModel=structuredClone(builtinByAsset.get('palm-tree'));
+  treeModel.parts=treeModel.parts.filter(part=>part.assetId!=='spawn-coconut');
+  next.pieces.push(assetPiece('palm-tree',new T.Vector3(labTree.x,0,labTree.z),treeModel));
+  for(let i=0;i<5;i++){
+    const angle=i*Math.PI*2/5,localX=Math.cos(angle)*(.25+(i%2)*.10),localY=2.88+(i%3)*.06;
+    const tilt=-.14;
+    const position=new T.Vector3(labTree.x+Math.cos(tilt)*localX-Math.sin(tilt)*localY,
+      Math.sin(tilt)*localX+Math.cos(tilt)*localY,labTree.z+Math.sin(angle)*(.25+(i%2)*.10));
+    next.pieces.push(assetPiece('spawn-coconut',position,null,'Coco '+(i+1)));
+  }
+  next.pieces.push(assetPiece('range-target',new T.Vector3(labTarget.x,labTarget.y,labTarget.z)));
+  return parseMap(next);
+};
 map=defaultMap();
-addLabFixtures(referenceScene,previewArena.boxes,{quality:()=> '7/10',resolution:()=> '7/10',textureSize:()=> '512 px'});
-const specs=createArenaObjectSpecs();
-forEachStartupObject((type,position)=>{
-  const {geo,material}=specs[type],mesh=new T.Mesh(geo,material);
-  geo.computeBoundingBox();
-  mesh.position.set(position.x,-geo.boundingBox.min.y,position.z);
-  referenceScene.add(mesh);
-});
 const mirror=new T.Mesh(new T.BoxGeometry(1.8,2.03,.10),new T.MeshStandardMaterial({color:'#8daebc',metalness:.9,roughness:.12}));
 mirror.position.set(labMirror.x,labMirror.y,labMirror.z);
 referenceScene.add(mirror);
@@ -741,6 +766,11 @@ function rebuildScene() {
     disposeModelMaterial(mesh.material);
   }
   arenaBackdrop.visible=Boolean(map.arenaBase);
+  const mappedAssets=new Set(map.pieces.map(piece=>piece.model?.assetId).filter(Boolean));
+  arenaBackdrop.traverse(node=>{
+    const assetId=node.userData.editorAssetId;
+    if(assetId)node.visible=Boolean(map.arenaBase)&&!mappedAssets.has(assetId);
+  });
   sun.visible=ambient.visible=!map.arenaBase;
   scene.fog=map.arenaBase?referenceScene.fog:null;
   scene.environment=map.arenaBase?referenceScene.environment:null;
