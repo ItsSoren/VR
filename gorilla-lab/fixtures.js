@@ -161,14 +161,29 @@ export function addLabFixtures(scene,boxes,actions) {
     scoreCtx.fillText('CIBLE  ·  '+score,128,42);scoreTexture.needsUpdate=true;
   }
   // Compare les deux positions qui encadrent le pas physique pour trouver le passage dans la cible.
-  function updateTarget(objects){
+  const fallbackTarget={
+    position:new T.Vector3(targetX,targetY,targetZ),right:new T.Vector3(1,0,0),
+    up:new T.Vector3(0,1,0),normal:new T.Vector3(0,0,1),scaleX:1,scaleY:1,
+  };
+  function updateTarget(objects,frame=null){
+    const targetFrame=frame??fallbackTarget;
+    const {position,right,up,normal}=targetFrame;
+    const scaleX=Math.max(.0001,targetFrame.scaleX??1),scaleY=Math.max(.0001,targetFrame.scaleY??1);
     for(const item of objects){
       if(!item.beforePhysics||item.owner||item.frozen||!item.mesh.visible)continue;
       const a=item.beforePhysics,b=item.mesh.position;
-      if(a.z<=targetZ||b.z>targetZ||item.velocity.z>=-1)continue;
-      const t=(a.z-targetZ)/(a.z-b.z);
-      const range=Math.hypot(T.MathUtils.lerp(a.x,b.x,t)-targetX,T.MathUtils.lerp(a.y,b.y,t)-targetY);
-      if(range<=.9+item.radius*.45){
+      const ax=(a.x-position.x)*normal.x+(a.y-position.y)*normal.y+(a.z-position.z)*normal.z;
+      const bx=(b.x-position.x)*normal.x+(b.y-position.y)*normal.y+(b.z-position.z)*normal.z;
+      if(ax<=0||bx>0||item.velocity.dot(normal)>=-1)continue;
+      const t=ax/(ax-bx);
+      const hitX=T.MathUtils.lerp(a.x,b.x,t)-position.x;
+      const hitY=T.MathUtils.lerp(a.y,b.y,t)-position.y;
+      const hitZ=T.MathUtils.lerp(a.z,b.z,t)-position.z;
+      const localX=(hitX*right.x+hitY*right.y+hitZ*right.z)/scaleX;
+      const localY=(hitX*up.x+hitY*up.y+hitZ*up.z)/scaleY;
+      const range=Math.hypot(localX,localY);
+      const objectRadius=item.radius/Math.sqrt(scaleX*scaleY);
+      if(range<=.9+objectRadius*.45){
         score+=range<.27?3:range<.58?2:1;
         drawScore();
       }
