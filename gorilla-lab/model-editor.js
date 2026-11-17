@@ -3,7 +3,7 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {TransformControls} from 'three/addons/controls/TransformControls.js';
 import {GLTFExporter} from 'three/addons/exporters/GLTFExporter.js';
 import {
-  createModelMaterial,createModelPartMaterial,disposeModelMaterial,createModelPartGeometry,createModelUnitGeometry,defaultModelProperties,
+  createModelMaterial,createModelPartMaterial,disposeModelMaterial,createModelPartGeometry,createModelUnitGeometry,modelHitbox,defaultModelProperties,
   modelLimits,modelShapes,modelStorageKey,modelSurfaces,normalizeModelPack,readModelPack,
 } from './model-pack.js';
 import {openTextureStudio} from './texture-studio.js';
@@ -32,7 +32,7 @@ try{
     dirty=true;
   }
 }catch{}
-let renderer=null,orbit=null,gizmo=null,viewMode='select';
+let renderer=null,orbit=null,gizmo=null,viewMode='select',hitboxEditing=false;
 let transformMoved=false;
 let pendingDraft=0,gestureStart=null,fieldHistory=null;
 const undoStack=[],redoStack=[],maxUndo=48;
@@ -45,8 +45,16 @@ const guide=new T.GridHelper(8,32,'#64818a','#334b54');
 guide.position.y=-.002;
 const selection=new T.Box3Helper(new T.Box3(),'#eeb578');
 selection.visible=false;
+const hitboxPreview=new T.Mesh(
+  new T.BoxGeometry(1,1,1),
+  new T.MeshBasicMaterial({color:'#ffb55e',wireframe:true,transparent:true,opacity:.92,depthTest:false})
+);
+hitboxPreview.name='Hitbox de collision';
+hitboxPreview.renderOrder=8;
+hitboxPreview.visible=false;
+
 const material=createModelMaterial();
-scene.add(previews,referencePreviews,guide,selection,new T.HemisphereLight('#ecf7ff','#4c5960',2.4));
+scene.add(previews,referencePreviews,guide,selection,hitboxPreview,new T.HemisphereLight('#ecf7ff','#4c5960',2.4));
 const sun=new T.DirectionalLight('#ffe5c2',2.05);
 sun.position.set(-2.5,4,-3);
 scene.add(sun);
@@ -270,8 +278,14 @@ function updateInspector(){
   $('send-to-map').setAttribute('aria-disabled',String(!model?.parts.length));
 }
 function setPanel(tab){
+  if(tab!=='collision'&&hitboxEditing){
+    hitboxEditing=false;
+    setTool('select');
+  }
   $('model-inspector').dataset.tab=tab;
   updateInspector();
+  updateHitboxPreview();
+  attachGizmo();
 }
 for(const button of document.querySelectorAll('.tab')){
   button.onclick=()=>setPanel(button.dataset.panel);
@@ -310,7 +324,19 @@ try{
   });
   gizmo.addEventListener('objectChange',()=>{
     const mesh=gizmo.object,part=currentPart();
-    if(!mesh||!part)return;
+    if(!mesh)return;
+    if(hitboxEditing&&mesh===hitboxPreview&&currentModel()?.hitbox?.mode==='box'){
+      const hitbox=currentModel().hitbox;
+      hitbox.center=mesh.position.toArray().map(v=>clamp(v,-6,6));
+      hitbox.size=mesh.scale.toArray().map(v=>clamp(Math.abs(v),.025,12));
+      mesh.position.fromArray(hitbox.center);
+      mesh.scale.fromArray(hitbox.size);
+      transformMoved=true;
+      updateHitboxControls();
+      render();
+      return;
+    }
+    if(!part)return;
     part.position=mesh.position.toArray().map(v=>clamp(v,-3,3));
     part.rotation=[mesh.rotation.x,mesh.rotation.y,mesh.rotation.z]
       .map(rad=>clamp(T.MathUtils.radToDeg(rad),-360,360));
@@ -378,7 +404,9 @@ function partMesh(part){
 function attachGizmo(){
   if(!gizmo)return;
   const selectedMesh=previews.children[partIndex];
-  const mesh=viewMode==='select'||!selectedMesh?.visible?null:selectedMesh;
+  const mesh=viewMode==='select'?null:
+    hitboxEditing&&hitboxPreview.visible&&['translate','scale'].includes(viewMode)?hitboxPreview:
+    !selectedMesh?.visible?null:selectedMesh;
   // Keep the same attachment while dragging. Re-attaching resets the
   // TransformControls axis and quietly aborts rotate/scale/translate.
   if(gizmo.object!==mesh){
@@ -398,7 +426,7 @@ function attachGizmo(){
 }
 function updateSelectionOutline(){
   const mesh=previews.children[partIndex];
-  selection.visible=!!mesh?.visible;
+  selection.visible=!!mesh?.visible&&!hitboxEditing;
   if(mesh)selection.box.setFromObject(mesh);
   render();
 }
@@ -454,6 +482,7 @@ function updatePreview(frame=false){
     const mesh=partMesh(part);mesh.visible=!hidden.has(index);previews.add(mesh);
   });
   updateReferencePreview();
+  updateHitboxPreview();
   $('preview-empty').hidden=Boolean(parts.length&&renderer);
   $('preview-empty').textContent=!renderer?'Prévisualisation 3D indisponible : les valeurs restent modifiables.'
     :currentModel()?'Ajoute une forme avec la barre à gauche pour commencer.'
@@ -493,6 +522,7 @@ function changeMask(slot){
   updateParts();updatePreview();
 }
 function setTool(tool){
+  if(hitboxEditing&&!['translate','scale'].includes(tool))hitboxEditing=false;
   viewMode=tool;
   for(const button of document.querySelectorAll('.rail-btn[data-tool]'))
     button.setAttribute('aria-pressed',String(button.dataset.tool===tool));
