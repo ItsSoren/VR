@@ -298,7 +298,7 @@ function updateHitboxControls(){
   const shape=model.hitbox?.shape??'box',precision=Math.round(model.hitbox?.precision??48);
   if($('hitbox-shape').value!==shape)$('hitbox-shape').value=shape;
   $('hitbox-precision').value=String(precision);$('hitbox-precision-value').textContent=String(precision);
-  $('hitbox-precision-wrap').hidden=shape!=='convex';
+  $('hitbox-precision-wrap').hidden=shape==='box';
   $('hitbox-info').textContent=manual?'Hitbox personnalisée : déplace, tourne et redimensionne la forme orange.'
     :shape==='convex'?'Auto : enveloppe convexe calculée depuis la géométrie du modèle.'
     :'Auto : collision simple ajustée aux dimensions du modèle.';

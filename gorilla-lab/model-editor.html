@@ -337,11 +337,11 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
                 <option value="capsule">Capsule</option>
               </select>
             </label>
-            <label id="hitbox-precision-wrap">Précision · budget de sommets (8–96)
+            <label id="hitbox-precision-wrap">Précision · complexité de collision (8–96)
               <input id="hitbox-precision" type="range" min="8" max="96" step="4" value="48">
               <output id="hitbox-precision-value">48</output>
             </label>
-            <p class="hint">Le budget règle la finesse de l'enveloppe convexe. Il est plafonné pour préserver les performances en VR.</p>
+            <p class="hint">Le réglage ajuste la tessellation des sphères et capsules, ou le nombre de points utilisés pour l'enveloppe convexe. Il est plafonné pour préserver les performances en VR.</p>
             <div id="hitbox-geometry" hidden>
               <div class="inline-actions">
                 <button id="hitbox-drag">✣ Déplacer</button>
