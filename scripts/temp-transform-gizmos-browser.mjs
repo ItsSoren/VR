@@ -115,7 +115,20 @@ try{
   // Map check: start from an existing solid piece and focus camera on it.
   await page.goto('http://127.0.0.1:8999/__gizmo_debug_map.html',{waitUntil:'domcontentloaded',timeout:60000});
   await page.waitForFunction(()=>document.querySelector('#pieces')?.options.length>0,{timeout:15000});
-  await page.select('#pieces','0');
+  const pieces=await page.evaluate(()=>{
+    const {group}=window.__gizmoProbe;
+    return [...document.querySelector('#pieces').options].map((option,i)=>{
+      const mesh=group.children[i];
+      return {value:option.value,name:option.textContent.trim(),size:mesh?.scale.toArray(),
+        position:mesh?.position.toArray()};
+    });
+  });
+  console.log('MAP_PIECES',JSON.stringify(pieces.slice(0,45)));
+  const available=pieces.filter(p=>p.size?.every(v=>v>=.12&&v<=5)&&Math.abs(p.position?.[1]??0)<12);
+  const selectedPiece=available[Math.floor(available.length/2)]??pieces.find(p=>p.size?.every(v=>v>0&&v<10))??pieces[0];
+  console.log('MAP_SELECTED',JSON.stringify(selectedPiece));
+  await page.select('#pieces',selectedPiece.value);
+  await page.click('#focus-piece');
   await page.click('[data-tool="rotate"]');
   const mapTarget=await page.evaluate(()=>{
     const g=window.__gizmoProbe?.gizmo;
