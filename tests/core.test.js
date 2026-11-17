@@ -15,6 +15,7 @@ import {createKeyboardState} from '../gorilla-lab/flat-controls.js';
 import {screenPixelRatio} from '../gorilla-lab/screen-render.js';
 import {terrainHeight,sculptTerrain,normalizeTerrain,resizeTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from '../gorilla-lab/terrain-edit.js';
 import {transformUVs,tiledBox,decorPrimitiveGeometry} from '../gorilla-lab/texture-geometry.js';
+import {resizedCenter} from '../gorilla-lab/editor-scale.js';
 
 test('held trigger emits ten shots each second and stops on release',()=>{
   const scene=new T.Scene(),gun=createArcadeBlaster(scene,{});
@@ -450,4 +451,26 @@ test('static decorative primitives survive map serialization and generate real m
   }
   const map=exampleMap();map.pieces[0].primitive='invalid';
   assert.equal(parseMap(map).pieces[0].primitive,'box');
+});
+
+test('face scaling preserves the opposite face and Ctrl fixes the centre',()=>{
+  const original={x:5,y:2,z:0,w:2,h:2,d:2,pitch:0,yaw:0,roll:0};
+  const expanded={w:4,h:2,d:2};
+  const anchored=resizedCenter(original,expanded,false);
+  assert.equal(anchored.x,6);
+  assert.equal(anchored.x-expanded.w/2,original.x-original.w/2,
+    'the opposite face must remain fixed');
+  assert.deepEqual(resizedCenter(original,expanded,true),{x:5,y:2,z:0});
+  const smaller=resizedCenter(original,{w:1,h:2,d:2},false);
+  assert.equal(smaller.x,4.5);
+  assert.equal(smaller.x-.5,original.x-1);
+});
+
+test('asymmetric scaling honours object rotation and terrain Y constraints',()=>{
+  const rotated={x:0,y:0,z:0,w:2,h:2,d:2,pitch:0,yaw:90,roll:0};
+  const center=resizedCenter(rotated,{w:4,h:2,d:2},false);
+  assert.ok(Math.abs(center.x)<1e-6);
+  assert.ok(Math.abs(center.z+1)<1e-6);
+  const terrain={...rotated,terrain:{detail:16},pitch:0,yaw:0};
+  assert.equal(resizedCenter(terrain,{w:2,h:8,d:2},false).y,0);
 });
