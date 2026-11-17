@@ -1,5 +1,6 @@
 import {Euler,Vector3} from 'three';
 import {labSpawn} from './lab-layout.js';
+import {normalizeModelPack} from './model-pack.js';
 import {normalizeTerrain} from './terrain-edit.js';
 
 
@@ -25,11 +26,14 @@ export function parseMap(input){
     pieces:input.pieces.map((p,i)=>{
       if(!p||typeof p!=='object')throw Error('Pièce invalide : '+(i+1));
       const terrain=p.terrain&&typeof p.terrain==='object'?normalizeTerrain(p.terrain):null;
+      const model=p.model ? normalizeModelPack({version:1,models:[p.model]}).models[0] : null;
+      if(model && !model.parts.length)throw Error('Le modèle doit contenir au moins une forme.');
       return {
         name:text(p.name,36,'Pièce '+(i+1)),x:number(p.x,-120,120,0),y:number(p.y,-12,33,0),z:number(p.z,-120,120,0),
         w:number(p.w,.2,64,3),h:number(p.h,.12,36,.5),d:number(p.d,.2,64,3),
         pitch:terrain?0:number(p.pitch,-180,180,0),yaw:terrain?0:number(p.yaw,-360,360,0),roll:terrain?0:number(p.roll,-180,180,0),
         ...(terrain?{terrain}:{}),
+        ...(model?{model}:{}),
         material:Math.round(number(p.material,0,16,0)),
         color:typeof p.color==='string'&&/^#[a-f0-9]{6}$/i.test(p.color)?p.color:'#ffffff',
         grip:number(p.grip,0,1.5,.8),gravity:number(p.gravity,.05,2.5,1),bounce:number(p.bounce,0,1.65,1),

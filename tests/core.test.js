@@ -10,6 +10,7 @@ import {createToolVisual} from '../gorilla-lab/tool-visual.js';
 import {createArcadeBlaster,createBlasterModel} from '../gorilla-lab/arcade-blaster.js';
 import {updateGroundHaptics} from '../gorilla-lab/ground-haptics.js';
 import {parseMap,exampleMap} from '../gorilla-lab/map-format.js';
+import {normalizeModelPack,createModelUnitGeometry,modelDimensions} from '../gorilla-lab/model-pack.js';
 import {createKeyboardState} from '../gorilla-lab/flat-controls.js';
 import {screenPixelRatio} from '../gorilla-lab/screen-render.js';
 import {terrainHeight,sculptTerrain} from '../gorilla-lab/terrain-edit.js';
@@ -357,4 +358,28 @@ test('a rotated palm stops with its collision center aligned to the visual hand'
   assert.equal(rig.step(0,.18,-.018).contacts,1);
   const palm=rig.hand.anchor.clone().add(palmCenter.clone().applyQuaternion(rotation));
   assert.ok(Math.abs(palm.dot(normal)-palmHalfExtent.y)<.001);
+});
+
+test('a composite model survives map export with its decorative or physical identity',()=>{
+  const model=normalizeModelPack({version:1,models:[{
+    id:'custom-model-test-piece',name:'Pont construit',kind:'structure',inGame:false,
+    properties:{grabbable:false,collidable:true,frozen:true},
+    parts:[
+      {name:'Plateau',shape:'box',position:[0,0,0],rotation:[0,0,0],scale:[2,.2,1],color:'#aabbcc',surface:'wood'},
+      {name:'Pilier',shape:'cylinder',position:[.7,-.6,0],rotation:[0,0,0],scale:[.2,1,.2],color:'#778899',surface:'plain'},
+    ]
+  }]}).models[0];
+  const map=exampleMap();
+  map.pieces.push({...map.pieces[0],name:'Pont',model,w:2,h:1.2,d:1});
+  const restored=parseMap(JSON.stringify(map));
+  assert.equal(restored.pieces.at(-1).model.kind,'structure');
+  assert.equal(restored.pieces.at(-1).model.parts.length,2);
+  assert.ok(modelDimensions(model).x>1.9);
+  const geometry=createModelUnitGeometry(model);
+  geometry.computeBoundingBox();
+  assert.ok(geometry.boundingBox.getSize(new T.Vector3()).x<=1.00001);
+  geometry.dispose();
+  const prop={...model,kind:'prop'};
+  map.pieces.at(-1).model=prop;
+  assert.equal(parseMap(JSON.stringify(map)).pieces.at(-1).model.kind,'prop');
 });

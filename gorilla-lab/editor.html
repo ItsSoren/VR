@@ -111,6 +111,7 @@
         <button id="add-terrain" class="tool" data-tool="terrain">Terrain</button>
         <button id="sculpt-terrain" class="tool" data-tool="sculpt">Sculpter</button>
         <a href="./model-editor.html">Atelier modèles</a>
+        <button id="place-model" class="tool" data-tool="model">Modèle 3D</button>
             <button class="tool" id="spawn-tool" data-tool="spawn" aria-pressed="false">Départ <kbd>4</kbd></button>
           </div>
           <div class="actions">
@@ -145,6 +146,11 @@
     <aside class="panel" aria-label="Réglages de la carte">
       <label>Nom de la map<input id="map-name" maxlength="56"></label>
       <div id="draft-status" role="status"></div>
+      <section class="inspector-section">
+        <h2>Bibliothèque de modèles</h2>
+        <label>Décors et objets créés<select id="model-library"></select></label>
+        <p style="font-size:12px;color:var(--muted)">Choisis un modèle, puis l’outil Modèle 3D pour le placer. Il sera intégré au JSON de la carte.</p>
+      </section>
       <section class="inspector-section">
         <div class="section-title"><h2 id="pieces-title">Pièces</h2><span class="count" id="count"></span></div>
         <input id="piece-search" type="search" placeholder="Chercher par nom…" aria-label="Chercher une pièce">

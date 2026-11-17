@@ -14,7 +14,7 @@ import {createSettings,toolModes,shaderNames,visualPresets} from './game-setting
 import { avatarPalettes,createAvatarStyle } from './avatar-style.js';
 import {createArenaObjectSpecs,forEachStartupObject} from './arena-objects.js';
 import { makeAnimatedProps,clonePropMaterial } from './animated-props.js';
-import {readModelPack,createModelPropDefinitions,createModelAvatarHead,normalizeModelPack,modelLimits,modelStorageKey} from './model-pack.js';
+import {readModelPack,createModelPropDefinitions,createModelAvatarHead,createModelUnitGeometry,createModelMaterial,normalizeModelPack,modelLimits,modelStorageKey} from './model-pack.js';
 import {mapCode,publicRooms} from './cloud-link.js';
 import { createHandSkin,palmCenter } from './hand-skin.js';
 import {placeTrackedPalm} from './xr-palm.js';
@@ -636,7 +636,40 @@ const fixtures=addLabFixtures(scene,arena.boxes,{
 const mapToolNames=['Poser','Déplacer','Supprimer','Peindre','Monter','Creuser','Lisser','Aplanir','Appliquer le bruit'];
 const mapShapeNames=['Bloc','Rampe','Mur','Dalle','Terrain'];
 const mapSurfaceNames=['Normale','Glace','Caoutchouc','Lune'];
-const maps=connectMaps({scene,arena,boot,onReset:angle=>{clearObjects();resetPlayer();yaw=T.MathUtils.degToRad(angle);if(maps.builtIn)spawnSamples();},onVisual:applyVisual,
+// Map-created objects use the same object physics as props spawned from the menu.
+const placedModelTypes=new Map();
+function spawnPlacedModels(){
+  for(const piece of maps.placedModels()){
+    const key=JSON.stringify([piece.model,piece.w,piece.h,piece.d]);
+    let type=placedModelTypes.get(key);
+    if(type===undefined){
+      const geo=createModelUnitGeometry(piece.model);
+      geo.scale(piece.w,piece.h,piece.d);
+      const collisionGeo=new T.BoxGeometry(piece.w,piece.h,piece.d);
+      const shape=colliderFor(collisionGeo);
+      collisionGeo.dispose();
+      type=objectSpecs.length;
+      objectSpecs.push({
+        id:piece.model.id,name:piece.model.name,geo,material:createModelMaterial(),
+        shape,lowShape:shape,
+        properties:{...piece.model.properties,grabbable:piece.model.properties.grabbable!==false},
+        mass:T.MathUtils.clamp(piece.w*piece.h*piece.d*9,.18,12)
+      });
+      placedModelTypes.set(key,type);
+    }
+    const body=spawnObject(type,new T.Vector3(piece.x,piece.y,piece.z),null,true);
+    if(body){
+      body.mesh.rotation.set(T.MathUtils.degToRad(piece.pitch),T.MathUtils.degToRad(piece.yaw),T.MathUtils.degToRad(piece.roll??0),'YXZ');
+      body.mesh.updateMatrixWorld(true);
+      body.start.copy(body.mesh.position);
+    }
+  }
+}
+const maps=connectMaps({scene,arena,boot,onReset:angle=>{
+  clearObjects();resetPlayer();yaw=T.MathUtils.degToRad(angle);
+  if(maps.builtIn)spawnSamples();
+  spawnPlacedModels();
+},onVisual:applyVisual,
   getLevel:()=>liveLevel,defaultObjects:[...arena.builtObjects,...scene.children.filter(n=>!beforeFixtures.has(n)),mirrorBacking],
 });
 const spectator=addSpectator({scene,currentMap:()=>(maps.signature||'arena-r25-'+arena.hillSeed)+modelSignature,

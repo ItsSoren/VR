@@ -2,7 +2,7 @@ import * as T from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 export const modelStorageKey = 'gorilla-lab-models-v1';
-export const modelLimits = Object.freeze({ models: 12, parts: 24, fileBytes: 180000 });
+export const modelLimits = Object.freeze({ models: 12, parts: 64, fileBytes: 180000 });
 export const modelShapes = Object.freeze({
   box: 'Cube', sphere: 'Sphère', cylinder: 'Cylindre', cone: 'Cône',
   torus: 'Anneau', capsule: 'Capsule', diamond: 'Diamant',
@@ -37,6 +37,7 @@ export function normalizeModelPack(input) {
     return {
       id: raw.id,
       name: label(raw.name, 'Modèle sans nom'),
+      kind: raw.kind === 'structure' ? 'structure' : 'prop',
       inGame: raw.inGame === true,
       properties: Object.fromEntries(Object.entries(defaultModelProperties).map(([key, fallback]) => [
         key, typeof raw.properties?.[key] === 'boolean' ? raw.properties[key] : fallback,
@@ -155,6 +156,26 @@ function centeredGeometry(parts) {
   geometry.center();
   geometry.computeBoundingBox();
   return geometry;
+}
+
+// Unit-sized, centred mesh for model placement. A map piece supplies its world dimensions.
+export function createModelUnitGeometry(model) {
+  const geometry = centeredGeometry(model.parts);
+  const size = geometry.boundingBox.getSize(new T.Vector3());
+  geometry.scale(1 / Math.max(size.x, 1e-5), 1 / Math.max(size.y, 1e-5), 1 / Math.max(size.z, 1e-5));
+  geometry.computeBoundingBox();
+  return geometry;
+}
+
+export function modelDimensions(model) {
+  const bounds = new T.Box3();
+  for (const part of model.parts) {
+    const geometry = createModelPartGeometry(part);
+    geometry.computeBoundingBox();
+    bounds.union(geometry.boundingBox);
+    geometry.dispose();
+  }
+  return bounds.getSize(new T.Vector3());
 }
 
 export function createModelPropDefinitions(pack) {

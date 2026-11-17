@@ -3,6 +3,7 @@ import * as T from 'three';
 import {tiledBox} from './texture-geometry.js';
 import {terrainGeometry,terrainCollider,terrainVegetation,disposeVegetation,sculptTerrain,normalizeTerrain,resizeTerrain} from './terrain-edit.js';
 import {boxCollider} from './physics.js';
+import {createModelUnitGeometry,createModelMaterial} from './model-pack.js';
 import {mapCode} from './cloud-link.js';
 import {parseMap,makePiece,snapPlacement,maxPieces,maxMapBytes,storageKey,downloadMap} from './map-format.js';
 
@@ -67,6 +68,22 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     if(row.custom){row.ownTexture?.materials.delete(row.mesh.material);row.mesh.material.dispose();}
   }
   function makeRow(piece,index){
+    if(piece.model){
+      const geometry=createModelUnitGeometry(piece.model);
+      geometry.scale(piece.w,piece.h,piece.d);
+      const material=createModelMaterial();
+      const mesh=new T.Mesh(geometry,material);
+      mesh.position.set(piece.x,piece.y,piece.z);
+      mesh.rotation.set(T.MathUtils.degToRad(piece.pitch),T.MathUtils.degToRad(piece.yaw),T.MathUtils.degToRad(piece.roll??0),'YXZ');
+      mesh.castShadow=mesh.receiveShadow=true;
+      mesh.userData.mapIndex=index;
+      if(piece.model.kind==='prop')mesh.visible=false; // Dynamic prop is spawned by the object physics system.
+      group.add(mesh);
+      const half=new T.Vector3(piece.w/2,piece.h/2,piece.d/2);
+      const collider={mesh,position:mesh.position,quaternion:mesh.quaternion,half,min:half.clone().negate(),
+        shape:boxCollider(half),friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:true,type:piece.material};
+      return {mesh,collider,custom:true,model:true};
+    }
     const {material,custom,ownTexture}=card(piece);
     const mesh=new T.Mesh(piece.terrain?terrainGeometry(piece):tiledBox(piece.w,piece.h,piece.d),material);
     mesh.position.set(piece.x,piece.y,piece.z);
@@ -85,7 +102,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   function refreshMaterials(){
     for(const row of meshRows){
       const model=map?.pieces[row.mesh.userData.mapIndex];
-      if(!model||row.ownTexture)continue;
+      if(!model||row.ownTexture||row.model)continue;
       const base=arena.mapMaterial(model.material,getLevel());
       if(!row.custom)row.mesh.material=base;
       else if(row.mesh.material.map!==base.map){
@@ -104,7 +121,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     pruneTextures();
     if(map){
       const retained=map.arenaBase?builtBoxes.filter(box=>!replaceableMeshes.has(box.mesh)):[];
-      arena.boxes.splice(0,arena.boxes.length,...retained,...meshRows.filter((row,i)=>nodes[i].solid).map(row=>row.collider));
+      arena.boxes.splice(0,arena.boxes.length,...retained,...meshRows.filter((row,i)=>nodes[i].solid&&nodes[i].model?.kind!=='prop').map(row=>row.collider));
     }
     else arena.boxes.splice(0,arena.boxes.length,...builtBoxes);
     group.updateMatrixWorld(true);
@@ -242,7 +259,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   document.querySelector('#map-load-url').onclick=()=>loadURL(url.value);
   document.querySelector('#map-export').onclick=save;
   document.querySelector('#map-reset').onclick=reset;
-  return {modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,reset,blank,undo,save,edit,recenter,inform,
+  return {placedModels:()=>map?.pieces.filter(p=>p.model?.kind==='prop')??[],modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,reset,blank,undo,save,edit,recenter,inform,
     clearGhost(){ghost.visible=false;},get active(){return Boolean(map);},get builtIn(){return !map||map.arenaBase===true;},get status(){return status;},get yaw(){return map?.spawn.yaw??0;},
     get nodes(){return map?.pieces.length??0;},get name(){return map?.name??null;},get signature(){return signature;},
   };
