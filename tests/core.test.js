@@ -16,6 +16,7 @@ import {screenPixelRatio} from '../gorilla-lab/screen-render.js';
 import {terrainHeight,sculptTerrain,normalizeTerrain,resizeTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from '../gorilla-lab/terrain-edit.js';
 import {transformUVs,tiledBox,decorPrimitiveGeometry} from '../gorilla-lab/texture-geometry.js';
 import {clonePropMaterial} from '../gorilla-lab/animated-props.js';
+import {sketchPresets,normalizeSketch,validateSketch,sketchOutline,createSketchGeometry} from '../gorilla-lab/custom-shape.js';
 import {resizedCenter} from '../gorilla-lab/editor-scale.js';
 
 test('held trigger emits ten shots each second and stops on release',()=>{
@@ -513,4 +514,40 @@ test('animated game objects safely clone a multi-material textured model',()=>{
   assert.equal(cloned[1].color.getHexString(),'9badc1');
   cloned.forEach(material=>material.dispose());
   a.forEach(material=>material.dispose());
+});
+
+test('freeform silhouette extrudes and serializes into existing model and map formats',()=>{
+  const profile=normalizeSketch(sketchPresets.angle);
+  assert.equal(validateSketch(profile),null);
+  const g=createSketchGeometry(profile);
+  assert.ok(g.attributes.position.count>36);
+  g.computeBoundingBox();
+  assert.ok(g.boundingBox.getSize(new T.Vector3()).z>.25);
+  g.dispose();
+  const model={id:'custom-model-freeform-2026',name:'Décor sculpté',kind:'structure',
+    parts:[{name:'Contour en L',shape:'custom',profile,position:[0,0,0],
+      rotation:[0,0,0],scale:[1,1,1],color:'#ffffff',surface:'plain'}]};
+  const pack=normalizeModelPack({version:1,models:[model]});
+  assert.equal(pack.models[0].parts[0].shape,'custom');
+  assert.deepEqual(pack.models[0].parts[0].profile.points,profile.points);
+  const geometry=createModelUnitGeometry(pack.models[0]);
+  assert.ok(geometry.attributes.position.count>36);
+  geometry.dispose();
+  const map=exampleMap();
+  map.pieces[0].model=pack.models[0];
+  assert.equal(parseMap(JSON.stringify(map)).pieces[0].model.parts[0].profile.points.length,6);
+});
+test('shape sketches support X-mirror contours and lathe geometry',()=>{
+  const shield=normalizeSketch(sketchPresets.shield);
+  assert.equal(validateSketch(shield),null);
+  assert.ok(sketchOutline(shield).length>shield.points.length);
+  const bottle=normalizeSketch(sketchPresets.bottle);
+  assert.equal(validateSketch(bottle),null);
+  const g=createSketchGeometry(bottle);
+  assert.ok(g.attributes.normal.count>50);
+  g.computeBoundingBox();
+  assert.ok(g.boundingBox.getSize(new T.Vector3()).x>.3);
+  g.dispose();
+  const invalid=normalizeSketch({...sketchPresets.panel,points:[[-.5,-.5],[.5,.5],[.5,-.5],[-.5,.5]]});
+  assert.match(validateSketch(invalid),/croise/);
 });
