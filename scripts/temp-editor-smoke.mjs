@@ -31,6 +31,12 @@ try{
   assert.equal(await page.$eval('#editor-views',n=>n.dataset.layout),'only-plan');
   await page.select('#layout-mode','split');
   await page.click('#plan-zoom-in');
+  // Middle-mouse panning must work without moving or editing map pieces.
+  const rect=await page.$eval('#plan',n=>{const r=n.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};});
+  await page.mouse.move(rect.x+rect.width/2,rect.y+rect.height/2);
+  await page.mouse.down({button:'middle'});
+  await page.mouse.move(rect.x+rect.width/2+40,rect.y+rect.height/2+25,{steps:4});
+  await page.mouse.up({button:'middle'});
   await page.$eval('#debug-controls',n=>n.open=true);
   await page.click('#debug-hitboxes');
   await page.click('#blank-map');
