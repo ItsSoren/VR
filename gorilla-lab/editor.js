@@ -3,7 +3,7 @@ import {buildArena} from './arena.js';
 import {addLabFixtures} from './fixtures.js';
 import {createArenaObjectSpecs,forEachStartupObject} from './arena-objects.js';
 import {labMirror} from './lab-layout.js';
-import {tiledBox} from './texture-geometry.js';
+import {tiledBox,transformUVs} from './texture-geometry.js';
 import {readModelPack,createModelUnitGeometry,createModelMaterial,modelDimensions} from './model-pack.js';
 import {normalizeTerrain,resizeTerrain,sculptTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from './terrain-edit.js';
 import {texturePresets,seamlessTexture} from './seamless-texture.js';
@@ -11,11 +11,12 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   parseMap, arenaMap, exampleMap, makePiece, mapMaterials, materialColors, surfacePresets,
-  maxPieces, snapPlacement, downloadMap, storageKey,
+  maxPieces, maxWorldReach, maxObjectSize, snapPlacement, downloadMap, storageKey,
 } from './map-format.js';
 
 const $ = id => document.getElementById(id);
 const fields = ['name', 'x', 'y', 'z', 'w', 'h', 'd', 'pitch', 'yaw', 'roll', 'material', 'color', 'grip', 'gravity', 'bounce', 'solid'];
+const uvFields=['uvScale','uvRotation','uvOffsetX','uvOffsetY'];
 const toolButtons = [...document.querySelectorAll('.tool')];
 const draftKey = 'gorilla-lab-editor-draft';
 const modelPack = readModelPack(localStorage);
@@ -56,12 +57,41 @@ const toolHelp = {
   wall: 'Clique dans la vue 3D ou sur le plan pour poser un mur. Échap revient à la sélection.',
   terrain:'Clique pour poser un terrain. Sélectionne-le pour régler le bruit ou la végétation.',
   sculpt:'Clique ou glisse sur un terrain. Le pinceau est réglable dans Relief et végétation.',
+  preset:'Choisis une forme rapide et clique où la placer. Tu peux ensuite la modifier ou la remplacer par un modèle.',
   spawn: 'Clique sur une surface pour placer le départ du joueur.',
   model: 'Choisis un modèle dans la bibliothèque, puis clique dans la vue 3D ou sur le plan pour le poser.',
 };
 let map, selected = -1, tool = 'move', gesture = null, ghost = null;
 const undoStack = [];
 const screen = $('preview'), plan = $('plan'), context = plan.getContext('2d');
+function presetPiece(){
+  const presets={
+    slab:['Dalle',3,.12,3],column:['Colonne',.6,3,.6],beam:['Poutre',4,.4,.45],
+    platform:['Plateforme',7,.4,5],fence:['Barrière',4,1.3,.18],
+    stair:['Marche',1.7,.25,.8],tiny:['Petit décor',.35,.35,.35]
+  };
+  const [name,w,h,d]=presets[$('shape-preset').value]??presets.slab;
+  return makePiece({name,w,h,d,y:h/2});
+}
+const editorViews=$('editor-views');
+function applyLayout(){
+  editorViews.dataset.layout=$('layout-mode').value;
+  document.documentElement.style.setProperty('--view-fraction',$('view-split').value+'%');
+  document.documentElement.style.setProperty('--side-width',$('sidebar-width').value+'px');
+  requestAnimationFrame(()=>{resizeRenderer();resizePlan();});
+}
+for(const id of ['layout-mode','view-split','sidebar-width'])$(id).addEventListener('input',applyLayout);
+$('sidebar-toggle').onclick=()=>{document.body.classList.toggle('inspector-hidden');applyLayout();};
+$('workspace-fullscreen').onclick=()=>{
+  if(document.fullscreenElement)document.exitFullscreen();
+  else document.querySelector('main').requestFullscreen?.();
+};
+$('focus-3d').onclick=()=>{$('layout-mode').value='only-3d';applyLayout();};
+$('focus-plan').onclick=()=>{$('layout-mode').value='only-plan';applyLayout();};
+const modelOptions=[['','Géométrie simple (défaut)'],...modelLibrary.map(m=>[m.id,m.name])];
+for(const id of ['terrain-grassModel','terrain-shrubModel']){
+  $(id).replaceChildren(...modelOptions.map(([value,label])=>new Option(label,value)));
+}
 let planRange = { scale: 10, cx: 0, cz: -6, width: 30, height: 40 };
 
 const renderer = new T.WebGLRenderer({ canvas: screen, antialias: true });
@@ -223,6 +253,7 @@ function queueRender() {
   requestAnimationFrame(() => {
     renderRequested = false;
     renderer.render(scene, camera);
+    updateDebugStats();
   });
 }
 
@@ -319,8 +350,9 @@ function paintPlan() {
   context.fillRect(0, 0, plan.width, plan.height);
   context.strokeStyle = '#37505f';
   context.lineWidth = 1;
-  const gridStep = planRange.scale < 4 ? 5 : 1;
-  for (let i = -120; i <= 120; i += gridStep) {
+  const gridStep=planRange.scale<1?25:planRange.scale<4?10:planRange.scale<12?5:1;
+  const limit=(map.worldSize??240)/2;
+  for (let i = -Math.ceil(limit/gridStep)*gridStep; i <= limit; i += gridStep) {
     const [x, z] = transform(i, i);
     if (x >= 0 && x <= plan.width) {
       context.beginPath();
@@ -336,6 +368,9 @@ function paintPlan() {
     }
   }
 
+  const [edgeX,edgeZ]=transform(-limit,-limit);
+  context.strokeStyle='#ffda9077';context.lineWidth=2;
+  context.strokeRect(edgeX,edgeZ,limit*2*planRange.scale,limit*2*planRange.scale);
   const layers = map.pieces.map((piece, index) => ({ piece, index })).sort((a, b) => a.piece.y - b.piece.y);
   for (const { piece, index } of layers) {
     const color = piece.model?.parts[0]?.color ?? (piece.color === '#ffffff' ? materialColors[piece.material] : piece.color);
@@ -404,19 +439,33 @@ gizmo.addEventListener('objectChange',()=>{
   if(tool==='translate'){
     const axes=['x','y','z'].filter(axis=>(gizmo.axis??'XYZ').includes(axis.toUpperCase()));
     const next=alignTranslation(piece,{x:mesh.position.x,y:mesh.position.y,z:mesh.position.z},axes,altHeld);
-    piece.x=clamp(next.x,-120,120);
-    piece.y=clamp(next.y,-12,33);
-    piece.z=clamp(next.z,-120,120);
+    const limit=(map.worldSize??240)/2;
+    piece.x=clamp(next.x,-limit,limit);
+    piece.y=clamp(next.y,-256,256);
+    piece.z=clamp(next.z,-limit,limit);
     mesh.position.set(piece.x,piece.y,piece.z);
   }else if(tool==='rotate'){
     piece.pitch=T.MathUtils.radToDeg(mesh.rotation.x);
     piece.yaw=T.MathUtils.radToDeg(mesh.rotation.y);
     piece.roll=T.MathUtils.radToDeg(mesh.rotation.z);
   }else{
-    piece.w=clamp(mesh.scale.x*(piece.terrain?original.w:1),.2,64);
-    piece.d=clamp(mesh.scale.z*(piece.terrain?original.d:1),.2,64);
-    if(!piece.terrain)piece.h=clamp(mesh.scale.y,.12,36);
+    piece.w=clamp(mesh.scale.x*(piece.terrain?original.w:1),.05,maxObjectSize);
+    piece.d=clamp(mesh.scale.z*(piece.terrain?original.d:1),.05,maxObjectSize);
+    if(!piece.terrain)piece.h=clamp(mesh.scale.y,.05,256);
     mesh.scale.set(piece.terrain?piece.w/original.w:piece.w,piece.terrain?1:piece.h,piece.terrain?piece.d/original.d:piece.d);
+    const anchor=$('scale-anchor').value;
+    if(anchor!=='center'){
+      const sign=anchor==='positive'?1:-1;
+      const offset=new T.Vector3((piece.w-original.w)*sign/2,
+        piece.terrain?0:(piece.h-original.h)*sign/2,(piece.d-original.d)*sign/2);
+      const quaternion=new T.Quaternion().setFromEuler(
+        new T.Euler(T.MathUtils.degToRad(original.pitch),T.MathUtils.degToRad(original.yaw),T.MathUtils.degToRad(original.roll??0),'YXZ'));
+      offset.applyQuaternion(quaternion);
+      piece.x=clamp(original.x+offset.x,-maxWorldReach,maxWorldReach);
+      piece.y=clamp(original.y+offset.y,-256,256);
+      piece.z=clamp(original.z+offset.z,-maxWorldReach,maxWorldReach);
+      mesh.position.set(piece.x,piece.y,piece.z);
+    }
   }
   mesh.updateMatrixWorld(true);
   selectionBox?.update();
@@ -482,6 +531,7 @@ function rebuildScene() {
       material.color.set(piece.color);
     }
     const geometry=piece.terrain?terrainGeometry(piece):(piece.texture||map.arenaBase)?tiledBox(piece.w,piece.h,piece.d).scale(1/piece.w,1/piece.h,1/piece.d):sharedBox;
+    if(geometry!==sharedBox)transformUVs(geometry,piece);
     const mesh = new T.Mesh(geometry, material);
     mesh.userData.ownsTexture=Boolean(piece.texture);
     if(piece.terrain){
@@ -492,6 +542,7 @@ function rebuildScene() {
     placeMesh(mesh, piece);
   }
   spawn.position.set(map.spawn.x, map.spawn.y + .38, map.spawn.z);
+  refreshDiagnostics();
   updateSceneSelection();
 }
 
@@ -553,9 +604,17 @@ function updateInspector() {
   $('delete').disabled = !piece || map.pieces.length === 1;
   $('texture-clear').disabled = !piece?.texture;
   const terrain=piece?.terrain;
+  for(const key of uvFields){const input=$('p-'+key);input.disabled=!piece||Boolean(piece?.model);input.value=piece?.[key]??(key==='uvScale'?1:0);}
+  $('uv-reset').disabled=!piece||Boolean(piece?.model);
   $('terrain-controls').hidden=!terrain;
   if(terrain){
     for(const key of terrainFields)$('terrain-'+key).value=terrain[key];
+    for(const name of ['grass','shrub']){
+      const select=$('terrain-'+name+'Model'),id=terrain[name+'Model']?.id??'';
+      if(id&&![...select.options].some(option=>option.value===id))select.add(new Option(terrain[name+'Model'].name+' (carte)',id));
+      select.value=id;
+    }
+    $('terrain-cell-size').textContent=(piece.w/terrain.detail).toFixed(2)+' × '+(piece.d/terrain.detail).toFixed(2)+' m';
     $('p-pitch').disabled=$('p-yaw').disabled=$('p-roll').disabled=true;
   }
   $('rotate').disabled=!piece||Boolean(terrain);
@@ -567,6 +626,7 @@ function updateInspector() {
 // Réconcilie le modèle, la 3D, le plan, le formulaire et le brouillon.
 function sync() {
   $('map-name').value = map.name;
+  $('map-world-size').value=map.worldSize??240;
   updateInspector();
   for (const key of ['x', 'y', 'z', 'yaw']) $('spawn-' + key).value = map.spawn[key];
   rebuildScene();
@@ -661,8 +721,8 @@ function fitViews() {
   planRange = {
     cx: center.x,
     cz: center.z,
-    width: size.x + 5,
-    height: size.z + 5,
+    width: Math.max(size.x+5,Math.min(map.worldSize??240,500)),
+    height: Math.max(size.z+5,Math.min(map.worldSize??240,500)),
   };
   scalePlan();
   const gridScale = Math.max(1, Math.ceil(Math.max(size.x, size.z) / 40));
@@ -712,7 +772,8 @@ function snapStep() { return Number($('snap').value); }
 // Aligne un déplacement au sol sur le pas et les limites du monde.
 function snapCoordinate(value) {
   const step = snapStep();
-  return T.MathUtils.clamp(Math.round(value / step) * step, -120, 120);
+  const limit=(map.worldSize??240)/2;
+  return T.MathUtils.clamp(Math.round(value / step) * step, -limit, limit);
 }
 
 // Les deux vues produisent un rayon dans le même monde 3D pour placer et déplacer les pièces.
@@ -778,7 +839,9 @@ function placementAt(canvas, event) {
     midpointSnapped=$('magnet').checked&&!event.altKey&&$('magnet-mode').value==='edge'&&midpoint.point.distanceTo(point)<=range;
   }
   const step=midpointSnapped||event.altKey?.000001:snapStep();
-  return snapPlacement(midpointSnapped?edgeMidpoint:point, normal, tool==='model'?modelPiece():shapes[tool], step);
+  const chosen=tool==='model'?modelPiece():tool==='preset'?presetPiece():shapes[tool];
+  const placed=snapPlacement(midpointSnapped?edgeMidpoint:point, normal, chosen, step);
+  return placed&&Math.max(Math.abs(placed.x),Math.abs(placed.z))<=map.worldSize/2?placed:null;
 }
 
 // Locate the closest edge of the box face hit by the placement ray, in world metres.
@@ -890,7 +953,8 @@ function moveGesture(canvas, event) {
   if (!point) return;
   const piece = current();
   const next=alignTranslation(piece,{x:point.x-gesture.dx,y:piece.y,z:point.z-gesture.dz},['x','z'],event.altKey);
-  const x=T.MathUtils.clamp(next.x,-120,120),z=T.MathUtils.clamp(next.z,-120,120);
+  const limit=(map.worldSize??240)/2;
+  const x=T.MathUtils.clamp(next.x,-limit,limit),z=T.MathUtils.clamp(next.z,-limit,limit);
   if (x === piece.x && z === piece.z) return;
   if (!gesture.recorded) {
     remember();
