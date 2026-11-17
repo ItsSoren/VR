@@ -21,7 +21,7 @@ jobs:
       - run: npm run build
       - run: npm install --no-save --no-package-lock puppeteer-core
       - run: node scripts/temp-shared-texture-browser.mjs
-      - run: echo 'Shared Surface Lab GLB export verified'
+      - run: echo 'Shared Surface Lab GLB export and game material compatibility verified'
       - name: Commit generated site bundles
         run: |
           git config user.name "github-actions[bot]"
