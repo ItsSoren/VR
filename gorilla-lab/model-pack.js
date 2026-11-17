@@ -1,13 +1,14 @@
 import * as T from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {normalizeSketch,createSketchGeometry} from './custom-shape.js';
+import {getBuiltinAsset,isBuiltinAsset} from './model-assets.js';
 
 export const modelStorageKey = 'gorilla-lab-models-v1';
 export const modelLimits = Object.freeze({ models: 24, parts: 64, fileBytes: 2_500_000, textureBytes: 160_000 });
 const texturePattern=/^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=\r\n]+$/i;
 export const modelShapes = Object.freeze({
   box: 'Cube', sphere: 'Sphère', cylinder: 'Cylindre', cone: 'Cône',
-  torus: 'Anneau', capsule: 'Capsule', diamond: 'Diamant',custom:'Forme libre',
+  torus: 'Anneau', capsule: 'Capsule', diamond: 'Diamant',custom:'Forme libre',asset:'Asset du jeu',
 });
 export const modelSurfaces = Object.freeze({
   plain: 'Uni', grid: 'Grille', stripes: 'Rayures', wood: 'Bois', speckle: 'Minéral',
@@ -40,6 +41,7 @@ export function normalizeModelPack(input) {
       id: raw.id,
       name: label(raw.name, 'Modèle sans nom'),
       kind: raw.kind === 'structure' ? 'structure' : 'prop',
+      ...(isBuiltinAsset(raw.assetId)?{assetId:raw.assetId}:{}),
       inGame: raw.inGame === true,
       properties: Object.fromEntries(Object.entries(defaultModelProperties).map(([key, fallback]) => [
         key, typeof raw.properties?.[key] === 'boolean' ? raw.properties[key] : fallback,
@@ -51,7 +53,8 @@ export function normalizeModelPack(input) {
       }:{mode:'auto'},
       parts: raw.parts.map((part, index) => ({
         name: label(part?.name, `Pièce ${index + 1}`),
-        shape: Object.hasOwn(modelShapes, part?.shape) ? part.shape : 'box',
+        shape: part?.shape==='asset'&&isBuiltinAsset(part?.assetId)?'asset':Object.hasOwn(modelShapes, part?.shape)&&part.shape!=='asset'?part.shape:'box',
+        ...(part?.shape==='asset'&&isBuiltinAsset(part?.assetId)?{assetId:part.assetId}:{}),
         ...(part?.shape==='custom'?{profile:normalizeSketch(part?.profile)}:{}),
         position: vector(part?.position, 0, -3, 3),
         rotation: vector(part?.rotation, 0, -360, 360),
@@ -130,25 +133,32 @@ function surfaceAtlas() {
 }
 
 export function createModelPartGeometry(part) {
-  const primitiveGeometry = part.shape==='custom'?createSketchGeometry(part.profile):primitive(part.shape);
+  const asset=part.shape==='asset'?getBuiltinAsset(part.assetId):null;
+  const primitiveGeometry = part.shape==='custom'?createSketchGeometry(part.profile):asset?.geometry?.clone()??primitive(part.shape);
   const geometry = primitiveGeometry.index ? primitiveGeometry.toNonIndexed() : primitiveGeometry;
   if (geometry !== primitiveGeometry) primitiveGeometry.dispose();
+  if(!geometry.attributes.uv)geometry.setAttribute('uv',new T.Float32BufferAttribute(new Float32Array(geometry.attributes.position.count*2),2));
   const angles = part.rotation.map(T.MathUtils.degToRad);
   geometry.scale(...part.scale);
   geometry.rotateX(angles[0]);
   geometry.rotateY(angles[1]);
   geometry.rotateZ(angles[2]);
   geometry.translate(...part.position);
-  const color = new T.Color(part.color);
+  const tint = new T.Color(part.color);
   const count = geometry.attributes.position.count;
   const colors = new Float32Array(count * 3);
   const uv = geometry.attributes.uv;
   const tile = surfaceKeys.indexOf(part.surface);
   const column = tile % atlasColumns;
   const row = Math.floor(tile / atlasColumns);
+  const sourceColors=geometry.attributes.color;
   for (let index = 0; index < count; index++) {
-    color.toArray(colors, index * 3);
-    if(!part.texture)uv.setXY(index, (column + .05 + uv.getX(index) * .90) / atlasColumns,
+    if(part.shape==='asset'&&sourceColors){
+      colors[index*3]=sourceColors.getX(index)*tint.r;
+      colors[index*3+1]=sourceColors.getY(index)*tint.g;
+      colors[index*3+2]=sourceColors.getZ(index)*tint.b;
+    }else tint.toArray(colors,index*3);
+    if(part.shape!=='asset'&&!part.texture)uv.setXY(index, (column + .05 + uv.getX(index) * .90) / atlasColumns,
       (row + .05 + uv.getY(index) * .90) / atlasRows);
   }
   geometry.setAttribute('color', new T.BufferAttribute(colors, 3));
@@ -156,6 +166,18 @@ export function createModelPartGeometry(part) {
 }
 
 export function createModelPartMaterial(part){
+  const asset=part?.shape==='asset'?getBuiltinAsset(part.assetId):null;
+  if(asset?.material){
+    const material=asset.material.clone();
+    if(part.texture){
+      const texture=new T.TextureLoader().load(part.texture);
+      texture.colorSpace=T.SRGBColorSpace;texture.wrapS=texture.wrapT=T.RepeatWrapping;
+      material.map=texture;
+    }
+    if(part.color&&part.color!=='#ffffff')material.color?.multiply(new T.Color(part.color));
+    material.needsUpdate=true;
+    return material;
+  }
   if(!part?.texture)return new T.MeshStandardMaterial({vertexColors:true,map:surfaceAtlas(),roughness:.68});
   const texture=new T.TextureLoader().load(part.texture);
   texture.colorSpace=T.SRGBColorSpace;
@@ -163,7 +185,7 @@ export function createModelPartMaterial(part){
   return new T.MeshStandardMaterial({vertexColors:true,map:texture,roughness:.68});
 }
 export function createModelMaterial(model){
-  if(model?.parts?.some(part=>part.texture))
+  if(model?.parts?.some(part=>part.texture||part.shape==='asset'))
     return model.parts.map(createModelPartMaterial);
   return new T.MeshStandardMaterial({vertexColors:true,map:surfaceAtlas(),roughness:.68});
 }
@@ -176,7 +198,7 @@ export function disposeModelMaterial(material){
 }
 function centeredGeometry(parts) {
   const pieces = parts.map(createModelPartGeometry);
-  const geometry = mergeGeometries(pieces,parts.some(part=>part.texture));
+  const geometry = mergeGeometries(pieces,parts.some(part=>part.texture||part.shape==='asset'));
   pieces.forEach(piece => piece.dispose());
   geometry.center();
   geometry.computeBoundingBox();
