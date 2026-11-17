@@ -169,7 +169,9 @@ export function createModelPartMaterial(part){
   const asset=part?.shape==='asset'?getBuiltinAsset(part.assetId):null;
   if(asset?.material){
     const material=asset.material.clone();
+    if(material.map){material.map=material.map.clone();material.map.needsUpdate=true;}
     if(part.texture){
+      material.map?.dispose();
       const texture=new T.TextureLoader().load(part.texture);
       texture.colorSpace=T.SRGBColorSpace;texture.wrapS=texture.wrapT=T.RepeatWrapping;
       material.map=texture;
