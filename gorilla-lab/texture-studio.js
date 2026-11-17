@@ -144,7 +144,7 @@ async function loadImage(src,canvas){
   ctx.clearRect(0,0,SIZE,SIZE);
   ctx.drawImage(image,0,0,SIZE,SIZE);
 }
-export function openTextureStudio({initial=null,tint='#687a86',name='Texture',maxDataBytes=750000,onApply=()=>{}}={}){
+export function openTextureStudio({initial=null,tint='#687a86',name='Texture',pattern='grain',maxDataBytes=750000,onApply=()=>{}}={}){
   addStyles();
   const backdrop=document.createElement('div');
   backdrop.className='texture-backdrop';
@@ -207,13 +207,14 @@ export function openTextureStudio({initial=null,tint='#687a86',name='Texture',ma
   const find=selector=>backdrop.querySelector(selector);
   const display=find('.texture-canvas'),tile=find('.texture-tile');
   const base=makeCanvas(),overlay=makeCanvas();
-  const settings={pattern:'grain',base:validColor(tint),scale:1,ink:'#e1ad78',size:22,opacity:.85,hardness:.7};
+  const settings={pattern:patterns.some(([id])=>id===pattern)?pattern:'grain',base:validColor(tint),scale:1,ink:'#e1ad78',size:22,opacity:.85,hardness:.7};
   const ctx=display.getContext('2d'),background=base.getContext('2d'),top=overlay.getContext('2d');
   const undo=[],redo=[];
   let changed=false,painting=false,dragPointer=null,tool='paint',last=null;
   find('#studio-title').textContent=name+' / SURFACE LAB';
   find('[data-field=pattern]').replaceChildren(...patterns.map(([key,value])=>new Option(value,key)));
   find('[data-field=base]').value=settings.base;
+  find('[data-field=pattern]').value=settings.pattern;
   for(const field of ['pattern','base','scale','ink','size','opacity','hardness']){
     find('[data-field='+field+']').addEventListener('input',event=>{
       settings[field]=['scale','size','opacity','hardness'].includes(field)?Number(event.target.value):event.target.value;
@@ -272,7 +273,6 @@ export function openTextureStudio({initial=null,tint='#687a86',name='Texture',ma
       }else{
         const gradient=ink.createRadialGradient(point.x,point.y,radius*soft*.85,
           point.x,point.y,radius);
-        const color=tool==='erase'?'0,0,0':'0,0,0';
         if(tool==='erase'){
           gradient.addColorStop(0,'rgba(0,0,0,1)');
           gradient.addColorStop(1,'rgba(0,0,0,0)');
@@ -386,5 +386,6 @@ export function openTextureStudio({initial=null,tint='#687a86',name='Texture',ma
   find('[data-cmd=undo]').disabled=true;find('[data-cmd=redo]').disabled=true;
   paintPattern(base,settings);composite();
   if(initial)loadImage(initial,base).then(composite).catch(()=>setStatus('Image introuvable : motif généré disponible.'));
+  find('[data-field=pattern]').focus({preventScroll:true});
   return {close:()=>close(false)};
 }
