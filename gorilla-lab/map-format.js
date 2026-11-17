@@ -23,7 +23,7 @@ export function parseMap(input){
   }
   const s=input.spawn??{};
   return {
-    format:'gorilla-lab-map',version:1,...(input.arenaBase===true?{arenaBase:true}:{}),name:text(input.name,56,'Ma map'),
+    format:'gorilla-lab-map',version:1,...(input.arenaBase===true?{arenaBase:true}:{}),...(input.assetLayer===true?{assetLayer:true}:{}),name:text(input.name,56,'Ma map'),
     worldSize:number(input.worldSize,24,2048,240),
     spawn:{x:number(s.x,-maxWorldReach,maxWorldReach,0),y:number(s.y,-256,256,.06),z:number(s.z,-maxWorldReach,maxWorldReach,3),yaw:number(s.yaw,-360,360,0)},
     pieces:input.pieces.map((p,i)=>{
