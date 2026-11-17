@@ -663,7 +663,7 @@ function rebuildScene() {
   scene.environment=map.arenaBase?referenceScene.environment:null;
   for (const piece of map.pieces) {
     if(piece.model) {
-      const mesh=new T.Mesh(createModelUnitGeometry(piece.model),createModelMaterial());
+      const mesh=new T.Mesh(createModelUnitGeometry(piece.model),createModelMaterial(piece.model));
       mesh.castShadow=mesh.receiveShadow=true;
       group.add(mesh);
       placeMesh(mesh,piece);
