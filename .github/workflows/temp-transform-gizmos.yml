@@ -4,6 +4,7 @@ on:
     branches: [fix/transform-gizmos-model-map-r42]
     paths:
       - '.github/workflows/temp-transform-gizmos.yml'
+      - 'scripts/temp-transform-gizmos-browser.mjs'
 jobs:
   validate:
     runs-on: ubuntu-latest
