@@ -54,6 +54,8 @@ try{
   assert.ok(patterns.includes('brick')&&patterns.includes('wood')&&patterns.includes('dots'));
   await paintTexture();
   assert.equal(await page.$eval('#part-texture-clear',el=>el.disabled),false);
+  await page.click('.tab[data-panel="settings"]');
+  await page.click('#in-game');
   await page.click('#save');
   const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('gorilla-lab-models-v1')));
   const texture=saved.models[0].parts[0].texture;
@@ -91,7 +93,10 @@ try{
   const map=await page.evaluate(()=>JSON.parse(localStorage.getItem('gorilla-lab-editor-draft')));
   assert.ok(map.pieces[0].texture.length>100);
   console.log('map texture bytes',map.pieces[0].texture.length);
-  if(errors.length)throw Error(errors.join('\n'));
+  // Load a real game session with the painted model enabled in Spawn.
+  await page.goto('http://127.0.0.1:8999/index.html',{waitUntil:'domcontentloaded',timeout:60000});
+  await new Promise(resolve=>setTimeout(resolve,2500));
+  if(errors.length)throw Error(errors.join('\\n'));
   console.log('SHARED_TEXTURE_STUDIO_BROWSER_PASSED');
 }finally{
  await page.close();await browser.close();server.close();
