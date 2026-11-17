@@ -174,6 +174,8 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
     <button class="rail-btn" data-shape="capsule" title="Ajouter une capsule · 6"><span class="glyph">⬭</span><span>Capsule</span></button>
     <button class="rail-btn" data-shape="diamond" title="Ajouter un diamant · 7"><span class="glyph">◇</span><span>Diamant</span></button>
     <div class="rail-split"></div>
+    <button class="rail-btn" data-shape="custom" title="Dessiner une forme sur mesure · 8"><span class="glyph">✎</span><span>Forme libre</span></button>
+    <div class="rail-split"></div>
     <button class="rail-btn" id="mirror" title="Miroir sur X · M"><span class="glyph">⥊</span><span>Miroir X</span></button>
     <button class="rail-btn" id="drop-to-grid" title="Poser sur la grille"><span class="glyph">⤓</span><span>Poser</span></button>
     <button class="rail-btn" id="focus-part" title="Cadrer la pièce · F"><span class="glyph">⊡</span><span>Cadrer</span></button>
@@ -198,7 +200,7 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
       <p id="preview-empty" class="preview-empty">Nouveau modèle : ajoute une forme avec la barre de gauche pour commencer.</p>
     </div>
     <div class="viewport-foot">
-      <span class="preview-footer">Clic : sélectionner · G/R/S : transformer · Shift D : dupliquer · M : miroir · F : cadrer · Alt : sans aimant</span>
+      <span class="preview-footer">Clic : sélectionner · 8 : forme libre · G/R/S : transformer · Shift D : dupliquer · M : miroir · F : cadrer · Alt : sans aimant</span>
       <span id="status" role="status" aria-live="polite">Prêt à construire.</span>
     </div>
   </section>
@@ -222,6 +224,12 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
               <div id="part-fields">
                 <label>Nom de la pièce<input id="part-name" maxlength="48" autocomplete="off"></label>
                 <label>Géométrie<select id="part-shape"></select></label>
+                <div id="custom-shape-controls" hidden style="margin:6px 0 10px">
+                  <button id="edit-profile" style="width:100%;background:#455344;border-color:#7eaa88">
+                    ✎ Modifier le contour et le volume
+                  </button>
+                  <p class="hint">Dessine les points d'un contour, extrude-le ou fais-le tourner sur 360°.</p>
+                </div>
               </div>
               <div class="inline-actions"><button id="duplicate-part">Dupliquer</button><button id="delete-part">Supprimer</button></div>
               <div class="inline-actions"><button id="reset-part" title="Remettre la pièce à l’origine">Réinitialiser</button>

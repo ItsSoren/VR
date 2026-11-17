@@ -1,12 +1,13 @@
 import * as T from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import {normalizeSketch,createSketchGeometry} from './custom-shape.js';
 
 export const modelStorageKey = 'gorilla-lab-models-v1';
 export const modelLimits = Object.freeze({ models: 12, parts: 64, fileBytes: 2_500_000, textureBytes: 160_000 });
 const texturePattern=/^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=\r\n]+$/i;
 export const modelShapes = Object.freeze({
   box: 'Cube', sphere: 'Sphère', cylinder: 'Cylindre', cone: 'Cône',
-  torus: 'Anneau', capsule: 'Capsule', diamond: 'Diamant',
+  torus: 'Anneau', capsule: 'Capsule', diamond: 'Diamant',custom:'Forme libre',
 });
 export const modelSurfaces = Object.freeze({
   plain: 'Uni', grid: 'Grille', stripes: 'Rayures', wood: 'Bois', speckle: 'Minéral',
@@ -46,6 +47,7 @@ export function normalizeModelPack(input) {
       parts: raw.parts.map((part, index) => ({
         name: label(part?.name, `Pièce ${index + 1}`),
         shape: Object.hasOwn(modelShapes, part?.shape) ? part.shape : 'box',
+        ...(part?.shape==='custom'?{profile:normalizeSketch(part?.profile)}:{}),
         position: vector(part?.position, 0, -3, 3),
         rotation: vector(part?.rotation, 0, -360, 360),
         scale: vector(part?.scale, .35, .02, 4),
@@ -123,7 +125,7 @@ function surfaceAtlas() {
 }
 
 export function createModelPartGeometry(part) {
-  const primitiveGeometry = primitive(part.shape);
+  const primitiveGeometry = part.shape==='custom'?createSketchGeometry(part.profile):primitive(part.shape);
   const geometry = primitiveGeometry.index ? primitiveGeometry.toNonIndexed() : primitiveGeometry;
   if (geometry !== primitiveGeometry) primitiveGeometry.dispose();
   const angles = part.rotation.map(T.MathUtils.degToRad);
