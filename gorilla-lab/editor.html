@@ -256,6 +256,17 @@
     text-align:center;font-size:12px!important;white-space:normal}
   .model-place-action:hover{background:#587d64!important}
   .model-place-action:disabled{opacity:.46}
+  .insert-palette #delete-library-model{display:block;width:100%;margin:7px 0 4px;
+    padding:7px 9px;font-size:11px;background:transparent;border:1px solid #9e625b;
+    color:#f2b4a9;text-align:center}
+  .insert-palette #delete-library-model:hover:not(:disabled){background:#543330}
+  .insert-palette #delete-library-model:disabled{opacity:.35}
+  .insert-palette #delete-library-model[hidden]{display:none}
+  #open-model-editor{white-space:nowrap;font-weight:650;color:#c7e8dd;text-decoration:none;
+    border:1px solid #4c6c67;border-radius:4px;padding:6px 9px;background:#293a39}
+  #open-model-editor:hover{background:#364e49}
+  @media(max-width:1020px){#open-model-editor{padding:5px 6px;font-size:11px}}
+
   .model-count-hint{padding:8px 0 0;border-top:1px solid #47515b;color:#9eb6c1!important}
   .insert-palette[data-mode="model"] #model-library{width:100%;background:#18272f;
     border-color:#71898b;font-size:13px;min-height:34px}
@@ -294,6 +305,7 @@
   <header class="header">
     <h1>Atelier des cartes <small style="font-size:11px;color:var(--muted)">Gorilla Lab {{LAB_RELEASE}}</small></h1>
     <a href="./">Retour au jeu</a>
+    <a href="./model-editor.html" id="open-model-editor" title="Ouvrir GORILLA / FOUNDRY pour créer et modifier les modèles">✎ Atelier modèles</a>
     <div class="header-actions">
       <label class="compact">Vues<select id="layout-mode" class="compact" aria-label="Disposition des fenêtres">
         <option value="split">3D + plan</option><option value="only-3d" selected>3D uniquement</option>
@@ -349,7 +361,6 @@
           </div>
         </div>
         <p class="tool-help" id="tool-help"></p>
-        <output id="placement-measures" hidden style="color:var(--accent)"></output>
       </div>
       <div class="views" id="editor-views" data-layout="split">
         <section class="panel view view-3d" aria-labelledby="preview-title">
