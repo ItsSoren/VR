@@ -71,7 +71,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     if(piece.model){
       const geometry=createModelUnitGeometry(piece.model);
       geometry.scale(piece.w,piece.h,piece.d);
-      const material=createModelMaterial();
+      const material=createModelMaterial(piece.model);
       const mesh=new T.Mesh(geometry,material);
       mesh.position.set(piece.x,piece.y,piece.z);
       mesh.rotation.set(T.MathUtils.degToRad(piece.pitch),T.MathUtils.degToRad(piece.yaw),T.MathUtils.degToRad(piece.roll??0),'YXZ');
