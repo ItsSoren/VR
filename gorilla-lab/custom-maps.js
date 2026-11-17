@@ -3,7 +3,7 @@ import * as T from 'three';
 import {tiledBox,transformUVs,decorPrimitiveGeometry} from './texture-geometry.js';
 import {terrainGeometry,terrainCollider,terrainVegetation,disposeVegetation,sculptTerrain,normalizeTerrain,resizeTerrain} from './terrain-edit.js';
 import {boxCollider} from './physics.js';
-import {createModelUnitGeometry,createModelMaterial} from './model-pack.js';
+import {createModelUnitGeometry,createModelMaterial,disposeModelMaterial} from './model-pack.js';
 import {mapCode} from './cloud-link.js';
 import {parseMap,makePiece,snapPlacement,maxPieces,maxMapBytes,storageKey,downloadMap} from './map-format.js';
 
@@ -65,7 +65,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   function removeRow(row){
     group.remove(row.mesh);row.mesh.geometry.dispose();
     if(row.vegetation)disposeVegetation(row.vegetation);
-    if(row.custom){row.ownTexture?.materials.delete(row.mesh.material);row.mesh.material.dispose();}
+    if(row.custom){row.ownTexture?.materials.delete(row.mesh.material);if(row.model)disposeModelMaterial(row.mesh.material);else row.mesh.material.dispose();}
   }
   function makeRow(piece,index){
     if(piece.model){
