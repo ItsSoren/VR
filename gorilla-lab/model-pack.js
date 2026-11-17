@@ -3,7 +3,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {normalizeSketch,createSketchGeometry} from './custom-shape.js';
 
 export const modelStorageKey = 'gorilla-lab-models-v1';
-export const modelLimits = Object.freeze({ models: 12, parts: 64, fileBytes: 2_500_000, textureBytes: 160_000 });
+export const modelLimits = Object.freeze({ models: 24, parts: 64, fileBytes: 2_500_000, textureBytes: 160_000 });
 const texturePattern=/^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=\r\n]+$/i;
 export const modelShapes = Object.freeze({
   box: 'Cube', sphere: 'Sphère', cylinder: 'Cylindre', cone: 'Cône',
