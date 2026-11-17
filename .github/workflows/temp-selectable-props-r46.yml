@@ -20,7 +20,7 @@ jobs:
       - run: npm install --no-package-lock
       - run: npm test
       - run: npm run build
-      - run: npm install --no-save --no-package-lock puppeteer-core
+      - run: npm install --no-save --no-package-lock puppeteer-core@24.12.1
       - run: node scripts/temp-selectable-props-browser-r46.mjs
       - name: Commit built editor assets
         run: |
