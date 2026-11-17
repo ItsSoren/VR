@@ -10,6 +10,7 @@ function applyAnimatedShader(material, configure) {
 }
 
 export function clonePropMaterial(material) {
+  if(Array.isArray(material))return material.map(clonePropMaterial);
   const clone = material.clone();
   const configure = animatedShaders.get(material);
   // The game's color grading is attached separately after cloning.

@@ -4,9 +4,10 @@ import {addLabFixtures} from './fixtures.js';
 import {createArenaObjectSpecs,forEachStartupObject} from './arena-objects.js';
 import {labMirror} from './lab-layout.js';
 import {tiledBox,transformUVs,decorPrimitiveGeometry} from './texture-geometry.js';
-import {readModelPack,createModelUnitGeometry,createModelMaterial,modelDimensions} from './model-pack.js';
+import {readModelPack,createModelUnitGeometry,createModelMaterial,disposeModelMaterial,modelDimensions} from './model-pack.js';
 import {normalizeTerrain,resizeTerrain,sculptTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from './terrain-edit.js';
 import {texturePresets,seamlessTexture} from './seamless-texture.js';
+import {openTextureStudio} from './texture-studio.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import {resizedCenter} from './editor-scale.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -655,7 +656,7 @@ function rebuildScene() {
     if(mesh.geometry!==sharedBox)mesh.geometry.dispose();
     if(mesh.userData.vegetation)disposeVegetation(mesh.userData.vegetation);
     if(mesh.userData.ownsTexture)mesh.material.map?.dispose();
-    mesh.material.dispose();
+    disposeModelMaterial(mesh.material);
   }
   arenaBackdrop.visible=Boolean(map.arenaBase);
   sun.visible=ambient.visible=!map.arenaBase;
@@ -663,7 +664,7 @@ function rebuildScene() {
   scene.environment=map.arenaBase?referenceScene.environment:null;
   for (const piece of map.pieces) {
     if(piece.model) {
-      const mesh=new T.Mesh(createModelUnitGeometry(piece.model),createModelMaterial());
+      const mesh=new T.Mesh(createModelUnitGeometry(piece.model),createModelMaterial(piece.model));
       mesh.castShadow=mesh.receiveShadow=true;
       group.add(mesh);
       placeMesh(mesh,piece);
@@ -763,7 +764,9 @@ function updateInspector() {
   for (const id of ['rotate', 'duplicate', 'texture-file', 'surface', 'spawn-here']) $(id).disabled = !piece;
   $('delete').disabled = !piece || map.pieces.length === 1;
   $('texture-clear').disabled = !piece?.texture;
+  $('texture-paint').disabled = !piece||Boolean(piece.model);
   const terrain=piece?.terrain;
+  $('terrain-grassTexture-paint').disabled = !terrain;
   for(const key of uvFields){const input=$('p-'+key);input.disabled=!piece||Boolean(piece?.model);input.value=piece?.[key]??(key==='uvScale'?1:0);}
   $('uv-reset').disabled=!piece||Boolean(piece?.model);
   $('terrain-controls').hidden=!terrain;
@@ -1368,6 +1371,33 @@ $('texture-file').onchange = async event => {
     event.target.value = '';
   }
 };
+$('texture-paint').onclick=()=>{
+  const piece=current();
+  if(!piece||piece.model)return notice('Peins les pièces d’un modèle depuis GORILLA / FOUNDRY.');
+  openTextureStudio({
+    name:piece.name||'Élément du décor',initial:piece.texture,
+    tint:piece.color&&piece.color!=='#ffffff'?piece.color:'#75838a',
+    maxDataBytes:850000,
+    onApply:async data=>{
+      if(!map.pieces.includes(piece))throw Error('La pièce sélectionnée a changé ou été supprimée.');
+      remember();piece.texture=data;
+      map=parseMap(map);sync();notice('Texture peinte appliquée. Export JSON pour la conserver dans la carte.');
+    }
+  });
+};
+$('terrain-grassTexture-paint').onclick=()=>{
+  const piece=current();
+  if(!piece?.terrain)return;
+  openTextureStudio({
+    name:'Herbe / '+piece.name,initial:piece.terrain.grassTexture,
+    tint:'#63814e',maxDataBytes:450000,
+    onApply:async data=>{
+      if(!map.pieces.includes(piece))throw Error('Terrain supprimé avant application.');
+      remember();piece.terrain.grassTexture=data;
+      map=parseMap(map);sync();notice('Texture d’herbe peinte et appliquée.');
+    }
+  });
+};
 $('texture-clear').onclick = () => {
   if (!current()?.texture) return;
   remember();
@@ -1516,7 +1546,7 @@ function refreshDiagnostics(){
   for(const box of [...diagnosticBoxes.children]){diagnosticBoxes.remove(box);box.geometry.dispose();box.material.dispose();}
   grid.visible=$('debug-grid').checked;
   for(const mesh of group.children){
-    if(mesh.material)mesh.material.wireframe=$('debug-wire').checked;
+    if(mesh.material)for(const mat of Array.isArray(mesh.material)?mesh.material:[mesh.material])mat.wireframe=$('debug-wire').checked;
     if($('debug-hitboxes').checked){
       diagnosticBoxes.add(new T.BoxHelper(mesh,'#fa9945'));
     }

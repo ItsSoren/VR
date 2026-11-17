@@ -15,6 +15,7 @@ import {createKeyboardState} from '../gorilla-lab/flat-controls.js';
 import {screenPixelRatio} from '../gorilla-lab/screen-render.js';
 import {terrainHeight,sculptTerrain,normalizeTerrain,resizeTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from '../gorilla-lab/terrain-edit.js';
 import {transformUVs,tiledBox,decorPrimitiveGeometry} from '../gorilla-lab/texture-geometry.js';
+import {clonePropMaterial} from '../gorilla-lab/animated-props.js';
 import {resizedCenter} from '../gorilla-lab/editor-scale.js';
 
 test('held trigger emits ten shots each second and stops on release',()=>{
@@ -473,4 +474,43 @@ test('asymmetric scaling honours object rotation and terrain Y constraints',()=>
   assert.ok(Math.abs(center.z+1)<1e-6);
   const terrain={...rotated,terrain:{detail:16},pitch:0,yaw:0};
   assert.equal(resizedCenter(terrain,{w:2,h:8,d:2},false).y,0);
+});
+
+test('a painted texture stays on its own model part through JSON normalization and geometry merge',()=>{
+  const data='data:image/webp;base64,'+'AA==';
+  const model={
+    id:'custom-model-paint-test',name:'Texture de pièce',kind:'structure',
+    parts:[
+      {name:'Face peinte',shape:'box',position:[0,0,0],rotation:[0,0,0],
+        scale:[1,1,1],color:'#ffffff',surface:'plain',texture:data},
+      {name:'Face neutre',shape:'sphere',position:[1,0,0],rotation:[0,0,0],
+        scale:[.2,.2,.2],color:'#ffffff',surface:'wood'},
+    ]
+  };
+  const pack=normalizeModelPack({version:1,models:[model],avatarId:null});
+  assert.equal(pack.models[0].parts[0].texture,data);
+  assert.equal(pack.models[0].parts[1].texture,null);
+  const restored=normalizeModelPack(JSON.parse(JSON.stringify(pack)));
+  assert.equal(restored.models[0].parts[0].texture,data);
+  const geom=createModelUnitGeometry(restored.models[0]);
+  assert.equal(geom.groups.length,2,'custom image requires separate material groups');
+  assert.equal(geom.groups[0].materialIndex,0);
+  assert.equal(geom.groups[1].materialIndex,1);
+  geom.dispose();
+  assert.equal(normalizeModelPack({version:1,models:[{...model,
+    parts:[{...model.parts[0],texture:'https://example.org/asset.png'}]}],avatarId:null}).models[0].parts[0].texture,null);
+  assert.equal(normalizeModelPack({version:1,models:[{...model,
+    parts:[{...model.parts[0],texture:'data:image/svg+xml;base64,AAAA'}]}],avatarId:null}).models[0].parts[0].texture,null);
+});
+
+test('animated game objects safely clone a multi-material textured model',()=>{
+  const a=[new T.MeshStandardMaterial({color:'#ffffff'}),
+    new T.MeshStandardMaterial({color:'#9badc1'})];
+  const cloned=clonePropMaterial(a);
+  assert.equal(cloned.length,2);
+  assert.notEqual(cloned[0],a[0]);
+  assert.notEqual(cloned[1],a[1]);
+  assert.equal(cloned[1].color.getHexString(),'9badc1');
+  cloned.forEach(material=>material.dispose());
+  a.forEach(material=>material.dispose());
 });
