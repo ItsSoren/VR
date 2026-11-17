@@ -1,408 +1,690 @@
 import * as T from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {TransformControls} from 'three/addons/controls/TransformControls.js';
+import {GLTFExporter} from 'three/addons/exporters/GLTFExporter.js';
 import {
-  createModelMaterial, createModelPartGeometry, defaultModelProperties,
-  modelLimits, modelShapes, modelStorageKey, modelSurfaces, normalizeModelPack, readModelPack,
+  createModelMaterial,createModelPartGeometry,defaultModelProperties,
+  modelLimits,modelShapes,modelStorageKey,modelSurfaces,normalizeModelPack,readModelPack,
 } from './model-pack.js';
 
-const elements = Object.fromEntries([...document.querySelectorAll('[id]')].map(node => [node.id, node]));
-const canvas = elements['preview-canvas'];
-const axes = ['X', 'Y', 'Z'];
-const vectors = {
-  position: { label: 'Position (m)', min: -3, max: 3, step: .01 },
-  rotation: { label: 'Rotation (°)', min: -360, max: 360, step: 1 },
-  scale: { label: 'Échelle', min: .02, max: 4, step: .01 },
+// GORILLA / FOUNDRY. Geometry remains in the Gorilla model-pack v1 format:
+// the editor transforms local part geometry without changing the game's schema.
+const $=id=>document.getElementById(id);
+const canvas=$('preview-canvas');
+const axes=['X','Y','Z'];
+const limits={
+  position:{min:-3,max:3,step:.01,label:'POSITION / M'},
+  rotation:{min:-360,max:360,step:1,label:'ROTATION / °'},
+  scale:{min:.02,max:4,step:.01,label:'DIMENSIONS / ÉCHELLE'},
 };
-const pack = readModelPack();
-let modelId = pack.models[0]?.id ?? null;
-let partIndex = 0;
-let dirty = false;
+const pack=readModelPack(localStorage);
+const draftKey='gorilla-foundry-draft-v1';
+let dirty=false,modelId=pack.models[0]?.id??null,partIndex=0;
+try{
+  const draft=localStorage.getItem(draftKey);
+  if(draft){
+    const data=normalizeModelPack(JSON.parse(draft));
+    Object.assign(pack,data);
+    modelId=pack.models[0]?.id??null;
+    dirty=true;
+  }
+}catch{}
+let renderer=null,orbit=null,gizmo=null,viewMode='select';
+let pendingDraft=0,gestureStart=null,fieldHistory=null;
+const undoStack=[],redoStack=[],maxUndo=48;
+const previews=new T.Group();
+const scene=new T.Scene();
+scene.background=new T.Color('#152229');
+const camera=new T.PerspectiveCamera(45,1,.005,110);
+const guide=new T.GridHelper(8,32,'#64818a','#334b54');
+guide.position.y=-.002;
+const selection=new T.Box3Helper(new T.Box3(),'#eeb578');
+selection.visible=false;
+const material=createModelMaterial();
+scene.add(previews,guide,selection,new T.HemisphereLight('#ecf7ff','#4c5960',2.4));
+const sun=new T.DirectionalLight('#ffe5c2',2.05);
+sun.position.set(-2.5,4,-3);
+scene.add(sun);
+camera.position.set(1.8,1.4,-2.4);
+camera.lookAt(0,0,0);
 
-function currentModel() {
-  return pack.models.find(model => model.id === modelId);
+const clamp=T.MathUtils.clamp;
+const currentModel=()=>pack.models.find(model=>model.id===modelId);
+const currentPart=()=>currentModel()?.parts[partIndex];
+const snapshot=()=>({data:structuredClone(pack),modelId,partIndex});
+function status(message,error=false){
+  $('status').textContent=message;
+  $('status').dataset.error=String(error);
 }
-
-function currentPart() {
-  return currentModel()?.parts[partIndex];
+function markDirty(){
+  dirty=true;
+  status('Brouillon local · non publié dans le jeu');
+  clearTimeout(pendingDraft);
+  pendingDraft=setTimeout(()=>{
+    try{localStorage.setItem(draftKey,JSON.stringify(normalizeModelPack(pack)));}
+    catch{status('Brouillon non enregistré : exporte le JSON.',true);}
+  },480);
 }
-
-function status(message, error = false) {
-  elements.status.textContent = message;
-  elements.status.dataset.error = String(error);
+function saveNow(){
+  try{
+    const clean=normalizeModelPack(pack);
+    localStorage.setItem(modelStorageKey,JSON.stringify(clean));
+    Object.assign(pack,clean);
+    localStorage.removeItem(draftKey);
+    clearTimeout(pendingDraft);
+    dirty=false;
+    refreshModel();
+    status('Enregistré · disponible dans Gorilla Lab et les cartes');
+    return true;
+  }catch{
+    status('Enregistrement impossible : exporte le JSON.',true);
+    return false;
+  }
 }
-
-function markDirty() {
-  if (!dirty) status('Modifications en attente d’enregistrement.');
-  dirty = true;
+function remember(){
+  const next=snapshot();
+  const previous=undoStack.at(-1);
+  if(!previous||JSON.stringify(previous)!==JSON.stringify(next)){
+    undoStack.push(next);
+    if(undoStack.length>maxUndo)undoStack.shift();
+  }
+  redoStack.length=0;
+  updateHistoryButtons();
 }
-
-function setOptions(select, entries, value) {
-  select.replaceChildren(...entries.map(([key, caption]) => new Option(caption, key)));
-  select.value = value ?? '';
+function updateHistoryButtons(){
+  $('undo-action').disabled=!undoStack.length;
+  $('redo-action').disabled=!redoStack.length;
 }
-
-function updateModelLists() {
-  const entries = pack.models.map(model => [model.id, model.name || 'Modèle sans nom']);
-  setOptions(elements.models, entries.length ? entries : [['', 'Aucun modèle']], modelId);
-  elements.models.disabled = !entries.length;
-  setOptions(elements.avatar, [['', 'Singe d’origine'], ...entries.filter(([id]) =>
-    pack.models.find(model => model.id === id).parts.length)], pack.avatarId);
+function restore(saved){
+  Object.assign(pack,structuredClone(saved.data));
+  modelId=saved.modelId;
+  partIndex=saved.partIndex;
+  markDirty();refreshModel();
+  updateHistoryButtons();
 }
-
-function updateParts() {
-  const parts = currentModel()?.parts ?? [];
-  const atLimit = parts.length >= modelLimits.parts;
-  elements['add-part'].disabled = atLimit;
-  elements['duplicate-part'].disabled = atLimit;
-  elements['part-list'].replaceChildren(...parts.map((part, index) => {
-    const button = document.createElement('button');
-    button.className = 'part-entry';
-    button.setAttribute('aria-pressed', String(index === partIndex));
-    const name = document.createElement('span');
-    name.textContent = part.name || `Pièce ${index + 1}`;
-    const swatch = document.createElement('span');
-    swatch.className = 'swatch';
-    swatch.style.setProperty('--swatch', part.color);
-    swatch.setAttribute('aria-hidden', 'true');
-    button.append(name, swatch);
-    button.addEventListener('click', () => selectPart(index, true));
+function undo(){
+  if(!undoStack.length)return;
+  const old=undoStack.pop();redoStack.push(snapshot());restore(old);status('Annulé · Ctrl Z');
+}
+function redo(){
+  if(!redoStack.length)return;
+  const next=redoStack.pop();undoStack.push(snapshot());restore(next);status('Rétabli · Ctrl Maj Z');
+}
+function startFieldEdit(target){
+  if(fieldHistory?.target===target&&fieldHistory.recorded)return;
+  if(!fieldHistory||fieldHistory.target!==target)fieldHistory={target,recorded:false};
+  if(!fieldHistory.recorded){remember();fieldHistory.recorded=true;}
+}
+document.addEventListener('focusout',event=>{
+  if(fieldHistory?.target===event.target)fieldHistory=null;
+});
+function beforeChange(target){
+  if(target&&document.activeElement===target)startFieldEdit(target);
+  else remember();
+}
+function setOptions(select,entries,value){
+  select.replaceChildren(...entries.map(([id,title])=>new Option(title,id)));
+  select.value=value??'';
+}
+function updateModelLists(){
+  const list=pack.models.map(model=>[model.id,model.name]);
+  setOptions($('models'),list.length?list:[['','Aucun modèle']],modelId);
+  $('models').disabled=!list.length;
+  setOptions($('avatar'),[['','Singe d’origine'],...list.filter(([id])=>pack.models.find(m=>m.id===id)?.parts.length)],pack.avatarId);
+}
+function updateParts(){
+  const parts=currentModel()?.parts??[];
+  $('part-count').textContent=parts.length+' / '+modelLimits.parts;
+  $('add-part').disabled=parts.length>=modelLimits.parts||!currentModel();
+  $('duplicate-part').disabled=parts.length>=modelLimits.parts||!currentPart();
+  const currentScroll=$('part-list').scrollTop;
+  $('part-list').replaceChildren(...parts.map((part,index)=>{
+    const button=document.createElement('button');
+    button.type='button';button.className='part-entry';
+    button.setAttribute('aria-pressed',String(index===partIndex));
+    button.title=part.shape+' · '+part.surface;
+    const title=document.createElement('span');
+    title.textContent=String(index+1).padStart(2,'0')+'  '+part.name;
+    const color=document.createElement('span');
+    color.className='swatch';color.style.setProperty('--swatch',part.color);
+    button.append(title,color);
+    button.onclick=()=>selectPart(index);
     return button;
   }));
+  $('part-list').scrollTop=currentScroll;
 }
-
-function updateInspector() {
-  const part = currentPart();
-  elements['part-empty'].hidden = Boolean(part);
-  elements['part-inspector'].hidden = !part;
-  if (!part) return;
-  for (const key of ['name', 'shape', 'color', 'surface']) elements[`part-${key}`].value = part[key];
-  for (const key of Object.keys(vectors)) vectorInputs[key].forEach((input, index) => { input.value = part[key][index]; });
-}
-
-const previews = new T.Group();
-const scene = new T.Scene();
-const camera = new T.PerspectiveCamera(45, 1, .005, 90);
-const material = createModelMaterial();
-const guide = new T.GridHelper(12, 48, '#566a78', '#283b48');
-const selection = new T.Box3Helper(new T.Box3(), '#e1ef8d');
-guide.position.y = -.004;
-selection.visible = false;
-scene.background = new T.Color('#101820');
-scene.add(previews, guide, selection, new T.HemisphereLight('#e4f3ff', '#52606a', 2.3));
-const keyLight = new T.DirectionalLight('#f9efcf', 2.1);
-keyLight.position.set(2, 4, -3);
-scene.add(keyLight);
-camera.position.set(1.55, 1.2, -2.05);
-camera.lookAt(0, 0, 0);
-
-let renderer, orbit;
-try {
-  renderer = new T.WebGLRenderer({ canvas, antialias: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  renderer.toneMapping = T.ACESFilmicToneMapping;
-  orbit = new OrbitControls(camera, canvas);
-  orbit.enablePan = false;
-  orbit.minDistance = .04;
-  orbit.maxDistance = 34;
-  orbit.addEventListener('change', render);
-  new ResizeObserver(() => {
-    camera.aspect = Math.max(1, canvas.clientWidth) / Math.max(1, canvas.clientHeight);
-    camera.updateProjectionMatrix();
-    renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
-    render();
-  }).observe(canvas);
-} catch {
-  // The form can still author and transfer models when graphics are unavailable.
-}
-
-function render() {
-  renderer?.render(scene, camera);
-}
-
-function frameModel() {
-  if (!orbit) return;
-  const bounds = new T.Box3().setFromObject(previews);
-  const center = new T.Vector3();
-  const size = new T.Vector3();
-  if (!bounds.isEmpty()) { bounds.getCenter(center); bounds.getSize(size); }
-  const halfHeightAngle = T.MathUtils.degToRad(camera.fov / 2);
-  const halfWidthAngle = Math.atan(Math.tan(halfHeightAngle) * camera.aspect);
-  const distance = Math.max(.65, size.length() * .58 / Math.sin(Math.min(halfHeightAngle, halfWidthAngle)));
-  const direction = camera.position.clone().sub(orbit.target).normalize();
-  orbit.target.copy(center);
-  camera.position.copy(center).addScaledVector(direction, distance);
-  orbit.update();
-  render();
-}
-
-function showSelection() {
-  const selected = previews.children[partIndex];
-  selection.visible = Boolean(selected);
-  if (selected) selection.box.setFromObject(selected);
-}
-
-// La prévisualisation réutilise les mêmes définitions géométriques que le jeu.
-function updatePreview(frame = false) {
-  const model = currentModel();
-  const parts = model?.parts ?? [];
-  previews.children.forEach(mesh => mesh.geometry.dispose());
-  previews.clear();
-  if (renderer && parts.length) previews.add(...parts.map(part => new T.Mesh(createModelPartGeometry(part), material)));
-  showSelection();
-  elements['preview-empty'].hidden = Boolean(renderer && parts.length);
-  elements['preview-empty'].textContent = !renderer
-    ? 'Aperçu 3D indisponible. Les commandes de création restent utilisables.'
-    : model ? 'Ajoute une première pièce à ce modèle.' : 'Crée un modèle et ajoute une pièce pour commencer.';
-  elements['preview-tag'].textContent = model ? `${parts.length} pièce${parts.length === 1 ? '' : 's'}` : 'Modèle 3D';
-  elements.frame.disabled = !renderer || !parts.length;
-  if (frame) frameModel();
-  else render();
-}
-
-function showModel() {
-  const model = currentModel();
-  updateModelLists();
-  elements['model-details'].hidden = !model;
-  elements['new-model'].disabled = elements.example.disabled = pack.models.length >= modelLimits.models;
-  if (model) {
-    elements['model-name'].value = model.name;
-    elements['model-kind'].value = model.kind || 'prop';
-    elements['send-to-map'].href = './editor.html?model=' + encodeURIComponent(model.id);
-    elements['in-game'].checked = model.inGame;
-    for (const key of Object.keys(defaultModelProperties)) elements[key].checked = model.properties[key];
+function updateInspector(){
+  const model=currentModel(),part=currentPart();
+  $('model-details').hidden=!model;
+  $('part-inspector').hidden=!part;
+  $('part-empty').hidden=!!part||$('model-inspector').dataset.tab==='settings';
+  if(model){
+    $('model-name').value=model.name;
+    $('model-kind').value=model.kind||'prop';
+    $('in-game').checked=model.inGame;
+    $('send-to-map').href='./editor.html?model='+encodeURIComponent(model.id);
+    for(const key of Object.keys(defaultModelProperties))$(key).checked=!!model.properties[key];
   }
-  updateParts();
-  updateInspector();
-  updatePreview(true);
-}
-
-function selectPart(index, focus = false) {
-  partIndex = index;
-  updateParts();
-  updateInspector();
-  showSelection();
-  render();
-  if (focus) elements['part-list'].children[index]?.focus();
-}
-
-let pointerStart;
-const picking = new T.Raycaster();
-const ndc = new T.Vector2();
-canvas.addEventListener('pointerdown', event => {
-  pointerStart = event.isPrimary && event.button === 0 ? { id: event.pointerId, x: event.clientX, y: event.clientY } : null;
-});
-canvas.addEventListener('pointercancel', () => { pointerStart = null; });
-canvas.addEventListener('pointerup', event => {
-  const start = pointerStart;
-  pointerStart = null;
-  if (start?.id !== event.pointerId || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 5) return;
-  const rect = canvas.getBoundingClientRect();
-  ndc.set((event.clientX - rect.left) / rect.width * 2 - 1, 1 - (event.clientY - rect.top) / rect.height * 2);
-  picking.setFromCamera(ndc, camera);
-  const hit = picking.intersectObjects(previews.children, false)[0];
-  if (hit) selectPart(previews.children.indexOf(hit.object));
-});
-
-function makePart(shape, name = modelShapes[shape], position = [0, 0, 0], scale = [.35, .35, .35],
-    color = '#51bdd2', surface = 'plain', rotation = [0, 0, 0]) {
-  return { name, shape, position, scale, rotation, surface, color };
-}
-
-function makeExample() {
-  const blue = '#6a89aa', light = '#c1d7de', dark = '#203142';
-  return [
-    makePart('sphere', 'Crâne', [0, 0, .02], [.31, .32, .29], blue, 'speckle'),
-    makePart('sphere', 'Museau', [0, -.048, -.11], [.20, .13, .15], light),
-    makePart('sphere', 'Oreille gauche', [-.149, .003, .01], [.08, .10, .06], blue),
-    makePart('sphere', 'Oreille droite', [.149, .003, .01], [.08, .10, .06], blue),
-    makePart('sphere', 'Œil gauche', [-.056, .037, -.118], [.049, .042, .036], dark),
-    makePart('sphere', 'Œil droit', [.056, .037, -.118], [.049, .042, .036], dark),
-    makePart('sphere', 'Nez', [0, -.025, -.181], [.071, .039, .033], dark),
-  ];
-}
-
-function addModel(example = false) {
-  if (pack.models.length >= modelLimits.models) return;
-  const name = example ? 'Singe de pierre' : `Modèle ${pack.models.length + 1}`;
-  const id = `custom-model-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  pack.models.push({ id, name, kind: 'prop', inGame: false, properties: { ...defaultModelProperties }, parts: example ? makeExample() : [] });
-  modelId = id;
-  partIndex = 0;
-  markDirty();
-  showModel();
-  elements['model-name'].focus();
-  elements['model-name'].select();
-}
-
-function changeParts(frame = false) {
-  const model = currentModel();
-  if (!model.parts.length && pack.avatarId === model.id) pack.avatarId = null;
-  markDirty();
-  updateModelLists();
-  updateParts();
-  updateInspector();
-  updatePreview(frame);
-}
-
-function listen(id, event, handler) {
-  elements[id].addEventListener(event, handler);
-}
-
-listen('new-model', 'click', () => addModel());
-listen('example', 'click', () => addModel(true));
-listen('models', 'change', event => { modelId = event.target.value; partIndex = 0; showModel(); });
-listen('model-name', 'input', event => { currentModel().name = event.target.value; markDirty(); updateModelLists(); });
-listen('in-game', 'change', event => { currentModel().inGame = event.target.checked; markDirty(); });
-listen('model-kind', 'change', event => { currentModel().kind = event.target.value; markDirty(); });
-listen('send-to-map', 'click', event => {
-  try {
-    localStorage.setItem(modelStorageKey, JSON.stringify(normalizeModelPack(pack)));
-    dirty = false;
-  } catch (error) {
-    event.preventDefault();
-    status('Impossible de transférer le modèle. Exporte le JSON pour le conserver.', true);
-  }
-});
-for (const key of Object.keys(defaultModelProperties)) {
-  listen(key, 'change', event => { currentModel().properties[key] = event.target.checked; markDirty(); });
-}
-listen('avatar', 'change', event => { pack.avatarId = event.target.value || null; markDirty(); });
-listen('delete-model', 'click', () => {
-  const model = currentModel();
-  if (!model || !window.confirm(`Supprimer « ${model.name} » de l’atelier ?`)) return;
-  const index = pack.models.indexOf(model);
-  pack.models.splice(index, 1);
-  if (pack.avatarId === model.id) pack.avatarId = null;
-  modelId = (pack.models[index] ?? pack.models[index - 1])?.id ?? null;
-  partIndex = 0;
-  markDirty();
-  showModel();
-});
-
-setOptions(elements['new-shape'], Object.entries(modelShapes), 'box');
-setOptions(elements['part-shape'], Object.entries(modelShapes), 'box');
-setOptions(elements['part-surface'], Object.entries(modelSurfaces), 'plain');
-listen('add-part', 'click', () => {
-  const model = currentModel();
-  if (!model || model.parts.length >= modelLimits.parts) return;
-  const previous = currentPart();
-  const position = previous ? [T.MathUtils.clamp(previous.position[0] + .24, -3, 3), ...previous.position.slice(1)] : undefined;
-  model.parts.push(makePart(elements['new-shape'].value, undefined, position));
-  partIndex = model.parts.length - 1;
-  changeParts(model.parts.length === 1);
-});
-listen('duplicate-part', 'click', () => {
-  const model = currentModel();
-  if (!currentPart() || model.parts.length >= modelLimits.parts) return;
-  const copy = structuredClone(currentPart());
-  copy.name = `${copy.name.slice(0, 42)} copie`;
-  copy.position[0] = Math.min(3, copy.position[0] + .12);
-  model.parts.splice(++partIndex, 0, copy);
-  changeParts();
-});
-listen('delete-part', 'click', () => {
-  const parts = currentModel().parts;
-  parts.splice(partIndex, 1);
-  partIndex = Math.max(0, Math.min(partIndex, parts.length - 1));
-  changeParts();
-});
-listen('frame', 'click', frameModel);
-
-for (const key of ['name', 'shape', 'color', 'surface']) {
-  listen(`part-${key}`, key === 'name' || key === 'color' ? 'input' : 'change', event => {
-    const part = currentPart();
-    if (!part) return;
-    part[key] = event.target.value;
-    markDirty();
-    updateParts();
-    if (key !== 'name') updatePreview();
-  });
-}
-
-const vectorInputs = {};
-for (const [key, settings] of Object.entries(vectors)) {
-  const fieldset = document.createElement('fieldset');
-  fieldset.className = 'vectors';
-  const legend = document.createElement('legend');
-  legend.textContent = settings.label;
-  fieldset.append(legend);
-  const row = document.createElement('div');
-  row.className = 'axes';
-  vectorInputs[key] = axes.map((axis, index) => {
-    const caption = document.createElement('label');
-    caption.textContent = axis;
-    const input = document.createElement('input');
-    input.id = `${key}-${axis.toLowerCase()}`;
-    input.type = 'number';
-    input.min = settings.min;
-    input.max = settings.max;
-    input.step = settings.step;
-    input.setAttribute('aria-label', `${settings.label} ${axis}`);
-    input.addEventListener('input', () => {
-      const part = currentPart();
-      if (!part || !Number.isFinite(input.valueAsNumber)) return;
-      part[key][index] = T.MathUtils.clamp(input.valueAsNumber, settings.min, settings.max);
-      markDirty();
-      updatePreview();
+  if(part){
+    for(const key of ['name','shape','color','surface'])$('part-'+key).value=part[key];
+    for(const key of Object.keys(limits))vectorInputs[key].forEach((input,index)=>{
+      if(document.activeElement!==input)input.value=Number(part[key][index].toFixed(3));
     });
-    input.addEventListener('change', () => { if (currentPart()) input.value = currentPart()[key][index]; });
-    caption.append(input);
-    row.append(caption);
+  }
+  for(const button of document.querySelectorAll('.tab')){
+    button.setAttribute('aria-pressed',String(button.dataset.panel===$('model-inspector').dataset.tab));
+  }
+  $('mirror').disabled=!part||currentModel().parts.length>=modelLimits.parts;
+  $('drop-to-grid').disabled=!part;
+  $('focus-part').disabled=!part;
+  $('reset-part').disabled=!part;
+  $('center-part').disabled=!part;
+  $('delete-part').disabled=!part;
+  $('viewport-title').textContent=model
+    ?'ATELIER / '+model.name.toUpperCase()
+    :'ESPACE DE CONSTRUCTION / 3D';
+}
+function setPanel(tab){
+  $('model-inspector').dataset.tab=tab;
+  updateInspector();
+}
+for(const button of document.querySelectorAll('.tab')){
+  button.onclick=()=>setPanel(button.dataset.panel);
+}
+
+function render(){
+  renderer?.render(scene,camera);
+}
+try{
+  renderer=new T.WebGLRenderer({canvas,antialias:true,preserveDrawingBuffer:true});
+  renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
+  renderer.toneMapping=T.ACESFilmicToneMapping;
+  orbit=new OrbitControls(camera,canvas);
+  orbit.enablePan=true;
+  orbit.minDistance=.09;orbit.maxDistance=48;
+  orbit.mouseButtons.RIGHT=T.MOUSE.ROTATE;
+  orbit.mouseButtons.MIDDLE=T.MOUSE.PAN;
+  orbit.addEventListener('change',render);
+  gizmo=new TransformControls(camera,canvas);
+  const helper=gizmo.getHelper();
+  scene.add(helper);
+  gizmo.addEventListener('dragging-changed',event=>{
+    orbit.enabled=!event.value;
+    if(!event.value)markDirty();
+  });
+  gizmo.addEventListener('mouseDown',()=>remember());
+  gizmo.addEventListener('objectChange',()=>{
+    const mesh=gizmo.object,part=currentPart();
+    if(!mesh||!part)return;
+    part.position=mesh.position.toArray().map(v=>clamp(v,-3,3));
+    part.rotation=[mesh.rotation.x,mesh.rotation.y,mesh.rotation.z]
+      .map(rad=>clamp(T.MathUtils.radToDeg(rad),-360,360));
+    part.scale=mesh.scale.toArray().map(v=>clamp(Math.abs(v),.02,4));
+    mesh.position.fromArray(part.position);
+    mesh.scale.fromArray(part.scale);
+    showSelection();
+    updateInspector();
+    render();
+  });
+  gizmo.addEventListener('mouseUp',()=>{
+    const part=currentPart();
+    if(part){markDirty();updatePreview();}
+  });
+  new ResizeObserver(()=>{
+    const width=Math.max(1,canvas.clientWidth),height=Math.max(1,canvas.clientHeight);
+    camera.aspect=width/height;camera.updateProjectionMatrix();
+    renderer.setSize(width,height,false);render();
+  }).observe(canvas);
+}catch(error){
+  status('WebGL indisponible · édition numérique toujours possible.',true);
+}
+
+const vectorInputs={};
+for(const [key,settings] of Object.entries(limits)){
+  const fieldset=document.createElement('fieldset');fieldset.className='vectors';
+  const legend=document.createElement('legend');legend.textContent=settings.label;fieldset.append(legend);
+  const row=document.createElement('div');row.className='axes';
+  vectorInputs[key]=axes.map((axis,index)=>{
+    const label=document.createElement('label');label.textContent=axis;
+    const input=document.createElement('input');
+    input.type='number';input.id=key+'-'+axis.toLowerCase();
+    input.min=settings.min;input.max=settings.max;input.step=settings.step;
+    input.setAttribute('aria-label',settings.label+' '+axis);
+    input.addEventListener('input',()=>{
+      const part=currentPart();
+      if(!part||!Number.isFinite(input.valueAsNumber))return;
+      beforeChange(input);
+      part[key][index]=clamp(input.valueAsNumber,settings.min,settings.max);
+      markDirty();updatePreview();
+    });
+    input.addEventListener('change',()=>{
+      const part=currentPart();
+      if(part)input.value=part[key][index];
+    });
+    label.append(input);row.append(label);
     return input;
   });
   fieldset.append(row);
-  elements['part-fields'].append(fieldset);
+  $('part-fields').append(fieldset);
 }
 
-listen('save', 'click', () => {
-  try {
-    const clean = normalizeModelPack(pack);
-    localStorage.setItem(modelStorageKey, JSON.stringify(clean));
-    Object.assign(pack, clean);
-    dirty = false;
-    showModel();
-    status('Enregistré. Ouvre ou recharge Gorilla Lab sur ce navigateur pour appliquer les modèles.');
-  } catch {
-    status('Enregistrement indisponible. Exporte le JSON pour conserver ton travail.', true);
+function partMesh(part){
+  const source={...part,position:[0,0,0],rotation:[0,0,0],scale:[1,1,1]};
+  const mesh=new T.Mesh(createModelPartGeometry(source),material);
+  mesh.position.fromArray(part.position);
+  mesh.rotation.order='ZYX';
+  mesh.rotation.set(...part.rotation.map(T.MathUtils.degToRad));
+  mesh.scale.fromArray(part.scale);
+  mesh.userData.part=true;
+  return mesh;
+}
+function attachGizmo(){
+  if(!gizmo)return;
+  gizmo.detach();
+  if(viewMode!=='select'&&previews.children[partIndex]){
+    gizmo.setMode(viewMode);
+    gizmo.setSpace(viewMode==='translate'?'world':'local');
+    gizmo.attach(previews.children[partIndex]);
   }
+  const snap=Number($('snap-step').value);
+  gizmo.setTranslationSnap(snap||null);
+  gizmo.setRotationSnap(snap?T.MathUtils.degToRad(5):null);
+  gizmo.setScaleSnap(snap||null);
+  render();
+}
+function showSelection(){
+  const mesh=previews.children[partIndex];
+  selection.visible=!!mesh;
+  if(mesh)selection.box.setFromObject(mesh);
+  attachGizmo();render();
+}
+function frameModel(onlySelected=false){
+  if(!orbit)return;
+  const modelPart=previews.children[partIndex];
+  const box=onlySelected&&modelPart
+    ?new T.Box3().setFromObject(modelPart)
+    :new T.Box3().setFromObject(previews);
+  const center=new T.Vector3(),size=new T.Vector3();
+  if(!box.isEmpty()){box.getCenter(center);box.getSize(size);}
+  const halfH=T.MathUtils.degToRad(camera.fov/2);
+  const halfW=Math.atan(Math.tan(halfH)*camera.aspect);
+  const distance=Math.max(.6,size.length()*.63/Math.sin(Math.min(halfH,halfW)));
+  const direction=camera.position.clone().sub(orbit.target).normalize();
+  orbit.target.copy(center);
+  camera.position.copy(center).addScaledVector(direction,distance);
+  orbit.update();render();
+}
+function updatePreview(frame=false){
+  gizmo?.detach();
+  for(const mesh of [...previews.children]){previews.remove(mesh);mesh.geometry.dispose();}
+  const parts=currentModel()?.parts??[];
+  if(renderer)for(const part of parts)previews.add(partMesh(part));
+  $('preview-empty').hidden=Boolean(parts.length&&renderer);
+  $('preview-empty').textContent=!renderer?'Prévisualisation 3D indisponible : les valeurs restent modifiables.'
+    :currentModel()?'Ajoute une forme avec la barre à gauche pour commencer.'
+    :'Crée un modèle avec ＋ puis assemble tes pièces.';
+  $('preview-tag').textContent=parts.length+' PIÈCE'+(parts.length>1?'S':'')+' / '+(currentModel()?.kind==='structure'?'DÉCOR':'OBJET');
+  showSelection();
+  if(frame&&parts.length)frameModel();
+  else render();
+}
+function refreshModel(){
+  updateModelLists();
+  $('new-model').disabled=$('example').disabled=pack.models.length>=modelLimits.models;
+  updateParts();updateInspector();updatePreview(true);updateHistoryButtons();
+}
+function selectPart(index){
+  if(!currentModel()?.parts[index])return;
+  partIndex=index;updateParts();updateInspector();showSelection();
+}
+function setTool(tool){
+  viewMode=tool;
+  for(const button of document.querySelectorAll('.rail-btn[data-tool]'))
+    button.setAttribute('aria-pressed',String(button.dataset.tool===tool));
+  canvas.dataset.tool=tool;
+  attachGizmo();
+}
+for(const button of document.querySelectorAll('.rail-btn[data-tool]')){
+  button.onclick=()=>setTool(button.dataset.tool);
+}
+
+let pickStart=null,rightStart=null;
+const raycaster=new T.Raycaster(),pointer=new T.Vector2();
+function pick(event){
+  if(!renderer)return -1;
+  const rect=canvas.getBoundingClientRect();
+  pointer.set(2*(event.clientX-rect.left)/rect.width-1,1-2*(event.clientY-rect.top)/rect.height);
+  raycaster.setFromCamera(pointer,camera);
+  const hit=raycaster.intersectObjects(previews.children,false)[0];
+  return hit?previews.children.indexOf(hit.object):-1;
+}
+canvas.addEventListener('pointerdown',event=>{
+  if(event.button===0)pickStart={id:event.pointerId,x:event.clientX,y:event.clientY};
+  if(event.button===2)rightStart={x:event.clientX,y:event.clientY};
 });
-listen('export', 'click', () => {
-  const data = JSON.stringify(normalizeModelPack(pack), null, 2);
-  const url = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
-  const download = document.createElement('a');
-  download.href = url;
-  download.download = 'atelier.gorilla-models.json';
-  download.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  status('Atelier exporté en JSON.');
+canvas.addEventListener('pointercancel',()=>{pickStart=null;rightStart=null;});
+canvas.addEventListener('pointerup',event=>{
+  if(gizmo?.dragging)return;
+  const from=pickStart;pickStart=null;
+  if(event.button!==0||from?.id!==event.pointerId
+      ||Math.hypot(event.clientX-from.x,event.clientY-from.y)>5)return;
+  const index=pick(event);
+  if(index>=0)selectPart(index);
 });
-listen('import', 'click', () => elements.file.click());
-listen('file', 'change', async event => {
-  const file = event.target.files[0];
-  event.target.value = '';
-  if (!file) return;
-  try {
-    if (file.size > modelLimits.fileBytes) throw new Error('Ce fichier dépasse la taille maximale de l’atelier.');
-    const incoming = normalizeModelPack(JSON.parse(await file.text()));
-    const merged = new Map(pack.models.map(model => [model.id, model]));
-    for (const model of incoming.models) merged.set(model.id, model);
-    if (merged.size > modelLimits.models) throw new Error(`L’atelier peut contenir ${modelLimits.models} modèles au maximum.`);
-    const clash = incoming.models.some(model => pack.models.some(existing => existing.id === model.id));
-    if (clash && !window.confirm('Remplacer les modèles existants qui figurent dans ce fichier ?')) return;
-    const models = [...merged.values()];
-    const avatarId = incoming.avatarId ?? pack.avatarId;
-    Object.assign(pack, { models, avatarId: models.some(model => model.id === avatarId && model.parts.length) ? avatarId : null });
-    modelId = incoming.models[0]?.id ?? modelId;
-    partIndex = 0;
-    markDirty();
-    showModel();
-    status('Modèles importés. Enregistre l’atelier pour les appliquer au jeu.');
-  } catch (error) {
-    status(error instanceof SyntaxError ? 'Le fichier JSON est illisible.' : error.message, true);
-  }
+const menu=$('part-context');
+function closeMenu(){menu.hidden=true;}
+canvas.addEventListener('contextmenu',event=>{
+  event.preventDefault();
+  if(!rightStart||Math.hypot(event.clientX-rightStart.x,event.clientY-rightStart.y)>6)return;
+  const index=pick(event);
+  if(index<0)return closeMenu();
+  selectPart(index);
+  $('context-name').textContent=currentPart().name;
+  menu.hidden=false;
+  menu.style.left=clamp(event.clientX,5,innerWidth-205)+'px';
+  menu.style.top=clamp(event.clientY,5,innerHeight-305)+'px';
+});
+document.addEventListener('pointerdown',event=>{
+  if(!menu.contains(event.target))closeMenu();
 });
 
-window.addEventListener('beforeunload', event => {
-  if (dirty) event.preventDefault();
+function makePart(shape,name=modelShapes[shape],position=[0,0,0],scale=[.35,.35,.35],
+  color='#51bdd2',surface='plain',rotation=[0,0,0]){
+  return {name,shape,position,scale,rotation,surface,color};
+}
+function exampleParts(){
+  const blue='#678fb4',light='#c1d7de',dark='#233241';
+  return [
+    makePart('sphere','Crâne',[0,0,.02],[.31,.32,.29],blue,'speckle'),
+    makePart('sphere','Museau',[0,-.048,-.11],[.20,.13,.15],light),
+    makePart('sphere','Oreille gauche',[-.149,.003,.01],[.08,.10,.06],blue),
+    makePart('sphere','Oreille droite',[.149,.003,.01],[.08,.10,.06],blue),
+    makePart('sphere','Œil gauche',[-.056,.037,-.118],[.049,.042,.036],dark),
+    makePart('sphere','Œil droit',[.056,.037,-.118],[.049,.042,.036],dark),
+    makePart('sphere','Nez',[0,-.025,-.181],[.071,.039,.033],dark),
+  ];
+}
+function addModel(example=false){
+  if(pack.models.length>=modelLimits.models)return;
+  remember();
+  const id='custom-model-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10);
+  const name=example?'Singe de pierre':'Modèle '+(pack.models.length+1);
+  pack.models.push({id,name,kind:'structure',inGame:false,
+    properties:{...defaultModelProperties},parts:example?exampleParts():[]});
+  modelId=id;partIndex=0;
+  markDirty();refreshModel();
+  setPanel('geometry');
+}
+function addPart(shape=$('new-shape').value){
+  const model=currentModel();
+  if(!model||model.parts.length>=modelLimits.parts)return;
+  remember();
+  const part=currentPart();
+  const pos=part?[clamp(part.position[0]+.22,-3,3),...part.position.slice(1)]:[0,0,0];
+  model.parts.push(makePart(shape,modelShapes[shape],pos));
+  partIndex=model.parts.length-1;
+  markDirty();updateParts();updateInspector();updatePreview(model.parts.length===1);
+  setTool('translate');setPanel('geometry');
+}
+function duplicatePart(){
+  const model=currentModel(),part=currentPart();
+  if(!part||model.parts.length>=modelLimits.parts)return;
+  remember();
+  const copy=structuredClone(part);
+  copy.name=part.name.slice(0,40)+' copie';
+  copy.position[0]=clamp(copy.position[0]+.12,-3,3);
+  model.parts.splice(partIndex+1,0,copy);
+  partIndex++;
+  markDirty();updateParts();updateInspector();updatePreview();
+}
+function deletePart(){
+  const model=currentModel();
+  if(!model?.parts.length)return;
+  remember();model.parts.splice(partIndex,1);
+  partIndex=Math.max(0,Math.min(partIndex,model.parts.length-1));
+  if(!model.parts.length&&pack.avatarId===model.id)pack.avatarId=null;
+  markDirty();updateModelLists();updateParts();updateInspector();updatePreview();
+}
+function mirrorPart(){
+  const model=currentModel(),part=currentPart();
+  if(!part||model.parts.length>=modelLimits.parts)return;
+  remember();
+  const copy=structuredClone(part);
+  copy.name=part.name.slice(0,36)+' · miroir';
+  copy.position[0]=-copy.position[0];
+  copy.rotation[1]=-copy.rotation[1];
+  copy.rotation[2]=-copy.rotation[2];
+  model.parts.splice(partIndex+1,0,copy);
+  partIndex++;
+  markDirty();updateParts();updateInspector();updatePreview();
+  status('Copie en miroir créée sur l’axe X');
+}
+function dropToGround(){
+  const part=currentPart(),mesh=previews.children[partIndex];
+  if(!part||!mesh)return;
+  const box=new T.Box3().setFromObject(mesh);
+  if(box.isEmpty())return;
+  remember();
+  part.position[1]=clamp(part.position[1]-box.min.y,-3,3);
+  markDirty();updateInspector();updatePreview();
+  status('Pièce posée sur le plan Y = 0');
+}
+function resetPart(){
+  const part=currentPart();if(!part)return;
+  remember();
+  part.position=[0,0,0];part.rotation=[0,0,0];part.scale=[.35,.35,.35];
+  markDirty();updateInspector();updatePreview();
+}
+function centerPart(){
+  const part=currentPart();if(!part)return;
+  remember();part.position=[0,0,0];
+  markDirty();updateInspector();updatePreview();
+}
+function setView(axis){
+  if(!orbit)return;
+  const distance=camera.position.distanceTo(orbit.target);
+  const dir=axis==='front'?new T.Vector3(0,0,-1):
+    axis==='side'?new T.Vector3(1,0,0):new T.Vector3(.0001,1,0);
+  camera.position.copy(orbit.target).addScaledVector(dir,Math.max(.6,distance));
+  orbit.update();render();
+}
+function download(blob,name){
+  const url=URL.createObjectURL(blob),link=document.createElement('a');
+  link.href=url;link.download=name;link.click();
+  setTimeout(()=>URL.revokeObjectURL(url),1200);
+}
+const fileStem=()=>currentModel()?.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+  .replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'modele';
+async function doExport(){
+  const format=$('export-format').value;
+  try{
+    const model=currentModel(),name=fileStem();
+    if(format==='workspace-json'){
+      download(new Blob([JSON.stringify(normalizeModelPack(pack),null,2)],{type:'application/json'}),
+        'atelier.gorilla-models.json');
+    }else if(format==='model-json'){
+      if(!model)throw Error('Crée un modèle avant de l’exporter.');
+      download(new Blob([JSON.stringify(normalizeModelPack({version:1,models:[model],avatarId:null}),null,2)],{type:'application/json'}),
+        name+'.gorilla-model.json');
+    }else if(format==='png'){
+      if(!renderer)throw Error('WebGL indisponible : capture impossible.');
+      render();
+      const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
+      if(!blob)throw Error('Capture impossible sur cet appareil.');
+      download(blob,name+'.png');
+    }else if(format==='glb'){
+      if(!model?.parts.length)throw Error('Ajoute une pièce avant l’export 3D.');
+      const root=new T.Group();
+      root.name=model.name;
+      const meshes=[];
+      for(const part of model.parts){
+        const mesh=new T.Mesh(createModelPartGeometry(part),
+          new T.MeshStandardMaterial({vertexColors:true,roughness:.67,metalness:.08}));
+        mesh.name=part.name;root.add(mesh);meshes.push(mesh);
+      }
+      try{
+        const data=await new Promise((resolve,reject)=>
+          new GLTFExporter().parse(root,resolve,reject,{binary:true,onlyVisible:true}));
+        download(new Blob([data],{type:'model/gltf-binary'}),name+'.glb');
+      }finally{
+        for(const mesh of meshes){mesh.geometry.dispose();mesh.material.dispose();}
+      }
+    }
+    status('Export '+format.toUpperCase()+' généré');
+  }catch(error){status(error.message||'Export impossible.',true);}
+}
+
+$('new-model').onclick=()=>addModel();
+$('example').onclick=()=>addModel(true);
+$('models').onchange=event=>{modelId=event.target.value;partIndex=0;refreshModel();};
+$('save').onclick=saveNow;
+$('undo-action').onclick=undo;
+$('redo-action').onclick=redo;
+$('export').onclick=doExport;
+$('import').onclick=()=>$('file').click();
+$('file').onchange=async event=>{
+  const file=event.target.files?.[0];event.target.value='';
+  if(!file)return;
+  try{
+    if(file.size>modelLimits.fileBytes)throw Error('JSON trop volumineux pour cet atelier.');
+    const incoming=normalizeModelPack(JSON.parse(await file.text()));
+    const merged=new Map(pack.models.map(model=>[model.id,model]));
+    for(const model of incoming.models)merged.set(model.id,model);
+    if(merged.size>modelLimits.models)throw Error('L’atelier accepte '+modelLimits.models+' modèles.');
+    if(incoming.models.some(model=>pack.models.some(old=>old.id===model.id))
+       &&!confirm('Remplacer les modèles de même identifiant ?'))return;
+    remember();
+    Object.assign(pack,{version:1,models:[...merged.values()],
+      avatarId:incoming.avatarId??pack.avatarId});
+    modelId=incoming.models[0]?.id??modelId;partIndex=0;
+    markDirty();refreshModel();status('Importé · enregistrer pour appliquer au jeu');
+  }catch(error){status(error instanceof SyntaxError?'JSON illisible.':error.message,true);}
+};
+$('send-to-map').onclick=event=>{
+  if(!saveNow())event.preventDefault();
+};
+$('delete-model').onclick=()=>{
+  const model=currentModel();if(!model||!confirm('Supprimer le modèle « '+model.name+' » ?'))return;
+  remember();
+  const index=pack.models.indexOf(model);
+  pack.models.splice(index,1);
+  if(pack.avatarId===model.id)pack.avatarId=null;
+  modelId=(pack.models[index]??pack.models[index-1])?.id??null;partIndex=0;
+  markDirty();refreshModel();
+};
+$('model-name').addEventListener('input',event=>{
+  const model=currentModel();if(!model)return;
+  beforeChange(event.target);
+  model.name=event.target.value;
+  markDirty();updateModelLists();updateInspector();
 });
-showModel();
+$('model-kind').onchange=event=>{
+  if(!currentModel())return;beforeChange(event.target);
+  currentModel().kind=event.target.value;markDirty();updatePreview();
+};
+$('in-game').onchange=event=>{
+  beforeChange(event.target);currentModel().inGame=event.target.checked;markDirty();
+};
+for(const key of Object.keys(defaultModelProperties)){
+  $(key).onchange=event=>{
+    if(!currentModel())return;beforeChange(event.target);
+    currentModel().properties[key]=event.target.checked;markDirty();
+  };
+}
+$('avatar').onchange=event=>{
+  beforeChange(event.target);pack.avatarId=event.target.value||null;markDirty();
+};
+setOptions($('new-shape'),Object.entries(modelShapes),'box');
+setOptions($('part-shape'),Object.entries(modelShapes),'box');
+setOptions($('part-surface'),Object.entries(modelSurfaces),'plain');
+$('add-part').onclick=()=>addPart();
+for(const button of document.querySelectorAll('[data-shape]')){
+  button.onclick=()=>{$('new-shape').value=button.dataset.shape;addPart(button.dataset.shape);};
+}
+$('duplicate-part').onclick=duplicatePart;
+$('delete-part').onclick=deletePart;
+$('mirror').onclick=mirrorPart;
+$('drop-to-grid').onclick=dropToGround;
+$('reset-part').onclick=resetPart;
+$('center-part').onclick=centerPart;
+$('focus-part').onclick=()=>frameModel(true);
+$('frame').onclick=()=>frameModel();
+$('view-front').onclick=()=>setView('front');
+$('view-side').onclick=()=>setView('side');
+$('view-top').onclick=()=>setView('top');
+$('grid-toggle').onchange=event=>{guide.visible=event.target.checked;render();};
+$('snap-step').onchange=attachGizmo;
+$('focus-toggle').onclick=()=>{
+  document.body.classList.toggle('preview-fullscreen');
+  setTimeout(()=>window.dispatchEvent(new Event('resize')),0);
+};
+for(const key of ['name','shape','color','surface']){
+  $('part-'+key).addEventListener(key==='name'||key==='color'?'input':'change',event=>{
+    const part=currentPart();if(!part)return;
+    beforeChange(event.target);
+    part[key]=event.target.value;
+    markDirty();updateParts();
+    if(key==='name')updateInspector();
+    else updatePreview();
+  });
+}
+for(const button of document.querySelectorAll('[data-color]')){
+  button.onclick=()=>{
+    const part=currentPart();if(!part)return;
+    remember();part.color=button.dataset.color;
+    markDirty();updateInspector();updatePreview();
+  };
+}
+for(const button of menu.querySelectorAll('button')){
+  button.onclick=()=>{
+    closeMenu();
+    const action=button.dataset.action;
+    if(['translate','rotate','scale'].includes(action))setTool(action);
+    else if(action==='duplicate')duplicatePart();
+    else if(action==='mirror')mirrorPart();
+    else if(action==='ground')dropToGround();
+    else if(action==='focus')frameModel(true);
+    else if(action==='delete')deletePart();
+  };
+}
+window.addEventListener('keydown',event=>{
+  if(event.key==='Escape'){closeMenu();setTool('select');return;}
+  const editing=event.target.closest?.('input,select,textarea,[contenteditable]');
+  const modifier=event.ctrlKey||event.metaKey;
+  if(modifier&&!editing){
+    const key=event.key.toLowerCase();
+    if(key==='z'){event.preventDefault();if(event.shiftKey)redo();else undo();return;}
+    if(key==='y'){event.preventDefault();redo();return;}
+    if(key==='s'){event.preventDefault();saveNow();return;}
+    if(key==='d'){event.preventDefault();duplicatePart();return;}
+  }
+  if(editing||modifier||event.altKey)return;
+  const key=event.key.toLowerCase();
+  if(key==='v')setTool('select');
+  else if(key==='g')setTool('translate');
+  else if(key==='r')setTool('rotate');
+  else if(key==='s')setTool('scale');
+  else if(key==='f')frameModel(true);
+  else if(key==='a')frameModel();
+  else if(key==='m')mirrorPart();
+  else if(key==='delete'||key==='backspace')deletePart();
+  else if(key==='d'&&event.shiftKey)duplicatePart();
+  else if('1234567'.includes(key)&&key.length===1){
+    const shape=['box','sphere','cylinder','cone','torus','capsule','diamond'][Number(key)-1];
+    if(shape)addPart(shape);
+  }else return;
+  event.preventDefault();
+});
+window.addEventListener('keydown',event=>{
+  if(event.key==='Alt'&&gizmo){
+    gizmo.setTranslationSnap(null);
+    gizmo.setRotationSnap(null);
+    gizmo.setScaleSnap(null);
+  }
+});
+window.addEventListener('keyup',event=>{
+  if(event.key==='Alt')attachGizmo();
+});
+window.addEventListener('beforeunload',event=>{if(dirty)event.preventDefault();});
+refreshModel();
+if(dirty)status('Brouillon récupéré automatiquement');
