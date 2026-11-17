@@ -3,7 +3,7 @@ import * as T from 'three';
 import {tiledBox,transformUVs,decorPrimitiveGeometry} from './texture-geometry.js';
 import {terrainGeometry,terrainCollider,terrainVegetation,disposeVegetation,sculptTerrain,normalizeTerrain,resizeTerrain} from './terrain-edit.js';
 import {boxCollider} from './physics.js';
-import {createModelUnitGeometry,createModelMaterial,disposeModelMaterial} from './model-pack.js';
+import {createModelUnitGeometry,createModelMaterial,modelHitbox,disposeModelMaterial} from './model-pack.js';
 import {mapCode} from './cloud-link.js';
 import {parseMap,makePiece,snapPlacement,maxPieces,maxMapBytes,storageKey,downloadMap} from './map-format.js';
 
@@ -79,8 +79,15 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
       mesh.userData.mapIndex=index;
       if(piece.model.kind==='prop')mesh.visible=false; // Dynamic prop is spawned by the object physics system.
       group.add(mesh);
-      const half=new T.Vector3(piece.w/2,piece.h/2,piece.d/2);
-      const collider={mesh,position:mesh.position,quaternion:mesh.quaternion,half,min:half.clone().negate(),
+      const hitbox=modelHitbox(piece.model);
+      const dimensions=new T.Vector3(piece.w,piece.h,piece.d);
+      const relativeScale=dimensions.clone().divide(hitbox.boundsSize.clone()
+        .max(new T.Vector3(.00001,.00001,.00001)));
+      const half=hitbox.size.clone().multiply(relativeScale).multiplyScalar(.5);
+      const collisionOffset=hitbox.center.clone().sub(hitbox.boundsCenter).multiply(relativeScale)
+        .applyQuaternion(mesh.quaternion);
+      const colliderPosition=mesh.position.clone().add(collisionOffset);
+      const collider={mesh,position:colliderPosition,quaternion:mesh.quaternion,half,min:half.clone().negate(),
         shape:boxCollider(half),friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:true,type:piece.material};
       return {mesh,collider,custom:true,model:true};
     }
@@ -124,7 +131,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     pruneTextures();
     if(map){
       const retained=map.arenaBase?builtBoxes.filter(box=>!replaceableMeshes.has(box.mesh)):[];
-      arena.boxes.splice(0,arena.boxes.length,...retained,...meshRows.filter((row,i)=>nodes[i].solid&&nodes[i].model?.kind!=='prop').map(row=>row.collider));
+      arena.boxes.splice(0,arena.boxes.length,...retained,...meshRows.filter((row,i)=>nodes[i].solid&&nodes[i].model?.kind!=='prop'&&nodes[i].model?.properties?.collidable!==false).map(row=>row.collider));
     }
     else arena.boxes.splice(0,arena.boxes.length,...builtBoxes);
     group.updateMatrixWorld(true);

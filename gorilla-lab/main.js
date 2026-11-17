@@ -14,7 +14,7 @@ import {createSettings,toolModes,shaderNames,visualPresets} from './game-setting
 import { avatarPalettes,createAvatarStyle } from './avatar-style.js';
 import {createArenaObjectSpecs,forEachStartupObject} from './arena-objects.js';
 import { makeAnimatedProps,clonePropMaterial } from './animated-props.js';
-import {readModelPack,createModelPropDefinitions,createModelAvatarHead,createModelUnitGeometry,createModelMaterial,normalizeModelPack,modelLimits,modelStorageKey} from './model-pack.js';
+import {readModelPack,createModelPropDefinitions,createModelAvatarHead,createModelUnitGeometry,createModelMaterial,modelCollisionGeometry,normalizeModelPack,modelLimits,modelStorageKey} from './model-pack.js';
 import {mapCode,publicRooms} from './cloud-link.js';
 import { createHandSkin,palmCenter } from './hand-skin.js';
 import {placeTrackedPalm} from './xr-palm.js';
@@ -646,7 +646,7 @@ function spawnPlacedModels(){
     if(type===undefined){
       const geo=createModelUnitGeometry(piece.model);
       geo.scale(piece.w,piece.h,piece.d);
-      const collisionGeo=new T.BoxGeometry(piece.w,piece.h,piece.d);
+      const collisionGeo=modelCollisionGeometry(piece.model,new T.Vector3(piece.w,piece.h,piece.d));
       const shape=colliderFor(collisionGeo);
       collisionGeo.dispose();
       type=objectSpecs.length;

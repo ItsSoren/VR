@@ -10,7 +10,7 @@ import {createToolVisual} from '../gorilla-lab/tool-visual.js';
 import {createArcadeBlaster,createBlasterModel} from '../gorilla-lab/arcade-blaster.js';
 import {updateGroundHaptics} from '../gorilla-lab/ground-haptics.js';
 import {parseMap,exampleMap} from '../gorilla-lab/map-format.js';
-import {normalizeModelPack,createModelUnitGeometry,modelDimensions} from '../gorilla-lab/model-pack.js';
+import {normalizeModelPack,createModelUnitGeometry,modelDimensions,modelHitbox,modelCollisionGeometry,createModelPropDefinitions,disposeModelMaterial} from '../gorilla-lab/model-pack.js';
 import {createKeyboardState} from '../gorilla-lab/flat-controls.js';
 import {screenPixelRatio} from '../gorilla-lab/screen-render.js';
 import {terrainHeight,sculptTerrain,normalizeTerrain,resizeTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from '../gorilla-lab/terrain-edit.js';
@@ -550,4 +550,55 @@ test('shape sketches support X-mirror contours and lathe geometry',()=>{
   g.dispose();
   const invalid=normalizeSketch({...sketchPresets.panel,points:[[-.5,-.5],[.5,.5],[.5,-.5],[-.5,.5]]});
   assert.match(validateSketch(invalid),/croise/);
+});
+
+test('model hitbox defaults to the bounding box of the complete geometry',()=>{
+  const model={id:'custom-model-hitbox-auto',name:'Objet',inGame:true,kind:'prop',parts:[
+    {name:'Corps',shape:'box',position:[1,0,0],rotation:[0,0,0],scale:[2,1,1],color:'#ffffff',surface:'plain'},
+    {name:'Bout',shape:'sphere',position:[-1,0,0],rotation:[0,0,0],scale:[.5,.5,.5],color:'#ffffff',surface:'plain'}
+  ]};
+  const clean=normalizeModelPack({version:1,models:[model]}).models[0];
+  assert.deepEqual(clean.hitbox,{mode:'auto'});
+  const hitbox=modelHitbox(clean);
+  const geometry=modelCollisionGeometry(clean);
+  geometry.computeBoundingBox();
+  const actual=geometry.boundingBox.getSize(new T.Vector3());
+  assert.ok(actual.distanceTo(hitbox.size)<1e-6);
+  geometry.dispose();
+});
+test('custom hitbox offset and size survive JSON, dynamic physics and map scaling',()=>{
+  const model={id:'custom-model-hitbox-box',name:'Caisse',kind:'structure',inGame:true,
+    hitbox:{mode:'box',center:[2.2,.3,-.25],size:[.4,.6,.8]},
+    parts:[{name:'Bloc',shape:'box',position:[2,0,0],rotation:[0,0,0],
+      scale:[1,1,1],color:'#ffffff',surface:'plain'}]};
+  const clean=normalizeModelPack({version:1,models:[model]}).models[0];
+  assert.deepEqual(clean.hitbox,model.hitbox);
+  assert.deepEqual(normalizeModelPack(JSON.parse(JSON.stringify({version:1,models:[clean]}))).models[0].hitbox,model.hitbox);
+  const dynamic=modelCollisionGeometry(clean);dynamic.computeBoundingBox();
+  const center=dynamic.boundingBox.getCenter(new T.Vector3());
+  const size=dynamic.boundingBox.getSize(new T.Vector3());
+  assert.ok(center.distanceTo(new T.Vector3(.2,.3,-.25))<1e-6);
+  assert.ok(size.distanceTo(new T.Vector3(.4,.6,.8))<1e-6);
+  const mapGeo=modelCollisionGeometry(clean,new T.Vector3(8,2,4));
+  mapGeo.computeBoundingBox();
+  assert.ok(mapGeo.boundingBox.getCenter(new T.Vector3()).distanceTo(new T.Vector3(1.6,.6,-1))<1e-5);
+  assert.ok(mapGeo.boundingBox.getSize(new T.Vector3()).distanceTo(new T.Vector3(3.2,1.2,3.2))<1e-5);
+  const physicsDefs=createModelPropDefinitions({version:1,models:[clean]});
+  physicsDefs[0].collisionGeo.computeBoundingBox();
+  assert.ok(physicsDefs[0].collisionGeo.boundingBox.getCenter(new T.Vector3()).distanceTo(center)<1e-6);
+  physicsDefs[0].collisionGeo.dispose();physicsDefs[0].geo.dispose();
+  disposeModelMaterial(physicsDefs[0].material);
+  const map=exampleMap();map.pieces[0].model=clean;
+  assert.deepEqual(parseMap(JSON.stringify(map)).pieces[0].model.hitbox,model.hitbox);
+  dynamic.dispose();mapGeo.dispose();
+});
+test('model hitbox values are clamped and invalid modes use automatic collision',()=>{
+  const model={id:'custom-model-hitbox-normal',name:'Test',parts:[
+    {name:'Cube',shape:'box',position:[0,0,0],rotation:[0,0,0],
+      scale:[.2,.2,.2],color:'#ffffff',surface:'plain'}],
+    hitbox:{mode:'box',center:[999,-999,0],size:[0,-3,999]}};
+  const clean=normalizeModelPack({version:1,models:[model]}).models[0];
+  assert.deepEqual(clean.hitbox.center,[6,-6,0]);
+  assert.deepEqual(clean.hitbox.size,[.025,.025,12]);
+  assert.deepEqual(normalizeModelPack({version:1,models:[{...model,hitbox:{mode:'bad'}}]}).models[0].hitbox,{mode:'auto'});
 });

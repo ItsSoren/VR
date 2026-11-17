@@ -114,7 +114,7 @@ gap:8px;width:100%;text-align:left;white-space:normal;padding:5px 8px;border-col
 .outline-tools{display:flex;gap:5px;align-items:center}
 .outline-tools select{min-width:0;flex:1;font-size:11px;min-height:27px}
 .outline-tools button{min-height:27px;flex-shrink:0;font-size:11px}
-.tabs{display:grid;grid-template-columns:repeat(3,1fr);flex:0 0 35px;border-bottom:1px solid var(--line);
+.tabs{display:grid;grid-template-columns:repeat(4,1fr);flex:0 0 35px;border-bottom:1px solid var(--line);
 background:#2a323a}
 .tab{min-height:35px;border:0;border-right:1px solid #3a454e;border-radius:0;background:transparent;font-size:11px;
 color:#aabcc4}
@@ -124,6 +124,7 @@ color:#aabcc4}
 .panel-body{display:none}
 .inspector[data-tab=geometry] #geometry-panel,
 .inspector[data-tab=appearance] #appearance-panel,
+.inspector[data-tab=collision] #collision-panel,
 .inspector[data-tab=settings] #settings-panel{display:block}
 #part-fields>label{margin-bottom:9px}
 .vectors{margin:11px 0 0;padding:0;border:0}
@@ -141,6 +142,20 @@ color:#aabcc4}
 #part-empty{font-size:11px;color:var(--muted)}
 #send-to-map{display:flex;justify-content:center;align-items:center;background:#3f4e46;border-color:#6b987d;margin:10px 0}
 #delete-model{color:#e9ac9c}
+.hitbox-type{display:flex;gap:6px;margin:4px 0 10px}
+.hitbox-type button{flex:1;text-align:center;min-height:32px;font-size:11px}
+.hitbox-type button[aria-pressed=true]{background:#5c4b35;border-color:#e6a961;color:#ffdfa9}
+#collision-panel h3{margin:8px 0 8px}
+#hitbox-info{font-size:11px;color:#9fc4ca;margin:7px 0 11px}
+#hitbox-geometry{border-top:1px solid #45525e;padding-top:8px}
+#hitbox-geometry[hidden]{display:none}
+#collision-panel .axes{grid-template-columns:repeat(3,minmax(0,1fr))}
+#collision-panel .axes input{height:30px;width:100%;font-size:11px}
+#collision-panel .inline-actions{gap:4px}
+#collision-panel .inline-actions button{min-height:31px;padding:4px;font-size:11px}
+#collision-panel .inline-actions button[aria-pressed=true]{background:#3e5b63;border-color:#74a7b2}
+#hitbox-preview-toggle{accent-color:#eab46a}
+
 .quick-colors{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
 .quick-colors button{width:25px;height:25px;min-height:25px;padding:0;background:var(--color);
 border:2px solid #a8b5bba3;border-radius:5px}
@@ -259,6 +274,7 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
     <section class="side-section inspector" id="model-inspector" data-tab="geometry">
       <nav class="tabs" aria-label="Propriétés"><button class="tab" data-panel="geometry" aria-pressed="true">Géométrie</button>
       <button class="tab" data-panel="appearance" aria-pressed="false">Aspect</button>
+      <button class="tab" data-panel="collision" aria-pressed="false">Hitbox</button>
       <button class="tab" data-panel="settings" aria-pressed="false">Modèle</button></nav>
       <div class="side-body">
         <p id="part-empty">Sélectionne ou ajoute une pièce dans la scène.</p>
@@ -297,6 +313,38 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
               <p class="hint">La finition est conservée dans Gorilla Lab. L’export GLB préserve les formes et les couleurs.</p>
             </div>
           </div>
+          <div class="panel-body" id="collision-panel">
+            <h3>COLLISION / MODÈLE ENTIER</h3>
+            <label class="check"><input id="hitbox-preview-toggle" type="checkbox" checked> Afficher le volume de collision en orange</label>
+            <label class="check"><input id="collidable" type="checkbox"> Activer les collisions dans le jeu</label>
+            <p class="hint" id="hitbox-info">La hitbox définit la zone physique du modèle.</p>
+            <div class="hitbox-type">
+              <button id="hitbox-auto" aria-pressed="true">Automatique</button>
+              <button id="hitbox-manual" aria-pressed="false">Personnalisée</button>
+            </div>
+            <div id="hitbox-geometry" hidden>
+              <div class="inline-actions">
+                <button id="hitbox-drag">✣ Déplacer</button>
+                <button id="hitbox-scale">⤢ Redimensionner</button>
+              </div>
+              <fieldset class="vectors"><legend>CENTRE / X · Y · Z</legend>
+                <div class="axes">
+                  <label>X<input id="hitbox-center-x" type="number" min="-6" max="6" step=".01"></label>
+                  <label>Y<input id="hitbox-center-y" type="number" min="-6" max="6" step=".01"></label>
+                  <label>Z<input id="hitbox-center-z" type="number" min="-6" max="6" step=".01"></label>
+                </div>
+              </fieldset>
+              <fieldset class="vectors"><legend>TAILLE / X · Y · Z</legend>
+                <div class="axes">
+                  <label>X<input id="hitbox-size-x" type="number" min=".025" max="12" step=".01"></label>
+                  <label>Y<input id="hitbox-size-y" type="number" min=".025" max="12" step=".01"></label>
+                  <label>Z<input id="hitbox-size-z" type="number" min=".025" max="12" step=".01"></label>
+                </div>
+              </fieldset>
+              <div class="inline-actions"><button id="hitbox-fit">↻ Ajuster au modèle</button></div>
+            </div>
+            <p class="hint">Une boîte de collision pour l'objet complet. Tu peux la déplacer et changer ses dimensions sans modifier la forme visuelle.</p>
+          </div>
           <div class="panel-body" id="settings-panel">
             <h3>IDENTITÉ</h3>
             <label>Nom du modèle<input id="model-name" maxlength="48" autocomplete="off"></label>
@@ -307,7 +355,7 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
             <h3>PROPRIÉTÉS DE JEU</h3>
             <label class="check"><input id="grabbable" type="checkbox"> Saisissable</label>
             <label class="check"><input id="frozen" type="checkbox"> Figé à l’apparition</label>
-            <label class="check"><input id="collidable" type="checkbox"> Collisions</label>
+            <p class="hint">La hitbox se règle dans l’onglet « Hitbox ».</p>
             <label class="check"><input id="supportWhileHeld" type="checkbox"> Appui pendant la prise</label>
             <h3>AVATAR</h3>
             <label>Tête du joueur<select id="avatar"></select></label>

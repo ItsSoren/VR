@@ -44,6 +44,11 @@ export function normalizeModelPack(input) {
       properties: Object.fromEntries(Object.entries(defaultModelProperties).map(([key, fallback]) => [
         key, typeof raw.properties?.[key] === 'boolean' ? raw.properties[key] : fallback,
       ])),
+      hitbox:raw?.hitbox?.mode==='box'?{
+        mode:'box',
+        center:vector(raw.hitbox.center,0,-6,6),
+        size:vector(raw.hitbox.size,.5,.025,12)
+      }:{mode:'auto'},
       parts: raw.parts.map((part, index) => ({
         name: label(part?.name, `Pièce ${index + 1}`),
         shape: Object.hasOwn(modelShapes, part?.shape) ? part.shape : 'box',
@@ -187,15 +192,41 @@ export function createModelUnitGeometry(model) {
   return geometry;
 }
 
-export function modelDimensions(model) {
-  const bounds = new T.Box3();
-  for (const part of model.parts) {
-    const geometry = createModelPartGeometry(part);
+export function modelBounds(model){
+  const bounds=new T.Box3();
+  for(const part of model.parts??[]){
+    const geometry=createModelPartGeometry(part);
     geometry.computeBoundingBox();
     bounds.union(geometry.boundingBox);
     geometry.dispose();
   }
-  return bounds.getSize(new T.Vector3());
+  if(bounds.isEmpty())bounds.setFromCenterAndSize(new T.Vector3(),new T.Vector3(1,1,1));
+  return bounds;
+}
+export function modelDimensions(model) {
+  return modelBounds(model).getSize(new T.Vector3());
+}
+// Hitbox settings use the model workshop's *unscaled* local units.
+// The model geometry is visually centered before it goes into the game.
+export function modelHitbox(model){
+  const bounds=modelBounds(model),center=bounds.getCenter(new T.Vector3()),
+    size=bounds.getSize(new T.Vector3());
+  if(model.hitbox?.mode==='box')return {
+    mode:'box',center:new T.Vector3(...model.hitbox.center),
+    size:new T.Vector3(...model.hitbox.size),boundsCenter:center,boundsSize:size
+  };
+  return {mode:'auto',center,size,boundsCenter:center,boundsSize:size};
+}
+export function modelCollisionGeometry(model,mapDimensions=null){
+  const hitbox=modelHitbox(model);
+  const offset=hitbox.center.clone().sub(hitbox.boundsCenter);
+  const size=hitbox.size.clone();
+  if(mapDimensions){
+    const s=new T.Vector3(mapDimensions.x, mapDimensions.y, mapDimensions.z)
+      .divide(hitbox.boundsSize.clone().max(new T.Vector3(.00001,.00001,.00001)));
+    offset.multiply(s);size.multiply(s);
+  }
+  return new T.BoxGeometry(size.x,size.y,size.z).translate(offset.x,offset.y,offset.z);
 }
 
 export function createModelPropDefinitions(pack) {
@@ -205,7 +236,7 @@ export function createModelPropDefinitions(pack) {
     return {
       id: model.id, name: model.name, properties: model.properties, geo,
       material: createModelMaterial(model),
-      collisionGeo: new T.BoxGeometry(size.x, size.y, size.z),
+      collisionGeo:modelCollisionGeometry(model),
       mass: T.MathUtils.clamp(size.x * size.y * size.z * 9, .18, 12),
     };
   });
