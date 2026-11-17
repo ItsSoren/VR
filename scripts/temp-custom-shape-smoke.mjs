@@ -66,7 +66,12 @@ try{
  },{timeout:15000});
  const status=await page.$eval('#status',s=>({text:s.textContent,error:s.dataset.error}));
  if(status.error==='true')throw Error(status.text);
- const files=await readdir(downloads);
+ let files=[];
+ for(let attempt=0;attempt<30;attempt++){
+   files=await readdir(downloads);
+   if(files.some(file=>file.endsWith('.glb')))break;
+   await new Promise(resolve=>setTimeout(resolve,200));
+ }
  assert.ok(files.some(file=>file.endsWith('.glb')),'GLB should export custom shape');
  console.log('CUSTOM_SHAPE_BROWSER_PASSED',JSON.stringify({
    shape:revised.models[0].parts[0].shape,
