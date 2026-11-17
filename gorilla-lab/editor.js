@@ -4,6 +4,7 @@ import {addLabFixtures} from './fixtures.js';
 import {createArenaObjectSpecs,forEachStartupObject} from './arena-objects.js';
 import {labMirror} from './lab-layout.js';
 import {tiledBox} from './texture-geometry.js';
+import {readModelPack,createModelUnitGeometry,createModelMaterial,modelDimensions} from './model-pack.js';
 import {normalizeTerrain,resizeTerrain,sculptTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from './terrain-edit.js';
 import {texturePresets,seamlessTexture} from './seamless-texture.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
@@ -17,6 +18,27 @@ const $ = id => document.getElementById(id);
 const fields = ['name', 'x', 'y', 'z', 'w', 'h', 'd', 'pitch', 'yaw', 'roll', 'material', 'color', 'grip', 'gravity', 'bounce', 'solid'];
 const toolButtons = [...document.querySelectorAll('.tool')];
 const draftKey = 'gorilla-lab-editor-draft';
+const modelPack = readModelPack(localStorage);
+const modelLibrary = modelPack.models.filter(model => model.parts.length);
+$('model-library').replaceChildren(
+  new Option('Sélectionner un modèle…', ''),
+  ...modelLibrary.map(model => new Option(model.name + (model.kind === 'structure' ? ' · Décor' : ' · Objet'), model.id))
+);
+const requestedModel = new URLSearchParams(location.search).get('model');
+if (modelLibrary.some(model => model.id === requestedModel)) $('model-library').value = requestedModel;
+$('place-model').disabled = !modelLibrary.length;
+function selectedModel() { return modelLibrary.find(model => model.id === $('model-library').value); }
+function modelPiece() {
+  const model = selectedModel();
+  if (!model) return null;
+  const size = modelDimensions(model);
+  return makePiece({
+    name:model.name.slice(0,36),model:structuredClone(model),x:0,y:Math.max(.15,size.y/2),z:0,
+    w:T.MathUtils.clamp(size.x,.2,64),h:T.MathUtils.clamp(size.y,.12,36),d:T.MathUtils.clamp(size.z,.2,64),
+    color:'#ffffff',solid:model.properties.collidable!==false
+  });
+}
+$('model-library').addEventListener('change',()=>{if(tool==='model')showGhost(null);});
 const shapes = {
   block: makePiece(),
   ramp: makePiece({ name: 'Rampe', w: 3, h: .30, d: 4, pitch: 16, material: 5 }),
@@ -35,6 +57,7 @@ const toolHelp = {
   terrain:'Clique pour poser un terrain. Sélectionne-le pour régler le bruit ou la végétation.',
   sculpt:'Clique ou glisse sur un terrain. Le pinceau est réglable dans Relief et végétation.',
   spawn: 'Clique sur une surface pour placer le départ du joueur.',
+  model: 'Choisis un modèle dans la bibliothèque, puis clique dans la vue 3D ou sur le plan pour le poser.',
 };
 let map, selected = -1, tool = 'move', gesture = null, ghost = null;
 const undoStack = [];
@@ -315,7 +338,7 @@ function paintPlan() {
 
   const layers = map.pieces.map((piece, index) => ({ piece, index })).sort((a, b) => a.piece.y - b.piece.y);
   for (const { piece, index } of layers) {
-    const color = piece.color === '#ffffff' ? materialColors[piece.material] : piece.color;
+    const color = piece.model?.parts[0]?.color ?? (piece.color === '#ffffff' ? materialColors[piece.material] : piece.color);
     drawFootprint(piece, color, index === selected ? '#ffe095' : '#a4bac7', index === selected ? 2 : 1, piece.solid ? .86 : .38);
   }
   drawMarker(map.spawn, false);
@@ -432,6 +455,13 @@ function rebuildScene() {
   scene.fog=map.arenaBase?referenceScene.fog:null;
   scene.environment=map.arenaBase?referenceScene.environment:null;
   for (const piece of map.pieces) {
+    if(piece.model) {
+      const mesh=new T.Mesh(createModelUnitGeometry(piece.model),createModelMaterial());
+      mesh.castShadow=mesh.receiveShadow=true;
+      group.add(mesh);
+      placeMesh(mesh,piece);
+      continue;
+    }
     const glass = [10, 11, 12].includes(piece.material);
     const material = new T.MeshLambertMaterial({
       color: new T.Color(materialColors[piece.material]).multiply(new T.Color(piece.color)),
@@ -737,6 +767,7 @@ function placementAt(canvas, event) {
     return {...shapes.terrain,terrain:normalizeTerrain(shapes.terrain.terrain),x:snapCoordinate(point.x),y:point.y,z:snapCoordinate(point.z)};
   }
   if(tool==='sculpt')return null;
+  if(tool==='model'&&!selectedModel())return null;
   const point = hit?.point ?? rayPlane(0);
   if (!point) return null;
   const normal = hit ? hit.face.normal.clone().applyNormalMatrix(normalMatrix.getNormalMatrix(hit.object.matrixWorld)) : worldUp;
@@ -747,7 +778,7 @@ function placementAt(canvas, event) {
     midpointSnapped=$('magnet').checked&&!event.altKey&&$('magnet-mode').value==='edge'&&midpoint.point.distanceTo(point)<=range;
   }
   const step=midpointSnapped||event.altKey?.000001:snapStep();
-  return snapPlacement(midpointSnapped?edgeMidpoint:point, normal, shapes[tool], step);
+  return snapPlacement(midpointSnapped?edgeMidpoint:point, normal, tool==='model'?modelPiece():shapes[tool], step);
 }
 
 // Locate the closest edge of the box face hit by the placement ray, in world metres.
