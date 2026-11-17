@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 const root=process.cwd();
 const mime={'.html':'text/html','.js':'application/javascript','.json':'application/json','.css':'text/css'};
 const server=createServer(async(req,res)=>{
+  if(req.url==='/favicon.ico'){res.writeHead(204);res.end();return;}
   const rel=decodeURIComponent((req.url?.split('?')[0]??'/').replace(/^\//,'')||'index.html');
   const path=resolve(root,rel);
   if(!path.startsWith(root)){res.writeHead(403);res.end();return;}
