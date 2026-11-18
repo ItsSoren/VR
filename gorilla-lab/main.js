@@ -385,7 +385,7 @@ const renderGroups=[
   ['Image',[['Shader','shaderMode'],['Ambiance','timeOfDay'],['FOV PC / mobile','viewFov'],['FOV VR','vrFov'],['Exposition','exposure'],['Contraste','contrast'],
     ['Saturation','saturation'],['Chaleur','warmth'],['Corps du singe','body'],['Mains','hands']]],
   ['Lumière',[['Ombres','shadows'],['Qualité des ombres','shadowQuality'],['Qualité des lumières','lightQuality'],
-    ['Carte de lumière','lightmap'],['Reflets','reflections'],['Bloom du soleil','bloom']]],
+    ['Carte de lumière','lightmap'],['Reflets','reflections'],['Qualité miroir','mirrorQuality'],['Bloom du soleil','bloom']]],
   ['Performance',[['Préréglage','preset'],['Qualité automatique','auto'],['Qualité manuelle','quality'],
     ['Résolution XR','resolution'],['Textures','textures'],['Max. textures','texturePower']]],
   ['Effets',[['Post FX VR','post'],['Ray tracing VR','rayTrace'],['Activer le focus','focus'],
@@ -499,6 +499,10 @@ const readings=document.querySelector('#readings');
 const debugSpeeds=[1,.75,.5,.25];
 function change(key,step){
   diagnostics.record('setting',{key,step,previous:settings[key]});
+  if(key==='mirrorQuality'){
+    settings.mirrorQuality=T.MathUtils.clamp(settings.mirrorQuality+step,1,3);
+    hudDirty=true;return;
+  }
   if(key==='debugSpeed'){
     settings.debugSpeed=T.MathUtils.clamp(settings.debugSpeed+step,1,debugSpeeds.length);
     locomotion.reset();hudDirty=true;return;
@@ -583,6 +587,7 @@ function button(text,action){
 }
 function toggleLabel(key){return key==='preciseHitboxes'?(settings[key]?'High':'Low'):(settings[key]?'Actif':'Coupé');}
 function settingValue(key){
+  if(key==='mirrorQuality')return ['Coupé','Éco','Fin'][settings[key]-1];
   if(key==='debugRange')return (settings[key]*5)+' m';
   if(key==='debugBudget')return (settings[key]*1000)+' segments';
   if(key==='debugSpeed')return spectator.role?'×1 en ligne':'×'+debugSpeeds[settings.debugSpeed-1];
@@ -659,43 +664,71 @@ const reflectionView=new T.PerspectiveCamera(75,1,.07,140);
 const mirrorFace=new Reflector(new T.PlaneGeometry(1.7,1.95),{
   color:0xf4f6ff,textureWidth:mobileScreen?128:256,textureHeight:mobileScreen?128:256,clipBias:.004,multisample:0,
 });
-const mirrorNormal=new T.Vector3(0,0,-1),toMirror=new T.Vector3(),mirrorForward=new T.Vector3();
+const mirrorNormal=new T.Vector3(),toMirror=new T.Vector3(),mirrorForward=new T.Vector3();
+const mirrorPosition=new T.Vector3(),mirrorRotation=new T.Quaternion(),mirrorOffset=new T.Vector3();
+const defaultMirrorRotation=new T.Quaternion().setFromAxisAngle(up,Math.PI);
+const defaultMirrorPosition=new T.Vector3(labMirror.x,labMirror.y,labMirror.z);
 mirrorFace.position.set(labMirror.x,labMirror.y,labMirror.z);
 mirrorFace.rotation.y=Math.PI;
 scene.add(mirrorFace);
 const mirrorBacking=new T.Mesh(new T.BoxGeometry(1.8,2.03,.10),new T.MeshLambertMaterial({color:'#344650'}));
+mirrorBacking.userData.editorAssetId='lab-mirror';
 mirrorBacking.position.copy(mirrorFace.position).z+=.064;
 scene.add(mirrorBacking);
 const renderReflection=mirrorFace.onBeforeRender.bind(mirrorFace);
 mirrorFace.onBeforeRender=()=>{};
 mirrorFace.visible=false;
 let lastMirrorRender=-Infinity;
+let mirrorSource=null,mirrorResolution=0,mirrorCpuMs=0;
 // Le miroir ne redessine la scène que s’il est proche, visible et hors de son délai de mise à jour.
 function updateMirror(now,pose){
+  mirrorCpuMs=0;
+  mirrorFace.visible=false;
+  if(!settings.reflections||settings.mirrorQuality===1){lastMirrorRender=-Infinity;return;}
   reflectionView.position.copy(worldHead);
   if(pose){
     const q=pose.transform.orientation;
     reflectionView.quaternion.set(q.x,q.y,q.z,q.w).premultiply(headRotation.setFromAxisAngle(up,yaw));
   }else camera.getWorldQuaternion(reflectionView.quaternion);
   mirrorForward.set(0,0,-1).applyQuaternion(reflectionView.quaternion);
-  toMirror.subVectors(mirrorFace.position,worldHead);
-  const distance=toMirror.length();
-  mirrorFace.visible=maps.builtIn&&settings.reflections&&distance<4&&toMirror.dot(mirrorNormal)<-.15&&
-    toMirror.multiplyScalar(1/Math.max(.001,distance)).dot(mirrorForward)>.66;
-  if(!mirrorFace.visible){lastMirrorRender=-Infinity;return;}
-  if(now-lastMirrorRender<(mobileScreen&&!renderer.xr.isPresenting?110:45))return;
+  let source=null,bestDistance=4;
+  function consider(candidate,position,rotation){
+    toMirror.subVectors(position,worldHead);
+    const distance=toMirror.length();
+    mirrorNormal.set(0,0,1).applyQuaternion(rotation);
+    if(distance>=bestDistance||toMirror.dot(mirrorNormal)>=-.15||toMirror.dot(mirrorForward)<=.66*distance)return;
+    source=candidate;bestDistance=distance;
+    mirrorFace.position.copy(position);mirrorFace.quaternion.copy(rotation);
+  }
+  if(maps.usesBuiltInMirror)consider(mirrorBacking,defaultMirrorPosition,defaultMirrorRotation);
+  for(const {mesh} of maps.mirrors()){
+    const {mirrorSize}=mesh.userData;
+    mirrorRotation.copy(mesh.quaternion);
+    mirrorPosition.copy(mesh.position).add(mirrorOffset.set(0,0,mirrorSize.d/2+.002).applyQuaternion(mirrorRotation));
+    consider(mesh,mirrorPosition,mirrorRotation);
+  }
+  if(!source){lastMirrorRender=-Infinity;return;}
+  const {w,h}=source.userData.mirrorSize??{w:1.7,h:1.95};
+  mirrorFace.scale.set(w/1.7,h/1.95,1);
+  mirrorFace.visible=true;
+  if(mirrorSource!==source){mirrorSource=source;lastMirrorRender=-Infinity;}
+  const quality=settings.mirrorQuality;
+  const resolution=quality===3?256:128;
+  if(mirrorResolution!==resolution){mirrorFace.getRenderTarget().setSize(resolution,resolution);mirrorResolution=resolution;lastMirrorRender=-Infinity;}
+  if(now-lastMirrorRender<(quality===3?45:110))return;
   lastMirrorRender=now;
   reflectionView.updateMatrixWorld(true);mirrorFace.updateMatrixWorld(true);
   avatarHead.visible=settings.body;
+  const started=performance.now();
   try{renderReflection(renderer,scene,reflectionView);}finally{avatarHead.visible=false;}
+  mirrorCpuMs=performance.now()-started;
 }
 const ray=new T.Raycaster(), raySource=new T.Vector3(), forward=new T.Vector3();
-const coconutPosition=new T.Vector3(), fixtureTouchPoint=new T.Vector3(), fixtureKeyPoint=new T.Vector3();
+const fixtureTouchPoint=new T.Vector3(), fixtureKeyPoint=new T.Vector3();
 let fixtureAim=null, toolLook=null, mapLook=null;
 const beforeFixtures=new Set(scene.children);
 const fixtures=addLabFixtures(scene,arena.boxes,{
   spawn:requestSpawn,clear:clearSpawnBank,resetPlayer,resetObjects:requestResetObjects,
-  resetTree:()=>requestObjectChange(2,resetCoconuts),
   quality:()=>liveLevel+'/10',
   resolution:()=>settings.resolution+'/10 · relancer VR',
   textureSize:()=>settingValue('texturePower'),
@@ -739,13 +772,12 @@ function spawnPlacedModels(){
 }
 maps=connectMaps({scene,arena,boot,onReset:angle=>{
   clearObjects();resetPlayer();yaw=T.MathUtils.degToRad(angle);
-  fixtures.coconuts.forEach(coco=>{coco.visible=!maps.assetLayer;});
   if(maps.builtIn)spawnSamples();
   spawnPlacedModels();
 },onVisual:applyVisual,
   getLevel:()=>liveLevel,defaultObjects:[...arena.builtObjects,...scene.children.filter(n=>!beforeFixtures.has(n)),mirrorBacking],
 });
-const spectator=addSpectator({scene,currentMap:()=>(maps.signature||'arena-r25-'+arena.hillSeed)+modelSignature,
+const spectator=addSpectator({scene,applyCoconuts:()=>{},currentMap:()=>(maps.signature||'arena-r25-'+arena.hillSeed)+modelSignature,
   seedArena:seed=>arena.setHillSeed(seed),
   makeReplica:type=>{
     const mesh=makePropMesh(type,true);
@@ -757,7 +789,6 @@ const spectator=addSpectator({scene,currentMap:()=>(maps.signature||'arena-r25-'
   onShot:shot=>blaster.receiveShot(shot,spectator.role==='vr'),
   applyLight:mode=>{arena.setTimeOfDay(mode??settings.timeOfDay-1);hudDirty=true;if(!renderer.xr.isPresenting)desktopMenu();},
   applyScore:value=>fixtures.setScore(value),
-  applyCoconuts:mask=>fixtures.coconuts.forEach((coco,i)=>{coco.visible=Boolean((mask??31)&1<<i);}),
 });
 function saveVRModel(asHead){
   const pieces=maps.modelPieces();
@@ -823,27 +854,17 @@ function touchFixture(hand){
   if(touched&&hand.lastFixture!==touched)touched.userData.action();
   hand.lastFixture=touched;
 }
-function pluckCoconut(coco,impulse=null){
-  coco.getWorldPosition(coconutPosition);
-  coco.visible=false;
-  if(!settings.objects)settings.objects=true;
-  const object=spawnObject(6,coconutPosition);
-  if(impulse)object.velocity.copy(impulse).multiplyScalar(3.5).y+=.66;
-  return object;
-}
 function fixtureRay(origin,direction,activate){
   if(!maps.builtIn)return;
   ray.set(origin,direction);
   ray.far=5.5;
-  const hits=ray.intersectObjects([...fixtures.targets,...fixtures.coconuts.filter(m=>m.visible)],false);
+  const hits=ray.intersectObjects(fixtures.targets,false);
   ray.far=Infinity;
   const hit=hits[0];
   if(!hit)return;
   cursor.visible=true;cursor.position.copy(hit.point).addScaledVector(direction,-.012);
   if(!activate)return;
   if(hit.object.userData.action)hit.object.userData.action(hit.uv);
-  else if(spectator.role==='player')spectator.sendAction({type:'world',mode:2,typeId:fixtures.coconuts.indexOf(hit.object)});
-  else pluckCoconut(hit.object,direction);
   desktopMenu();
 }
 
@@ -871,17 +892,6 @@ function requestObjectChange(typeId,local){
 }
 function clearSpawnBank(){requestObjectChange(0,clearObjects);}
 function requestResetObjects(){requestObjectChange(1,resetObjects);}
-function resetCoconuts(){
-  if(maps?.assetLayer){
-    for(const body of objects)if(body.spec.assetId==='spawn-coconut'){
-      if(body.owner){body.owner.held=null;body.owner=null;}
-      body.toolHold=false;restoreObject(body);
-      body.velocity.set(0,0,0);body.angular.set(0,0,0);body.frozen=true;
-    }
-    return;
-  }
-  for(const coco of fixtures.coconuts)coco.visible=true;
-}
 function requestSpawn(index,origin=null){
   settings.objects=true;
   if(spectator.role==='pc'){showGameHint('Commence par rejoindre le salon en joueur.');return;}
@@ -893,12 +903,7 @@ function handleNetworkAction(action,peer){
   if(!peer)return;
   if(action.type==='world'){
     if(action.mode===1){settings.timeOfDay=action.typeId+1;applyVisual();}
-    else if(action.mode===3){[clearObjects,resetObjects,resetCoconuts][action.typeId]();}
-    else if(maps.builtIn){
-      const coco=fixtures.coconuts[action.typeId];
-      if(coco?.visible&&coco.getWorldPosition(coconutPosition).distanceToSquared(peer)<=5.8**2&&
-          !handContact(spawnOrigin.copy(peer),coconutPosition,.01,activeBoxes,spawnHit,spawnNormal))pluckCoconut(coco);
-    }
+    else if(action.mode===3)[clearObjects,resetObjects][action.typeId]?.();
     return;
   }
   if(action.type==='spawn'){
@@ -1337,9 +1342,6 @@ function trackRemoteGrip(hand,grip){
   if(closest){
     const objectId=closest.userData.netId;
     if(spectator.sendAction({type:'hold',objectId,hand:side}))hand.remoteHeld=objectId;
-  }else if(maps.builtIn){
-    const typeId=fixtures.coconuts.findIndex(coco=>coco.visible&&coco.getWorldPosition(coconutPosition).distanceToSquared(hand.target)<.26**2);
-    if(typeId>=0)spectator.sendAction({type:'world',mode:2,typeId});
   }
 }
 // WebXR fournit les prises. xr-palm.js calcule leur pose dans l'arène avant
@@ -1363,12 +1365,10 @@ function trackHands(frame,space,dt){
     if(spectator.role==='player')trackRemoteGrip(h,grip);
     else if(!menu&&grip&&!h.grip&&settings.objects&&!h.held){
       let body=null, best=.15;
-      const coco=fixtures.coconuts.find(m=>m.visible&&m.getWorldPosition(coconutPosition).distanceToSquared(h.target)<.26**2);
-      if(coco)body=pluckCoconut(coco);
       for(const o of objects){
         if(o.owner||!o.grabbable||o.mesh.position.distanceToSquared(h.target)>(o.radius+.18)**2)continue;
         const distance=distanceToObject(h.target,o);
-        if(!coco&&distance<best){best=distance;body=o;}
+        if(distance<best){best=distance;body=o;}
       }
       if(body&&!h.held){
         h.held=body;body.owner=h;body.frozen=false;
@@ -1647,7 +1647,7 @@ function captureNetworkAvatar(){
   return {
     head:avatarHead.quaternion,hands:inVR?hands.map(h=>h.valid?{position:h.mesh.position,quaternion:h.mesh.quaternion,pressure:h.pressure}:null):[null,toolState.mode?desktopHand:null],
     height:head.y,armSpan:armSegmentLength()*2,light:settings.timeOfDay-1,
-    color:avatarColor,coconuts:fixtures.coconuts.reduce((mask,coco,i)=>mask|(Number(coco.visible)<<i),0),
+    color:avatarColor,coconuts:0,
     tool:toolState.mode?toolState:null,gun:blaster.gun,
   };
 }
@@ -1701,7 +1701,10 @@ renderer.setAnimationLoop((time,frame)=>{
     const physicsStart=performance.now();
     solveObjects(objects,arena.boxes,dt,9.81*settings.gravity/5,.12+settings.bounce*.064,surfaceAt);
     physicsCpuMs=performance.now()-physicsStart;
-    if(maps.builtIn)fixtures.updateTarget(objects,editableTargetFrame());
+    if(maps.builtIn){
+      const targetFrame=editableTargetFrame();
+      if(targetFrame||fixtures.target.visible)fixtures.updateTarget(objects,targetFrame);
+    }
   }
   if(inVR&&!menu&&spectator.role!=='pc')for(const hand of hands)touchFixture(hand);
   arena.probe.rotation.y+=dt*.29;
@@ -1779,7 +1782,7 @@ renderer.setAnimationLoop((time,frame)=>{
     try{renderer.render(scene,camera);}finally{vrFovMask.visible=false;}
   }
   renderSubmissionCpuMs=performance.now()-renderStart;
-  diagnostics.sample({mode:inVR?'VR':'PC',frameMs:actual*1000,physicsCpuMs,debugCpuMs,renderSubmissionCpuMs,objects:objects.length,moving:objects.filter(o=>!o.owner&&!o.frozen&&!o.sleeping&&o.velocity.lengthSq()>.0001).length,debugSegments:debugView.stats.segments});
+  diagnostics.sample({mode:inVR?'VR':'PC',frameMs:actual*1000,physicsCpuMs,debugCpuMs,mirrorCpuMs,renderSubmissionCpuMs,objects:objects.length,moving:objects.filter(o=>!o.owner&&!o.frozen&&!o.sleeping&&o.velocity.lengthSq()>.0001).length,debugSegments:debugView.stats.segments});
   if(time-diagAt>350){
     debugReadout.hidden=!(settings.debugForces||debugView.stats.truncated);
     if(!debugReadout.hidden)debugReadout.textContent='Vitesse joueur : '+velocity.length().toFixed(2)+' m/s · Gravité : '+currentGravity.toFixed(2)+' m/s² · Segments : '+debugView.stats.segments+(debugView.stats.truncated?' (budget atteint : augmenter Budget debug ou réduire la portée)':'');

@@ -1,5 +1,6 @@
 
 import * as T from 'three';
+import {shouldKeepArenaAsset} from './arena-map-pieces.js';
 import {tiledBox,transformUVs,decorPrimitiveGeometry} from './texture-geometry.js';
 import {terrainGeometry,terrainCollider,terrainVegetation,disposeVegetation,sculptTerrain,normalizeTerrain,resizeTerrain} from './terrain-edit.js';
 import {boxCollider,colliderFor} from './physics.js';
@@ -11,7 +12,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   const builtBoxes=arena.boxes.slice();
   const replaceableMeshes=new Set(builtBoxes.filter(box=>box.half&&box.mesh?.isObject3D).map(box=>box.mesh));
   const group=new T.Group();scene.add(group);
-  const meshRows=[], history=[];
+  const meshRows=[], mirrorRows=[], history=[];
   const loader=new T.TextureLoader(), textures=new Map();
   let loadRequest=0;
   let map=null, signature='', selection=-1,moving=-1,status='', lastGhostKey='';
@@ -98,6 +99,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     mesh.rotation.set(T.MathUtils.degToRad(piece.pitch),T.MathUtils.degToRad(piece.yaw),T.MathUtils.degToRad(piece.roll??0),'YXZ');
     mesh.castShadow=mesh.receiveShadow=true;
     mesh.userData.mapIndex=index;
+    if(piece.sceneryId==='lab-mirror')mesh.userData.mirrorSize={w:piece.w,h:piece.h,d:piece.d};
     group.add(mesh);
     const half=new T.Vector3(piece.w/2,piece.h/2,piece.d/2);
     const collider={mesh,position:mesh.position,quaternion:mesh.quaternion,half,min:half.clone().negate(),
@@ -121,6 +123,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   function rebuild(){
     for(const row of meshRows)removeRow(row);
     meshRows.length=0;
+    mirrorRows.length=0;
     const nodes=map?.pieces??[];
     signature=map?'custom-'+mapCode(JSON.stringify(map)):'';
     // Asset-backed map pieces replace their matching built-in fixture instead of stacking on it.
@@ -128,16 +131,16 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     const mappedScenery=new Set(nodes.map(piece=>piece.sceneryId).filter(Boolean));
     defaultObjects.forEach(mesh=>{
       const assetId=mesh.userData?.editorAssetId;
-      mesh.visible=!map||map.arenaBase&&!replaceableMeshes.has(mesh)&&(!assetId||(!mappedAssets.has(assetId)&&!mappedScenery.has(assetId)));
-      if(map?.assetLayer&&mesh.userData?.editorAssetId==='palm-tree')
-        mesh.traverse(child=>{if(child.userData?.editorFixtureCoconut)child.visible=false;});
+      mesh.visible=!map||!replaceableMeshes.has(mesh)&&shouldKeepArenaAsset(map,assetId,mappedAssets,mappedScenery);
     });
     for(let i=0;i<nodes.length;i++)meshRows.push(makeRow(nodes[i],i));
+    for(const row of meshRows)if(row.mesh.userData.mirrorSize)mirrorRows.push(row);
     pruneTextures();
     if(map){
-      const retained=map.arenaBase?builtBoxes.filter(box=>!replaceableMeshes.has(box.mesh)&&
-        (!box.editorAssetId||(!mappedAssets.has(box.editorAssetId)&&!mappedScenery.has(box.editorAssetId)))):[];
-      arena.boxes.splice(0,arena.boxes.length,...retained,...meshRows.filter((row,i)=>nodes[i].solid&&nodes[i].model?.kind!=='prop'&&nodes[i].model?.properties?.collidable!==false).map(row=>row.collider));
+      const retained=builtBoxes.filter(box=>!replaceableMeshes.has(box.mesh)&&shouldKeepArenaAsset(map,box.editorAssetId,mappedAssets,mappedScenery));
+      const colliders=meshRows.filter((row,i)=>nodes[i].solid&&nodes[i].model?.kind!=='prop'&&nodes[i].model?.properties?.collidable!==false)
+        .map(row=>row.collider);
+      arena.boxes.splice(0,arena.boxes.length,...retained,...colliders);
     }
     else arena.boxes.splice(0,arena.boxes.length,...builtBoxes);
     group.updateMatrixWorld(true);
@@ -183,7 +186,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   function edit(origin,direction,click,{mode,piece,head,feet}){
     trace.set(origin,direction);trace.far=12;
     const targets=meshRows.map(row=>row.mesh);
-    if(mode===1&&map?.arenaBase)targets.push(...builtBoxes.filter(box=>box.heightfield&&
+    if(mode===1&&map?.arenaBase&&!map.editableArena)targets.push(...builtBoxes.filter(box=>box.heightfield&&
       !map.pieces.some(piece=>piece.sceneryId===box.editorAssetId)).map(box=>box.mesh));
     const hits=trace.intersectObjects(targets,false);
     const hit=mode>=5?hits.find(item=>map?.pieces[item.object.userData.mapIndex]?.terrain):hits[0];
@@ -277,6 +280,8 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   document.querySelector('#map-export').onclick=save;
   document.querySelector('#map-reset').onclick=reset;
   return {placedModels:()=>map?.pieces.filter(p=>p.model?.kind==='prop')??[],modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,reset,blank,undo,save,edit,recenter,inform,
+    mirrors:()=>mirrorRows,
+    get usesBuiltInMirror(){return !map||map.arenaBase&&!map.editableArena&&!map.pieces.some(piece=>piece.sceneryId==='lab-mirror');},
     clearGhost(){ghost.visible=false;},get active(){return Boolean(map);},get builtIn(){return !map||map.arenaBase===true;},get assetLayer(){return map?.assetLayer===true;},
     hasAsset(assetId){return Boolean(map?.pieces.some(piece=>piece.model?.assetId===assetId));},
     getAssetPiece(assetId){return map?.pieces.find(piece=>piece.model?.assetId===assetId)??null;},
@@ -284,4 +289,5 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     get nodes(){return map?.pieces.length??0;},get name(){return map?.name??null;},get signature(){return signature;},
   };
 }
+
 

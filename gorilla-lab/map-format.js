@@ -22,11 +22,15 @@ export function parseMap(input){
     throw Error('Choisis une map Gorilla Lab v1 avec 1 à '+maxPieces+' pièces.');
   }
   const s=input.spawn??{};
+  const pieces=input.arenaBase===true?input.pieces.filter(piece=>
+    piece?.model?.assetId!=='palm-tree'&&piece?.sceneryId!=='palm-tree'&&
+    !(piece?.model?.assetId==='spawn-coconut'&&/^Coco [1-5]$/.test(piece.name))):input.pieces;
+  if(!pieces.length)throw Error('Cette carte ne contient plus de pièces après retrait du cocotier.');
   return {
-    format:'gorilla-lab-map',version:1,...(input.arenaBase===true?{arenaBase:true}:{}),...(input.assetLayer===true?{assetLayer:true}:{}),name:text(input.name,56,'Ma map'),
+    format:'gorilla-lab-map',version:1,...(input.arenaBase===true?{arenaBase:true}:{}),...(input.assetLayer===true?{assetLayer:true}:{}),...(input.editableArena===true?{editableArena:true}:{}),name:text(input.name,56,'Ma map'),
     worldSize:number(input.worldSize,24,2048,240),
     spawn:{x:number(s.x,-maxWorldReach,maxWorldReach,0),y:number(s.y,-256,256,.06),z:number(s.z,-maxWorldReach,maxWorldReach,3),yaw:number(s.yaw,-360,360,0)},
-    pieces:input.pieces.map((p,i)=>{
+    pieces:pieces.map((p,i)=>{
       if(!p||typeof p!=='object')throw Error('Pièce invalide : '+(i+1));
       const terrain=p.terrain&&typeof p.terrain==='object'?normalizeTerrain(p.terrain):null;
       const model=p.model ? normalizeModelPack({version:1,models:[p.model]}).models[0] : null;
@@ -57,11 +61,13 @@ export function arenaMap(boxes){
   return parseMap({
     format:'gorilla-lab-map',version:1,name:'Gorilla Lab — arène de départ',arenaBase:true,
     spawn:{...labSpawn,yaw:0},
-    pieces:boxes.filter(box=>box.half&&box.mesh?.isObject3D).map(box=>({
-      name:box.name,x:box.position.x,y:box.position.y,z:box.position.z,
-      w:box.half.x*2,h:box.half.y*2,d:box.half.z*2,
-      pitch:box.mesh.rotation.x*180/Math.PI,material:box.type,grip:box.friction,gravity:box.gravity,
-    })),
+    pieces:boxes.filter(box=>box.half&&box.mesh?.isObject3D).map(box=>{
+      const angles=new Euler().setFromQuaternion(box.quaternion??box.mesh.quaternion,'YXZ');
+      return {name:box.name,x:box.position.x,y:box.position.y,z:box.position.z,
+        w:box.half.x*2,h:box.half.y*2,d:box.half.z*2,pitch:angles.x*180/Math.PI,
+        yaw:angles.y*180/Math.PI,roll:angles.z*180/Math.PI,material:box.type,
+        grip:box.friction,gravity:box.gravity,bounce:box.bounce};
+    }),
   });
 }
 export function exampleMap(){
@@ -110,4 +116,5 @@ export function downloadMap(map){
   a.click();
   setTimeout(()=>URL.revokeObjectURL(url),1200);
 }
+
 

@@ -171,7 +171,24 @@ function vertexContact(body,box,outNormal,outPoint) {
   return deepest;
 }
 const satAxis=new T.Vector3(), satCross=new T.Vector3(), satPoint=new T.Vector3();
-const separating=new T.Vector3(), reverseAxis=new T.Vector3();
+const separating=new T.Vector3();
+const satInverseA=new T.Quaternion(),satInverseB=new T.Quaternion();
+const projectionAxis=new T.Vector3(),projectionA={min:0,max:0},projectionB={min:0,max:0};
+function projectShape(shape,axis,inverse,out){
+  if(shape.sphereRadius){
+    out.min=-shape.sphereRadius;
+    out.max=shape.sphereRadius;
+    return;
+  }
+  projectionAxis.copy(axis).applyQuaternion(inverse);
+  let min=Infinity,max=-Infinity;
+  for(const vertex of shape.vertices){
+    const value=vertex.dot(projectionAxis);
+    min=Math.min(min,value);
+    max=Math.max(max,value);
+  }
+  out.min=min;out.max=max;
+}
 export function boxCollider(half) {
   return colliderFor(new T.BoxGeometry(half.x*2,half.y*2,half.z*2));
 }
@@ -184,13 +201,16 @@ function sat(a,b,out) {
     return Math.max(0,a.shape.sphereRadius+b.shape.sphereRadius-distance);
   }
   let best=Infinity;
+  satInverseA.copy(a.mesh.quaternion).invert();
+  satInverseB.copy(b.mesh.quaternion).invert();
   function axisTest(axis){
     if(axis.lengthSq()<.00001)return true;
     axis.normalize();
     const center=d.dot(axis);
-    const reverse=reverseAxis.copy(axis).negate();
-    const towardPositive=support(a,reverse)+support(b,axis)-center;
-    const towardNegative=support(a,axis)+support(b,reverse)+center;
+    projectShape(a.shape,axis,satInverseA,projectionA);
+    projectShape(b.shape,axis,satInverseB,projectionB);
+    const towardPositive=projectionB.max-projectionA.min-center;
+    const towardNegative=projectionA.max-projectionB.min+center;
     if(towardPositive<=0||towardNegative<=0)return false;
     if(Math.min(towardPositive,towardNegative)<best){
       best=Math.min(towardPositive,towardNegative);
@@ -578,8 +598,10 @@ export function solveObjects(objects,boxes,dt,gravity,rebound,surfaceAt) {
       if(!state.inverseMass)continue;
       const {body}=state;
       state.groundFriction=0;state.groundY=0;
-      if(!body.sleeping)advanceBody(body,step,gravity,surfaceAt);
-      updateBodyBounds(state);
+      if(!body.sleeping){
+        advanceBody(body,step,gravity,surfaceAt);
+        updateBodyBounds(state);
+      }
     }
     for(let pass=0;pass<SOLVER_PASSES;pass++){
       let changed=false;
@@ -598,7 +620,9 @@ export function solveObjects(objects,boxes,dt,gravity,rebound,surfaceAt) {
         for(let j=i+1;j<states.length;j++){
           const b=states[j];
           if(b.sweepStart>a.sweepEnd)break;
-          if((!a.inverseMass&&!b.inverseMass)||!a.bounds.intersectsBox(b.bounds))continue;
+          // Bodies resting independently on the ground cannot change each other's contacts.
+          if((!a.inverseMass&&!b.inverseMass)||
+            (a.body.sleeping&&b.body.sleeping&&a.groundY>.9&&b.groundY>.9)||!a.bounds.intersectsBox(b.bounds))continue;
           const depth=sat(a.body,b.body,normal);
           if(depth<=0)continue;
           contactPoint(a.body,b.body,normal,contact);

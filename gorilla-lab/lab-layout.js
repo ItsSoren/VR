@@ -14,7 +14,7 @@ export const labZones={
   throwing:{name:'Lancers et cible',color:'#dfc78a',bounds:bounds(9,23,-23,-8),sign:[12,-9.25]},
   hills:{name:'Terrain vallonné',color:'#b5cb99',bounds:bounds(-23,-9,-49,-27),sign:[-16,-28.5]},
   course:{name:'Parcours en hauteur',color:'#c5b4da',bounds:bounds(-6,6,-49,-27),sign:[0,-28.4]},
-  coconuts:{name:'Cocotier',color:'#a4c99c',bounds:bounds(9,23,-34,-27),sign:[12,-28.25]},
+  coconuts:{name:'Zone libre',color:'#a4c99c',bounds:bounds(9,23,-34,-27),sign:[12,-28.25]},
   gravity:{name:'Gravité faible',color:'#dfd3a1',bounds:bounds(9,23,-48,-37),sign:[16,-38.2]},
 };
 
@@ -40,11 +40,9 @@ export const labStations={
   largeObjects:[18.8,-2.5],
   rendering:[-15.5,-3.5],
   course:[4.7,-29],
-  coconuts:[19.4,-32.5],
 };
 export const labObjectSpawns=[{x:13,y:1,z:-.3},{x:18.8,y:1,z:-.3}];
 export const labObjectSlots=[1.75,4.75].flatMap(z=>[11.5,14,16.5,19,21.5].map(x=>({x,z})));
-export const labTree={x:16,z:-31};
 export const labTarget={x:16,y:1.52,z:-21};
 export const labProbe={x:-19.4,y:.68,z:-3.25};
 export const labMaterialSample=i=>({x:-20+(i%6)*1.52,z:.5-Math.floor(i/6)*1.25});
@@ -78,3 +76,4 @@ export const labStructures={
     ['Plateforme haute',3.06,3.4,-43.15,3.8,.45,2.1,0],
   ],
 };
+

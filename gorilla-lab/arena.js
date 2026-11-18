@@ -271,6 +271,7 @@ export function buildArena(scene,renderer) {
   sign('ARRIVÉE',1.02,-48.15,'#e8d2ff',3.4);
   const chrome=new T.MeshStandardMaterial({color:'#c8e6ed',metalness:1,roughness:.16});
   const probe=new T.Mesh(new T.IcosahedronGeometry(.54,2),chrome);
+  probe.userData.editorAssetId='chrome-sphere';
   probe.position.set(labProbe.x,labProbe.y,labProbe.z);probe.castShadow=true;scene.add(probe);
   const display=palette.map((_,i)=>{
     const {x,z}=labMaterialSample(i);
@@ -328,6 +329,7 @@ export function buildArena(scene,renderer) {
   }
   return {boxes,floors,probe,display,visual,shadow,setTimeOfDay,centerShadows,get hillSeed(){return hillSeed;},setHillSeed,bakeLightmap,mapMaterial:(i,level)=>level>=4?tiles[i]:alt[i],builtObjects:[...boxes.map(b=>b.mesh).filter(m=>m?.isObject3D),probe,...props],materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
 }
+
 
 
 

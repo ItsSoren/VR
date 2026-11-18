@@ -19,7 +19,7 @@ export function createSettings(mobileScreen){
     texturePower:7, preset:2, lightmap:true,
     post:true, rayTrace:false, focus:true,
     focusStrength:5, focusSize:5, textures:true,
-    reflections:true, shadows:true, bloom:true,
+    reflections:true, mirrorQuality:2, shadows:true, bloom:true,
     // Outils et carte
     blasterActive:false, toolMode:1, toolActive:false,
     mapEdit:false, mapMode:1, mapShape:1,

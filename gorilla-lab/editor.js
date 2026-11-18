@@ -2,7 +2,8 @@ import * as T from 'three';
 import {buildArena} from './arena.js';
 import {addLabFixtures} from './fixtures.js';
 import {createArenaObjectSpecs,forEachStartupObject} from './arena-objects.js';
-import {labMirror,labProbe,labTree,labTarget} from './lab-layout.js';
+import {labMirror,labProbe,labTarget} from './lab-layout.js';
+import {defaultMirrorPiece,shouldKeepArenaAsset} from './arena-map-pieces.js';
 import {tiledBox,transformUVs,decorPrimitiveGeometry} from './texture-geometry.js';
 import {readModelPack,modelStorageKey,normalizeModelPack,createModelUnitGeometry,createModelMaterial,modelCollisionGeometry,disposeModelMaterial,modelDimensions,modelBounds} from './model-pack.js';
 import {createBuiltinModelTemplates,spawnAssetIds} from './model-assets.js';
@@ -359,7 +360,7 @@ const defaultMap=()=>{
   const next=arenaMap(previewArena.boxes);
   const hillBox=previewArena.boxes.find(box=>box.heightfield);
   if(hillBox){
-    const {xMin,xMax,zMin,zMax}=hillBox,detail=64,w=xMax-xMin,d=zMax-zMin;
+    const {xMin,xMax,zMin,zMax}=hillBox,detail=32,w=xMax-xMin,d=zMax-zMin;
     const heights=Array.from({length:(detail+1)**2},(_,index)=>{
       const x=xMin+(index%(detail+1))/detail*w;
       const z=zMin+Math.floor(index/(detail+1))/detail*d;
@@ -370,27 +371,20 @@ const defaultMap=()=>{
       terrain:normalizeTerrain({detail,seed:1,amplitude:0,heights})}));
   }
   next.assetLayer=true;
+  next.editableArena=true;
+  next.pieces.push(defaultMirrorPiece());
   forEachStartupObject((type,position)=>{
     const assetId=spawnAssetIds[type];
     if(assetId)next.pieces.push(assetPiece(assetId,position));
   });
   next.pieces.push(assetPiece('chrome-sphere',new T.Vector3(labProbe.x,labProbe.y,labProbe.z)));
-  const treeModel=structuredClone(builtinByAsset.get('palm-tree'));
-  treeModel.parts=treeModel.parts.filter(part=>part.assetId!=='spawn-coconut');
-  next.pieces.push(assetPiece('palm-tree',new T.Vector3(labTree.x,0,labTree.z),treeModel));
-  for(let i=0;i<5;i++){
-    const angle=i*Math.PI*2/5,localX=Math.cos(angle)*(.25+(i%2)*.10),localY=2.88+(i%3)*.06;
-    const tilt=-.14;
-    const position=new T.Vector3(labTree.x+Math.cos(tilt)*localX-Math.sin(tilt)*localY,
-      Math.sin(tilt)*localX+Math.cos(tilt)*localY,labTree.z+Math.sin(angle)*(.25+(i%2)*.10));
-    next.pieces.push(assetPiece('spawn-coconut',position,null,'Coco '+(i+1)));
-  }
   next.pieces.push(assetPiece('range-target',new T.Vector3(labTarget.x,labTarget.y,labTarget.z)));
   return parseMap(next);
 };
 map=defaultMap();
 const mirror=new T.Mesh(new T.BoxGeometry(1.8,2.03,.10),new T.MeshStandardMaterial({color:'#8daebc',metalness:.9,roughness:.12}));
 mirror.position.set(labMirror.x,labMirror.y,labMirror.z);
+mirror.userData.editorAssetId='lab-mirror';
 referenceScene.add(mirror);
 const editableArenaBoxes=previewArena.boxes.filter(box=>box.half&&box.mesh?.isObject3D);
 editableArenaBoxes.forEach(box=>box.mesh.removeFromParent());
@@ -784,7 +778,7 @@ function rebuildScene() {
   const mappedScenery=new Set(map.pieces.map(piece=>piece.sceneryId).filter(Boolean));
   arenaBackdrop.traverse(node=>{
     const assetId=node.userData.editorAssetId;
-    if(assetId)node.visible=Boolean(map.arenaBase)&&!mappedAssets.has(assetId)&&!mappedScenery.has(assetId);
+    if(assetId)node.visible=shouldKeepArenaAsset(map,assetId,mappedAssets,mappedScenery);
   });
   sun.visible=ambient.visible=!map.arenaBase;
   scene.fog=map.arenaBase?referenceScene.fog:null;
@@ -1140,7 +1134,7 @@ function pieceRoot(object){
 }
 function pointUnderPointer(canvas, event) {
   setEventRay(canvas, event);
-  const objects=map.arenaBase?[...group.children,previewHill]:group.children;
+  const objects=previewHill.visible&&map.arenaBase?[...group.children,previewHill]:group.children;
   const hits=raycaster.intersectObjects(objects,true);
   for(const hit of hits){
     if(hit.object===previewHill)return hit;
@@ -1154,7 +1148,7 @@ function pointUnderPointer(canvas, event) {
 function spawnOnTop(x, z, yaw, selectedMesh = null) {
   raycaster.set(new T.Vector3(x, 80, z), new T.Vector3(0, -1, 0));
   const ground = selectedMesh ? raycaster.intersectObject(selectedMesh, false)[0]
-    : raycaster.intersectObjects(map.arenaBase?[...group.children,previewHill]:group.children, false).find(hit => hit.object===previewHill||map.pieces[group.children.indexOf(hit.object)]?.solid);
+    : raycaster.intersectObjects(previewHill.visible&&map.arenaBase?[...group.children,previewHill]:group.children, false).find(hit => hit.object===previewHill||map.pieces[group.children.indexOf(hit.object)]?.solid);
   if (!ground || ground.point.y > 29.9) return null;
   return { x, y: Math.max(-10, ground.point.y + .08), z, yaw };
 }
@@ -1548,6 +1542,7 @@ $('spawn-here').onclick = () => {
 
 for (const button of toolButtons) button.onclick = () => setTool(button.dataset.tool);
 $('duplicate').onclick = duplicatePiece;
+$('add-mirror').onclick = () => addPiece(defaultMirrorPiece());
 $('delete').onclick = removePiece;
 $('rotate').onclick = rotatePiece;
 $('undo').onclick = undo;
@@ -1796,12 +1791,12 @@ try {
     const saved=parseMap(draft);
     // Previously just opening the editor automatically saved the demo as a draft.
     if(JSON.stringify(saved)!==JSON.stringify(exampleMap())){
-      if(saved.arenaBase){
+      if(saved.arenaBase&&!saved.editableArena){
         const defaults=defaultMap(),knownAssets=new Set(saved.pieces.map(piece=>piece.model?.assetId).filter(Boolean));
         const knownScenery=new Set(saved.pieces.map(piece=>piece.sceneryId).filter(Boolean));
         const additions=defaults.pieces.filter(piece=>(piece.model?.assetId&&!knownAssets.has(piece.model.assetId))||
           (piece.sceneryId&&!knownScenery.has(piece.sceneryId)));
-        if(additions.length){saved.pieces.push(...additions);saved.assetLayer=true;map=parseMap(saved);
+        if(additions.length&&saved.pieces.length+additions.length<=maxPieces){saved.pieces.push(...additions);saved.assetLayer=true;saved.editableArena=true;map=parseMap(saved);
           notice('Carte mise à niveau : relief, objets et éléments du Spawn désormais éditables.');
         }else map=saved;
       }else map=saved;
@@ -1823,3 +1818,4 @@ if(requestedModel){
     notice('Modèle introuvable dans ce navigateur. Enregistre-le dans l’atelier des modèles, puis réessaie.');
   }
 }
+

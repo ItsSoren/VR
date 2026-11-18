@@ -1,6 +1,6 @@
 import * as T from 'three';
 import {createArenaObjectSpecs} from './arena-objects.js';
-import {labProbe,labTree,labTarget} from './lab-layout.js';
+import {labTarget} from './lab-layout.js';
 
 export const spawnAssetIds=[
   'spawn-cube','spawn-ball','spawn-tetrahedron','spawn-brick','spawn-large-rectangle',
@@ -103,18 +103,6 @@ export function createBuiltinModelTemplates(){
     ].map(([id,name])=>template(id,name,'prop',id==='spawn-coconut'?{frozen:true}:{})),
     template('chrome-sphere','Sphère chrome','prop',{frozen:true}),
   ];
-  const tree=template('palm-tree','Cocotier','structure',{grabbable:false});
-  tree.parts=[
-    part('Tronc','palm-trunk',[0,1.575,0],[1,1,1],[0,0,-8]),
-    part('Palmes','palm-fronds',[0,0,0],[1,1,1],[0,0,-8]),
-  ];
-  for(let i=0;i<5;i++){
-    const a=i*Math.PI*2/5;
-    tree.parts.push(part('Noix de coco '+(i+1),'spawn-coconut',
-      [Math.cos(a)*(.25+(i%2)*.10),2.88+(i%3)*.06,Math.sin(a)*(.25+(i%2)*.10)],
-      [.91,1.16,.91],[0,0,-8]));
-  }
-  templates.push(tree);
   const target=template('range-target','Cible de tir','structure',{grabbable:false,collidable:false});
   target.parts=[
     part('Anneau extérieur','target-ring-outer'),
@@ -126,3 +114,4 @@ export function createBuiltinModelTemplates(){
   templates.push(target);
   return templates;
 }
+
