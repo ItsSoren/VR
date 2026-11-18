@@ -2,13 +2,14 @@
 export function createSettings(mobileScreen){
   return {
     // Locomotion et collisions
-    stepHaptics:true, grip:6, slide:3,
+    stepHaptics:true, stepHapticStrength:5, snapWithMenu:true, grip:6, slide:3,
     gravity:5, jump:5, weight:5,
     size:5, arms:5, bounce:4,
     throw:5, preciseHitboxes:true, movement:true,
     collisions:true, objects:true, body:true,
     hands:true, stepAudio:true, stepVolume:5,
     // Diagnostic overlays are off in normal play.
+    debugScene:true, debugObjects:true, debugMesh:false, debugRange:6, debugBudget:5,
     debugPalm:false, debugHitboxes:false, debugInvisible:false, debugForces:false, debugBody:false, debugSpeed:1,
     // Rendu
     timeOfDay:1, viewFov:70, vrFov:100, shaderMode:1,
@@ -39,3 +40,4 @@ export const visualPresets={
   'Vitrine':{shadowQuality:10,lightQuality:10,post:true,rayTrace:true,quality:10,auto:false,texturePower:12,resolution:10,shadows:true,reflections:true,bloom:true,focus:false},
   'Benchmark':{shadowQuality:10,lightQuality:10,post:true,rayTrace:true,quality:10,auto:false,texturePower:10,resolution:7,shadows:true,reflections:true,bloom:false,focus:false},
 };
+

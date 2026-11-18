@@ -12,6 +12,10 @@ export function createDebugView(scene){
   lines.frustumCulled=false;lines.renderOrder=100;lines.visible=false;scene.add(lines);
   const sphere=new T.WireframeGeometry(new T.SphereGeometry(1,12,8)).attributes.position;
   const palm=new T.WireframeGeometry(new T.OctahedronGeometry(1).scale(...palmHalfExtent)).attributes.position;
+  const colliderCache=new WeakMap();
+  const stats={vertices:0,segments:0,truncated:false,boxes:0,bodies:0};
+  let budget=10000;
+  const viewOrigin=new T.Vector3();
   const wireCache=new WeakMap(), unit=new T.Vector3(1,1,1), rotation=new T.Quaternion();
   const a=new T.Vector3(),b=new T.Vector3(),c=new T.Vector3(),d=new T.Vector3(),center=new T.Vector3();
   const axis=new T.Vector3(),side=new T.Vector3(),worldUp=new T.Vector3(0,1,0);
@@ -19,12 +23,13 @@ export function createDebugView(scene){
     proxy:new T.Color('#ff76df'),movement:new T.Color('#fff0af'),normal:new T.Color('#ff994e'),velocity:new T.Color('#80aaff'),force:new T.Color('#ff5454'),rig:new T.Color('#cec4ff')};
   let count=0;
   function line(from,to,color){
-    if(count+2>capacity)return;
+    if(count+2>budget){stats.truncated=true;return;}
     from.toArray(positions,count*3);color.toArray(colors,count++*3);
     to.toArray(positions,count*3);color.toArray(colors,count++*3);
   }
   function wire(vertices,position,quaternion,scale,color){
     for(let i=0;i<vertices.count;i+=2){
+      if(count+2>budget){stats.truncated=true;break;}
       a.fromBufferAttribute(vertices,i).multiply(scale).applyQuaternion(quaternion).add(position);
       b.fromBufferAttribute(vertices,i+1).multiply(scale).applyQuaternion(quaternion).add(position);
       line(a,b,color);
@@ -32,12 +37,16 @@ export function createDebugView(scene){
   }
   function collider(shape,position,quaternion,color){
     if(shape.sphereRadius){wire(sphere,position,quaternion,d.setScalar(shape.sphereRadius),color);return;}
-    for(const {a:first,b:second,c:third} of shape.faces){
-      a.copy(first).applyQuaternion(quaternion).add(position);
-      b.copy(second).applyQuaternion(quaternion).add(position);
-      c.copy(third).applyQuaternion(quaternion).add(position);
-      line(a,b,color);line(b,c,color);line(c,a,color);
+    let edges=colliderCache.get(shape);
+    if(!edges){
+      const seen=new Set(),values=[];
+      for(const face of shape.faces)for(const [first,second] of [[face.a,face.b],[face.b,face.c],[face.c,face.a]]){
+        const keys=[first.toArray().join(','),second.toArray().join(',')].sort().join('|');
+        if(seen.has(keys))continue;seen.add(keys);values.push(...first.toArray(),...second.toArray());
+      }
+      edges=new T.Float32BufferAttribute(values,3);colliderCache.set(shape,edges);
     }
+    wire(edges,position,quaternion,unit,color);
   }
   function vector(origin,value,scale,color){
     if(value.lengthSq()<1e-8)return;
@@ -51,13 +60,26 @@ export function createDebugView(scene){
     line(center,a.copy(d).addScaledVector(side,tip*.5),color);
     line(center,b.copy(d).addScaledVector(side,-tip*.5),color);
   }
-  function update({settings,boxes,bodies,hands,locomotion,velocity,head,body,neck,proxies,gravity,appliedMove,playerActive,inVR}){
-    count=0;
-    lines.visible=settings.debugPalm||settings.debugHitboxes||settings.debugInvisible||settings.debugForces||settings.debugBody;
-    if(!lines.visible)return;
-    if(settings.debugHitboxes||settings.debugInvisible){
-      for(const box of boxes){
+  function update({settings,boxes,bodies,hands,locomotion,velocity,head,body,neck,proxies,gravity,appliedMove,playerActive,inVR,viewQuaternion}){
+    count=0;Object.assign(stats,{vertices:0,segments:0,truncated:false,boxes:0,bodies:0});
+    budget=Math.min(capacity,(settings.debugBudget??5)*2000);
+    const range=(settings.debugRange??6)*5;
+    const nearby=(position,radius=0)=>!position||position.distanceToSquared(head)<=(range+radius)**2;
+    lines.visible=settings.debugPalm||settings.debugHitboxes||settings.debugInvisible||settings.debugForces||settings.debugBody||settings.debugMesh;
+    if(!lines.visible){geometry.setDrawRange(0,0);return;}
+    if(settings.debugHitboxes||settings.debugInvisible||settings.debugMesh){
+      if(settings.debugScene!==false)for(const box of boxes){
+        if(count+2>budget){stats.truncated=true;break;}
+        const radius=box.shape?.radius??box.half?.length()??Math.hypot((box.xMax-box.xMin)||0,(box.zMax-box.zMin)||0);
+        if(!nearby(box.position??box.mesh?.position,radius))continue;
+        stats.boxes++;
         const visible=box.mesh?.isObject3D&&box.mesh.visible;
+        if(settings.debugMesh&&visible&&box.mesh.geometry){
+          const source=box.mesh.geometry,version=source.attributes.position.version;
+          let entry=wireCache.get(source);
+          if(entry?.version!==version){entry?.edges.dispose();entry={version,edges:new T.WireframeGeometry(source)};wireCache.set(source,entry);}
+          wire(entry.edges.attributes.position,box.mesh.position,box.mesh.quaternion,box.mesh.scale,palette.grip);
+        }
         if(visible?!settings.debugHitboxes:!settings.debugInvisible)continue;
         if(box.shape)collider(box.shape,box.position,box.quaternion,visible?palette.solid:palette.proxy);
         else if(box.heightfield&&box.mesh?.geometry){
@@ -72,8 +94,18 @@ export function createDebugView(scene){
           wire(entry.edges.attributes.position,box.mesh.position,box.mesh.quaternion,unit,palette.solid);
         }
       }
-      if(settings.debugHitboxes)for(const object of bodies){
-        if(object.blocksPlayer&&object.mesh.visible)collider(object.shape,object.mesh.position,object.mesh.quaternion,palette.solid);
+      if(settings.debugObjects!==false)for(const object of bodies){
+        if(count+2>budget){stats.truncated=true;break;}
+        if(!object.mesh.visible||!nearby(object.mesh.position,object.shape.radius))continue;
+        stats.bodies++;
+        if(settings.debugHitboxes&&object.collidable!==false&&object.blocksPlayer!==false)
+          collider(object.shape,object.mesh.position,object.mesh.quaternion,object.owner?palette.proxy:palette.solid);
+        if(settings.debugMesh&&object.mesh.geometry){
+          const source=object.mesh.geometry,version=source.attributes.position.version;
+          let entry=wireCache.get(source);
+          if(entry?.version!==version){entry?.edges.dispose();entry={version,edges:new T.WireframeGeometry(source)};wireCache.set(source,entry);}
+          wire(entry.edges.attributes.position,object.mesh.position,object.mesh.quaternion,object.mesh.scale,palette.grip);
+        }
       }
     }
     if(playerActive){
@@ -84,9 +116,17 @@ export function createDebugView(scene){
         line(neck,body,palette.rig);
       }
       if(settings.debugForces){
-        vector(head,velocity,.13,palette.velocity);
-        vector(head,worldUp,-gravity*.038,palette.force);
-        vector(head,appliedMove,5,palette.movement);
+        viewOrigin.set(0,-.22,-.5);
+        if(viewQuaternion)viewOrigin.applyQuaternion(viewQuaternion);
+        viewOrigin.add(head);
+        vector(viewOrigin,velocity,.13,palette.velocity);
+        vector(viewOrigin,worldUp,-gravity*.038,palette.force);
+        vector(viewOrigin,appliedMove,5,palette.movement);
+        if(settings.debugObjects!==false)for(const object of bodies){
+          if(!object.mesh.visible||!object.velocity||!nearby(object.mesh.position,object.radius))continue;
+          vector(object.mesh.position,object.velocity,.13,palette.velocity);
+          if(count+2>budget){stats.truncated=true;break;}
+        }
       }
       if(inVR&&(settings.debugPalm||settings.debugForces))for(const state of locomotion.hands){
         const {hand,normal,offset}=state;
@@ -109,6 +149,7 @@ export function createDebugView(scene){
           vector(hand.anchor,normal,.25,palette.normal);
       }
     }
+    stats.vertices=count;stats.segments=count/2;
     geometry.setDrawRange(0,count);
     for(const name of ['position','color']){
       const attribute=geometry.attributes[name];
@@ -117,5 +158,6 @@ export function createDebugView(scene){
       attribute.needsUpdate=Boolean(count);
     }
   }
-  return {update};
+  return {update,stats};
 }
+

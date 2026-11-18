@@ -1,3 +1,5 @@
+import {readTurnAxis,consumeSnap} from './snap-turn.js';
+import {createDiagnostics} from './diagnostics.js';
 import {restoreObject,outsideObjectWorld} from './object-lifecycle.js';
 import {calibratedHeight,torsoBend,removeInwardVelocity,bodyProxyOffset} from './player-pose.js';
 
@@ -9,7 +11,7 @@ import {texturePresets,seamlessTexture} from './seamless-texture.js';
 import {createFlatControls,createKeyboardState} from './flat-controls.js';
 import {screenPixelRatio} from './screen-render.js';
 import { GorillaLocomotion } from './locomotion.js';
-import { updateGroundHaptics } from './ground-haptics.js';
+import { updateGroundHaptics,pulseHand } from './ground-haptics.js';
 import { createToolVisual } from './tool-visual.js';
 import {createBlasterSystem,bindBlasterTrigger} from './blaster-system.js';
 import {createSettings,toolModes,shaderNames,visualPresets} from './game-settings.js';
@@ -77,6 +79,10 @@ try{
 const steps=createStepSound();
 for(const event of ['pointerdown','keydown'])addEventListener(event,steps.unlock,{passive:true});
 const debugView=createDebugView(scene);
+const diagnostics=createDiagnostics();
+let physicsCpuMs=0,debugCpuMs=0,renderSubmissionCpuMs=0;
+addEventListener('error',event=>diagnostics.record('error',{message:String(event.message).slice(0,500)}));
+addEventListener('unhandledrejection',event=>diagnostics.record('rejection',{message:String(event.reason?.message??event.reason).slice(0,500)}));
 // The preceding frame's foot contact guides keyboard/joystick movement.
 const walkingSupport={normal:new T.Vector3(),surface:null};
 const bodyProxies=[.18,.17,.105].map(radius=>({radius,position:new T.Vector3()}));
@@ -92,7 +98,8 @@ let hasPreviousHead=false,grounded=false;
 let launchCount=0,lastLaunch=null;
 let refreshOptions=[],fpsGoal=100;
 const up=new T.Vector3(0,1,0), spin=new T.Quaternion();
-let yaw=0,bodyYaw=0,pitch=0, drop=0, standingHeight=NaN, snap=false, frameTime=0,fps=0,windowFrames=0,windowElapsed=0,qualityTimer=0,lowCount=0,highCount=0,liveLevel=settings.quality,refreshRate=72;
+let yaw=0,bodyYaw=0,pitch=0, drop=0, standingHeight=NaN, snapState={armed:true}, frameTime=0,fps=0,windowFrames=0,windowElapsed=0,qualityTimer=0,lowCount=0,highCount=0,liveLevel=settings.quality,refreshRate=72;
+let vrRowsPage=0;
 let menu=false,panelHand='left',page=new URLSearchParams(location.search).has('room')?5:0,renderPage=0,spawnPage=0,mapPage=0,hudDirty=true,lastDraw=0;
 const blocked=[],handBoxes=[];
 let activeBoxes=arena.boxes;
@@ -274,6 +281,7 @@ function spawnObject(index,origin,actor,quiet=false){
   body.frozen=Boolean(spec.properties?.frozen);body.collidable=spec.properties?.collidable!==false;body.grabbable=spec.properties?.grabbable!==false;body.toolHold=false;body.protected=index===CAMERA_TYPE;body.paint=0;body.materialStyle=-1;
   if(body.blocksPlayer)body.handCollider={objectBody:body,friction:.96,gravity:1};
   objects.push(body);placeObject(body,arena.boxes);
+  diagnostics.record('object-spawn',{model:spec.name,typeId:index,count:objects.length});
   return body;
 }
 function releaseAll(){
@@ -312,8 +320,8 @@ function resetPlayer(){
   standingHeight=NaN;drop=0;
   blaster.reset();
   rig.position.copy(boot);yaw=T.MathUtils.degToRad(maps.yaw);pitch=0;rig.rotation.y=yaw;
-  velocity.set(0,0,0);snap=false;grounded=false;walkingSupport.normal.set(0,0,0);walkingSupport.surface=null;hasPreviousHead=false;locomotion.reset();steps.reset();torsoTilt.set(0,0);
-  for(const hand of hands){hand.valid=false;hand.hapticGrounded=false;hand.hapticCooldown=0;hand.gamepad=null;release(hand,false);}
+  velocity.set(0,0,0);snapState.armed=true;grounded=false;walkingSupport.normal.set(0,0,0);walkingSupport.surface=null;hasPreviousHead=false;locomotion.reset();steps.reset();torsoTilt.set(0,0);
+  for(const hand of hands){hand.valid=false;hand.hapticGrounded=false;hand.hapticPending=false;hand.hapticCooldown=0;hand.gamepad=null;release(hand,false);}
 
 }
 resetObjects();
@@ -366,7 +374,7 @@ const sections=[
   ['Locomotion',[
     ['Appuis Gorilla','movement'],['Collisions','collisions'],['Grip','grip'],['Glissement','slide'],
     ['Gravité','gravity'],['Impulsion','jump'],['Poids','weight'],['Taille','size'],['Longueur des bras','arms'],
-    ['Vibration des appuis','stepHaptics'],['Retour au départ',resetPlayer],
+    ['Vibration des appuis','stepHaptics'],['Intensité vibrations','stepHapticStrength'],['Rotation avec menu','snapWithMenu'],['Retour au départ',resetPlayer],
   ]],
   ['Objets',[
     ['Objets actifs','objects'],['Hitboxes objets','preciseHitboxes'],['Rebond','bounce'],['Force du lancer','throw'],['Réinitialiser les objets',requestResetObjects],
@@ -384,7 +392,7 @@ const renderGroups=[
     ['Intensité du focus','focusStrength'],['Zone nette du focus','focusSize']]],
 ];
 function currentRows(){return page===2?renderGroups[renderPage][1]:page===3?spawnGroups[spawnPage][1]:page===4?mapGroups[mapPage][1]:sections[page][1];}
-function selectPage(index){page=index;hudDirty=true;}
+function selectPage(index){page=index;vrRowsPage=0;hudDirty=true;}
 let reportSnapshot=null, rawFrameMs=[], frameSampleIndex=0, diagAt=0, lastVR=null, reportHadVR=false, contactFrames=0, trackedFrames=0, renderStats={};
 const lightSlots=Array.from({length:3},()=>{
   const light=new T.PointLight('#ffffff',0,22,1.60);
@@ -417,14 +425,19 @@ function updatePropLights(spectating){
 }
 // Une capture garde les dernières mesures VR pour un téléchargement après la session.
 function captureReport(){
-  const sorted=rawFrameMs.slice().sort((a,b)=>a-b);
-  const percentile=p=>sorted.length?Number(sorted[Math.min(sorted.length-1,Math.floor((sorted.length-1)*p))].toFixed(2)):null;
+  diagnostics.record('capture',{mode:renderer.xr.isPresenting?'VR':'PC'});
+
+  const captured=diagnostics.snapshot(renderer.xr.isPresenting?'VR':'PC');
   reportSnapshot={
-    game:'Gorilla Lab',version:labRelease.toLowerCase(),time:new Date().toISOString(),
-    mode:reportHadVR?'VR':'PC',settings:{...settings},qualityActive:liveLevel,
+    game:'Gorilla Lab',version:labRelease.toLowerCase(),reportSchema:2,revision:'lot3-input-debug',time:new Date().toISOString(),
+    mode:renderer.xr.isPresenting?'VR':'PC',sessionHadVR:reportHadVR,settings:{...settings},qualityActive:liveLevel,
+    diagnostics:captured,debugGeometry:{...debugView.stats},
+    scenario:document.querySelector('#report-note')?.value?.slice(0,500)??'',
+    device:{userAgent:navigator.userAgent,cores:navigator.hardwareConcurrency??null,memoryGiB:navigator.deviceMemory??null,viewport:[innerWidth,innerHeight],pixelRatio:renderer.getPixelRatio()},
+    haptics:hands.map(h=>({side:h.side,tracked:Boolean(h.valid),...h.hapticStats})),
     debug:lastPlayerDiagnostics,audio:{volume:settings.stepVolume,enabled:settings.stepAudio,clipsPlayed:steps.count,state:steps.state},
-    performance:{fps,frames:sorted.length,frameMs:{median:percentile(.5),p95:percentile(.95),max:percentile(1)}},
-    xr:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{physics:{...objectPhysicsStats},total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},cloud:{role:spectator.role,connected:spectator.connected,replicas:spectator.replicaCount,...spectator.stats},targetScore:fixtures.score(),locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
+    performance:{fps,frames:captured.frames.length,frameMs:captured.metrics.frameMs},
+    xr:renderer.xr.isPresenting?lastVR:null,previousVR:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{physics:{...objectPhysicsStats},total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},cloud:{role:spectator.role,connected:spectator.connected,replicas:spectator.replicaCount,...spectator.stats},targetScore:fixtures.score(),locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
   };
   document.querySelector('#download-report').disabled=false;
   hudDirty=true;
@@ -433,11 +446,17 @@ function downloadReport(){
   if(!reportSnapshot) captureReport();
   const url=URL.createObjectURL(new Blob([JSON.stringify(reportSnapshot,null,2)],{type:'application/json'}));
   const a=document.createElement('a');
-  a.href=url;a.download='gorilla-lab-rapport.json';a.click();
+  a.href=url;a.download='gorilla-lab-rapport-'+new Date().toISOString().replace(/[:.]/g,'-')+'.json';a.click();
   setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 document.querySelector('#download-report').onclick=downloadReport;
 document.querySelector('#capture-report').onclick=captureReport;
+const reportNote=document.createElement('input');
+reportNote.id='report-note';reportNote.maxLength=500;reportNote.placeholder='Scénario : ex. 30 objets lancés, debug coupé';
+reportNote.setAttribute('aria-label','Scénario du rapport');reportNote.style.cssText='width:100%;padding:.5rem;margin:.5rem 0';
+document.querySelector('#capture-report').parentElement.after(reportNote);
+const debugReadout=document.createElement('p');
+debugReadout.setAttribute('aria-live','off');document.querySelector('#settings').after(debugReadout);
 sections[1][1].push(['Tool Gun','toolActive'],['Action Tool Gun','toolMode'],['Pistolet de tir','blasterActive'],['Capturer un rapport',captureReport]);
 const workshopGroups=Array.from({length:Math.ceil(workshopTypes.length/8)},(_,i)=>['Atelier'+(workshopTypes.length>8?' '+(i+1):''),workshopTypes.slice(i*8,i*8+8)]);
 const spawnGroups=[['Basiques',basicTypes],['Détaillés',detailTypes],['Animés',animatedTypes],...workshopGroups].map(([label,types])=>[
@@ -459,16 +478,27 @@ const mapGroups=[['Construction',[
 sections.push(['Carte',[]],['En ligne',[]],['Debug',[
   ['Prises et paumes','debugPalm'],['Hitboxes visibles','debugHitboxes'],
   ['Collisions sans maillage','debugInvisible'],['Forces et vitesse','debugForces'],
-  ['Corps et tête','debugBody'],['Vitesse simulation','debugSpeed'],
+  ['Corps et tête','debugBody'],['Décor en debug','debugScene'],['Objets en debug','debugObjects'],
+  ['Maillage visuel','debugMesh'],['Portée debug','debugRange'],['Budget debug','debugBudget'],['Vitesse simulation','debugSpeed'],
   ['Son des appuis','stepAudio'],['Volume des appuis','stepVolume'],
+  ['Tester vibration gauche',previewLeftHaptic],['Tester vibration droite',previewRightHaptic],
   ['Écouter un pas',previewStep],['Capturer un rapport',captureReport],
 ]]);
+function previewHaptic(side){
+  const hand=hands.find(h=>h.side===side);
+  const supported=hand?.valid&&pulseHand(hand,.45,65);
+  diagnostics.record('haptic-test',{side,supported:Boolean(supported)});
+  showGameHint(supported?'Test envoyé : '+side+' (résultat dans le rapport).':'Manette absente ou vibration indisponible : '+side);
+}
+function previewLeftHaptic(){previewHaptic('left');}
+function previewRightHaptic(){previewHaptic('right');}
 function previewStep(){steps.unlock().then(()=>steps.play(settings.stepVolume));}
 function saveStepVolume(){try{localStorage.setItem('gorilla-lab-step-volume',String(settings.stepVolume));}catch{}}
 const title=document.querySelector('#section'), desktop=document.querySelector('#settings');
 const readings=document.querySelector('#readings');
 const debugSpeeds=[1,.75,.5,.25];
 function change(key,step){
+  diagnostics.record('setting',{key,step,previous:settings[key]});
   if(key==='debugSpeed'){
     settings.debugSpeed=T.MathUtils.clamp(settings.debugSpeed+step,1,debugSpeeds.length);
     locomotion.reset();hudDirty=true;return;
@@ -553,6 +583,8 @@ function button(text,action){
 }
 function toggleLabel(key){return key==='preciseHitboxes'?(settings[key]?'High':'Low'):(settings[key]?'Actif':'Coupé');}
 function settingValue(key){
+  if(key==='debugRange')return (settings[key]*5)+' m';
+  if(key==='debugBudget')return (settings[key]*1000)+' segments';
   if(key==='debugSpeed')return spectator.role?'×1 en ligne':'×'+debugSpeeds[settings.debugSpeed-1];
   if(key==='stepVolume')return settings.stepVolume+'/10';
   if(key==='viewFov')return settings.viewFov+'°';
@@ -569,6 +601,7 @@ function menuGroups(){return page===2?renderGroups:page===3?spawnGroups:mapGroup
 function currentGroup(){return page===2?renderPage:page===3?spawnPage:mapPage;}
 function selectGroup(index){if(page===2)renderPage=index;else if(page===3)spawnPage=index;else mapPage=index;}
 function actionLabel(key){
+  if(key===previewLeftHaptic||key===previewRightHaptic)return 'Tester';
   if(key===captureReport)return 'Capturer';
   if(key===previewStep)return 'Écouter';
   if(key===clearObjects||key===clearSpawnBank)return 'Vider';
@@ -1100,7 +1133,9 @@ function drawPanel(){
     const width=Math.min(144,Math.floor(586/menuGroups().length)-4);
     item(25+i*(width+4),114,width,38,name,()=>selectGroup(i),selected?'#546947':'#263d49');
   });
-  currentRows().forEach(([name,key],i)=>{
+  const rows=currentRows(),perPage=grouped?9:10,pages=Math.max(1,Math.ceil(rows.length/perPage));
+  vrRowsPage=Math.max(0,Math.min(vrRowsPage,pages-1));
+  rows.slice(vrRowsPage*perPage,(vrRowsPage+1)*perPage).forEach(([name,key],i)=>{
     const y=(grouped?166:113)+i*40;
     if(i%2===0){c.fillStyle='#20323e';c.fillRect(25,y,587,36);}
     c.fillStyle='#e9e5ce';c.font='22px system-ui';c.fillText(name,37,y+26);
@@ -1112,9 +1147,14 @@ function drawPanel(){
       item(568,y,44,36,'+',()=>change(key,1));
     }
   });
+  if(pages>1){
+    item(25,533,180,35,'Précédent',()=>{vrRowsPage=(vrRowsPage+pages-1)%pages;hudDirty=true;});
+    item(432,533,180,35,'Suivant',()=>{vrRowsPage=(vrRowsPage+1)%pages;hudDirty=true;});
+    c.fillStyle='#e9e5ce';c.font='19px system-ui';c.fillText((vrRowsPage+1)+' / '+pages,285,558);
+  }
   item(25,579,286,44,'Réglages par défaut',restore);
   item(325,579,287,44,'Fermer',()=>menu=false);
-  c.fillStyle='#c4d5d8';c.font='17px system-ui';c.fillText(vrHint|| (page===6?'Cyan : prise · Vert : paume · Rose : collisions invisibles':page===4&&maps.status?maps.status.slice(0,64):reportSnapshot?'Rapport capturé. Quitte la VR pour le télécharger.':'Gâchette : choisir  ·  B/Y : panneau  ·  ¹ Prochaine session VR'),25,645);
+  c.fillStyle='#c4d5d8';c.font='17px system-ui';c.fillText(vrHint|| (page===6?'v '+velocity.length().toFixed(2)+' m/s | g '+currentGravity.toFixed(2)+' m/s² | Jaune collider, cyan maillage':page===4&&maps.status?maps.status.slice(0,64):reportSnapshot?'Rapport capturé. Quitte la VR pour le télécharger.':'Gâchette : choisir  ·  B/Y : panneau  ·  ¹ Prochaine session VR'),25,645,587);
   panel.texture.needsUpdate=true;
 }
 function setMenu(side){
@@ -1245,7 +1285,7 @@ enter.onclick=async()=>{
     refreshRate=session.frameRate||refreshRate;
     fpsGoal=Math.min(100,refreshRate);
     if(settings.auto){liveLevel=Math.min(liveLevel,4);qualityTimer=lowCount=highCount=0;}
-    rawFrameMs=[];frameSampleIndex=0;diagAt=0;contactFrames=trackedFrames=launchCount=0;lastLaunch=null;reportHadVR=true;lastVR=null;
+    rawFrameMs=[];diagnostics.reset();frameSampleIndex=0;diagAt=0;contactFrames=trackedFrames=launchCount=0;lastLaunch=null;reportHadVR=true;lastVR=null;
     standingHeight=NaN;drop=0;resetPlayer();applyVisual();
     document.body.classList.add('immersive');
   }catch(error){
@@ -1411,12 +1451,12 @@ function character(frame,space,pose,dt,inputDt=dt){
     eye.position.y=-drop;
     head.set(p.x,p.y-drop,p.z);
     const source=[...frame.session.inputSources].find(s=>s.handedness==='right');
-    const x=source?.gamepad?.axes[2]??0;
-    if(Math.abs(x)<.3)snap=false;
-    if(Math.abs(x)>.67&&!snap&&!menu){
-      snap=true;
+    const x=readTurnAxis(source?.gamepad);
+    const turn=consumeSnap(snapState,x,{menu,allowMenu:settings.snapWithMenu});
+    if(turn){
+      diagnostics.record('snap-turn',{direction:turn,menu});
       point.copy(head).applyAxisAngle(up,yaw);
-      yaw-=Math.sign(x)*Math.PI/4;
+      yaw-=turn*Math.PI/4;
       rotated.copy(head).applyAxisAngle(up,yaw);
       rig.position.add(point.sub(rotated));
       locomotion.reset();hasPreviousHead=false;
@@ -1444,7 +1484,7 @@ function character(frame,space,pose,dt,inputDt=dt){
     for(const box of activeBoxes)handBoxes.push(box);
     if(settings.collisions&&settings.objects)for(const body of blockers)if(body.handCollider&&!body.owner)handBoxes.push(body.handCollider);
     locomotion.move({head:worldHead,dt,inputDt,gravity,settings,boxes:handBoxes,velocity,movement:delta,reach:armSegmentLength()*2+.16});
-    for(const hand of hands)updateGroundHaptics(hand,settings.stepHaptics,inputDt);
+    for(const hand of hands)updateGroundHaptics(hand,settings.stepHaptics,inputDt,.08+settings.stepHapticStrength*.04,40);
   }else{
     updateTorso(false,inputDt);
     velocity.y-=gravity*dt;
@@ -1639,6 +1679,7 @@ renderer.setAnimationLoop((time,frame)=>{
   if(spectator.role!=='player'){remoteHeld=0;for(const h of hands)h.remoteHeld=0;}
   if(!remoteWorld){updateHeldBodies(dt);maintainSpectatorCamera();}
 
+  physicsCpuMs=0;
   for(const object of objects){
     object.mesh.visible=settings.objects&&!remoteWorld;
     const {x,y,z}=object.mesh.position;
@@ -1657,7 +1698,9 @@ renderer.setAnimationLoop((time,frame)=>{
   if(!remoteWorld&&settings.objects){
     // La cible compare le début et la fin du pas pour repérer les impacts rapides.
     for(const object of objects)object.beforePhysics.copy(object.mesh.position);
+    const physicsStart=performance.now();
     solveObjects(objects,arena.boxes,dt,9.81*settings.gravity/5,.12+settings.bounce*.064,surfaceAt);
+    physicsCpuMs=performance.now()-physicsStart;
     if(maps.builtIn)fixtures.updateTarget(objects,editableTargetFrame());
   }
   if(inVR&&!menu&&spectator.role!=='pc')for(const hand of hands)touchFixture(hand);
@@ -1703,9 +1746,11 @@ renderer.setAnimationLoop((time,frame)=>{
   spectator.update({inVR,time,dt:inputDt,position:worldHead,yaw:spectating?yaw:bodyYaw,pitch,camera,rig,keys,actions,flat,avatar:captureNetworkAvatar,
     bodies:settings.objects?objects:noBodies,score:fixtures.score()});
   actions.clear();
+  const debugStart=performance.now();
   debugView.update({settings,boxes:activeBoxes,bodies:remoteWorld?(settings.debugHitboxes?replicaBlockers():noBodies):objects,hands,locomotion,velocity,
-    head:worldHead,neck,body:monkey.position,proxies:bodyProxies,gravity:currentGravity,appliedMove,playerActive:!spectating,inVR});
-  if(!spectating&&(inVR||!reportHadVR)&&time-diagAt>350){
+    head:worldHead,neck,body:monkey.position,proxies:bodyProxies,gravity:currentGravity,appliedMove,playerActive:!spectating,inVR,viewQuaternion:avatarHead.quaternion});
+  debugCpuMs=performance.now()-debugStart;
+  if(!spectating&&time-diagAt>350){
     lastPlayerDiagnostics={simulationScale:speed,gravity:currentGravity,velocity:velocity.toArray(),
       grounded,torsoDegrees:[torsoTilt.x,torsoTilt.y].map(T.MathUtils.radToDeg),
       hands:inVR?locomotion.hands.map(({hand,normal,offset})=>!hand.valid?null:{
@@ -1723,6 +1768,7 @@ renderer.setAnimationLoop((time,frame)=>{
     renderer.shadowMap.needsUpdate=true;lastShadowRender=time;
   }
   updateMirror(time,pose);
+  const renderStart=performance.now();
   const useVrPost=inVR&&settings.post;
   const useVrTrace=inVR&&settings.rayTrace;
   updateRayProbe(useVrTrace,objects);
@@ -1732,7 +1778,13 @@ renderer.setAnimationLoop((time,frame)=>{
     vrFovMask.visible=inVR&&visibleField<1;
     try{renderer.render(scene,camera);}finally{vrFovMask.visible=false;}
   }
-  if(inVR||!reportHadVR) {
+  renderSubmissionCpuMs=performance.now()-renderStart;
+  diagnostics.sample({mode:inVR?'VR':'PC',frameMs:actual*1000,physicsCpuMs,debugCpuMs,renderSubmissionCpuMs,objects:objects.length,moving:objects.filter(o=>!o.owner&&!o.frozen&&!o.sleeping&&o.velocity.lengthSq()>.0001).length,debugSegments:debugView.stats.segments});
+  if(time-diagAt>350){
+    debugReadout.hidden=!(settings.debugForces||debugView.stats.truncated);
+    if(!debugReadout.hidden)debugReadout.textContent='Vitesse joueur : '+velocity.length().toFixed(2)+' m/s · Gravité : '+currentGravity.toFixed(2)+' m/s² · Segments : '+debugView.stats.segments+(debugView.stats.truncated?' (budget atteint : augmenter Budget debug ou réduire la portée)':'');
+  }
+  {
     rawFrameMs[frameSampleIndex]=actual*1000;
     frameSampleIndex=(frameSampleIndex+1)%720;
     if(time-diagAt>350){
