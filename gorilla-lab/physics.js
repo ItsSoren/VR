@@ -424,6 +424,7 @@ function impulseResponse(state,lever,axis){
 
 function applyImpulse(state,lever,axis,amount){
   if(!state?.inverseMass)return;
+  if(state.body.sleeping&&Math.abs(amount)>.005){state.body.sleeping=false;state.body.quietTime=0;}
   state.body.velocity.addScaledVector(axis,amount*state.inverseMass);
   state.body.angular.addScaledVector(inverseInertia(state,lever,axis,rotatedTorque),amount);
 }
@@ -512,37 +513,72 @@ function travelLimit(shape){
   return Math.max(.008,shape.thickness*.35);
 }
 
+export const objectPhysicsStats={substeps:0,active:0,free:0,sleeping:0};
+
+function advanceBody(body,dt,gravity,surfaceAt){
+  body.velocity.y-=gravity*dt*(surfaceAt?.(body.mesh.position)?.gravity??1);
+  body.mesh.position.addScaledVector(body.velocity,dt);
+  const speed=body.angular.length();
+  if(speed>1e-5)body.mesh.rotateOnWorldAxis(spinAxis.copy(body.angular).divideScalar(speed),Math.min(speed,30)*dt);
+}
+
+function sweptBounds(body,dt,gravity){
+  // A sphere bounds every orientation, including rapid rotation and gravity.
+  const bounds=new T.Box3().setFromCenterAndSize(body.mesh.position,new T.Vector3());
+  const end=body.mesh.position.clone().addScaledVector(body.velocity,dt);
+  const acceleration=gravity*surfaceAtGravity(body);
+  end.y-=acceleration*dt*dt;
+  const turning=body.velocity.y/(2*acceleration);
+  if(turning>0&&turning<dt){
+    const peak=body.mesh.position.clone().addScaledVector(body.velocity,turning);
+    peak.y-=acceleration*turning*turning;bounds.expandByPoint(peak);
+  }
+  bounds.expandByPoint(end).expandByScalar(body.shape.radius+.002);
+  return bounds;
+}
+function surfaceAtGravity(body){return body.sweepGravity??1;}
+
 export function solveObjects(objects,boxes,dt,gravity,rebound,surfaceAt) {
-  if(!Number.isFinite(dt)||dt<0)return;
-  const states=[], arena=boxes.map(box=>({box,bounds:boundsFor(box)}));
+  Object.assign(objectPhysicsStats,{substeps:0,active:0,free:0,sleeping:0});
+  if(!Number.isFinite(dt)||dt<=0)return;
+  const states=[], free=[], arena=boxes.map(box=>({box,bounds:boundsFor(box)}));
+  const visible=objects.filter(body=>body.mesh.visible!==false);
+  const sweeps=new Map();
+  for(const body of visible){
+    body.sweepGravity=surfaceAt?.(body.mesh.position)?.gravity??1;
+    sweeps.set(body,sweptBounds(body,dt,gravity));
+  }
   let count=Math.max(1,Math.ceil(dt/.006));
-  for(const body of objects){
-    if(body.mesh.visible===false||body.collidable===false)continue;
+  for(const body of visible){
     const dynamic=isDynamic(body);
-    if(dynamic){
-      // Keep travel below a fraction of the smallest collider dimension, including rotation.
+    if(body.sleeping&&(body.velocity.lengthSq()>1e-8||body.angular.lengthSq()>1e-8||!dynamic)){
+      body.sleeping=false;body.quietTime=0;
+    }
+    if(body.collidable===false){if(dynamic)free.push(body);continue;}
+    const sweep=sweeps.get(body);
+    const nearArena=arena.some(({box,bounds})=>overlapsArena(sweep,box,bounds));
+    const nearObject=visible.some(other=>other!==body&&other.collidable!==false&&sweep.intersectsBox(sweeps.get(other)));
+    if(dynamic&&!nearArena&&!nearObject){body.sleeping=false;body.quietTime=0;free.push(body);continue;}
+    if(dynamic&&!body.sleeping){
       const angularSpeed=Math.min(body.angular.length(),30);
-      const speed=body.velocity.length()+angularSpeed*body.shape.radius+Math.abs(gravity)*dt;
+      const speed=body.velocity.length()+angularSpeed*body.shape.radius+Math.abs(gravity*body.sweepGravity)*dt;
       count=Math.max(count,Math.ceil(speed*dt/travelLimit(body.shape)));
     }
     const state={body,inverseMass:dynamic?1/body.mass:0,held:body.owner&&!body.frozen,
       bounds:new T.Box3(),groundFriction:0,groundY:0,sweepStart:0,sweepEnd:0};
-    updateBodyBounds(state);
-    states.push(state);
+    updateBodyBounds(state);states.push(state);
   }
-  count=Math.min(MAX_SUBSTEPS,count);
+  // Isolated free flight does not impose thin-collider substeps on resting objects.
+  for(const body of free)advanceBody(body,dt,gravity,surfaceAt);
+  count=states.some(s=>s.inverseMass&&!s.body.sleeping)?Math.min(MAX_SUBSTEPS,count):1;
+  Object.assign(objectPhysicsStats,{substeps:count,active:states.length,free:free.length});
   const step=dt/count;
   for(let k=0;k<count;k++){
     for(const state of states){
       if(!state.inverseMass)continue;
       const {body}=state;
-      const {mesh,velocity,angular}=body;
-      state.groundFriction=0;
-      state.groundY=0;
-      velocity.y-=gravity*step*(surfaceAt?.(mesh.position)?.gravity??1);
-      mesh.position.addScaledVector(velocity,step);
-      const speed=angular.length();
-      if(speed>1e-5)mesh.rotateOnWorldAxis(spinAxis.copy(angular).divideScalar(speed),Math.min(speed,30)*step);
+      state.groundFriction=0;state.groundY=0;
+      if(!body.sleeping)advanceBody(body,step,gravity,surfaceAt);
       updateBodyBounds(state);
     }
     for(let pass=0;pass<SOLVER_PASSES;pass++){
@@ -555,12 +591,7 @@ export function solveObjects(objects,boxes,dt,gravity,rebound,surfaceAt) {
           if(depth>0)changed=resolveContact(state,null,box,depth,rebound)||changed;
         }
       }
-
-      // A sweep over world AABBs also rejects thin or rotated shapes whose bounding spheres overlap.
-      for(const state of states){
-        state.sweepStart=state.bounds.min.x;
-        state.sweepEnd=state.bounds.max.x;
-      }
+      for(const state of states){state.sweepStart=state.bounds.min.x;state.sweepEnd=state.bounds.max.x;}
       states.sort((a,b)=>a.sweepStart-b.sweepStart);
       for(let i=0;i<states.length;i++){
         const a=states[i];
@@ -578,8 +609,18 @@ export function solveObjects(objects,boxes,dt,gravity,rebound,surfaceAt) {
     }
     for(const state of states)if(state.inverseMass)slowRolling(state,step);
   }
+  for(const state of states){
+    if(!state.inverseMass)continue;
+    const body=state.body;
+    const ball=Boolean(body.shape.sphereRadius);
+    const quiet=state.groundY>.9&&body.velocity.lengthSq()<(ball ? .000144 : .0064)&&
+      body.angular.lengthSq()*(ball ? 1 : body.shape.radius**2)<(ball ? .01 : .0144);
+    body.quietTime=quiet?(body.quietTime??0)+dt:0;
+    if(body.quietTime>.25){body.sleeping=true;body.velocity.set(0,0,0);body.angular.set(0,0,0);}
+    else if(!quiet)body.sleeping=false;
+    if(body.sleeping)objectPhysicsStats.sleeping++;
+  }
 }
-
 
 function heightContact(p,radius,field,out) {
   if(p.x<field.xMin||p.x>field.xMax||p.z<field.zMin||p.z>field.zMax)return 0;

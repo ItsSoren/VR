@@ -1,3 +1,4 @@
+import {restoreObject,outsideObjectWorld} from './object-lifecycle.js';
 import {calibratedHeight,torsoBend,removeInwardVelocity,bodyProxyOffset} from './player-pose.js';
 
 import * as T from 'three';
@@ -30,7 +31,7 @@ import { createVrEffects, addRayProbe } from './vr-effects.js';
 import { createVrFovMask } from './vr-fov.js';
 import { addLabFixtures } from './fixtures.js';
 import { buildArena } from './arena.js';
-import { solve,palmContact,handContact,solveObjects,moveKinematic,colliderFor,distanceToObject,placeObject,boxCollider,playerObjectContact } from './physics.js';
+import { objectPhysicsStats,solve,palmContact,handContact,solveObjects,moveKinematic,colliderFor,distanceToObject,placeObject,boxCollider,playerObjectContact } from './physics.js';
 
 // scripts/build.mjs injects the release used in the HTML titles and JSON report.
 const labRelease=__LAB_RELEASE__;
@@ -267,7 +268,7 @@ function spawnObject(index,origin,actor,quiet=false){
   const mesh=makePropMesh(index);
   mesh.position.copy(origin);scene.add(mesh);
   const selectedShape=settings.preciseHitboxes?spec.shape:(spec.lowShape??spec.shape);
-  const body={mesh,spec,netId:nextNetId++,netType:index,beforePhysics:mesh.position.clone(),blocksPlayer:spec.properties?.collidable!==false,precise:settings.preciseHitboxes,type:spec.name,shape:selectedShape,radius:selectedShape.radius,mass:spec.mass,start:mesh.position.clone(),
+  const body={mesh,spec,netId:nextNetId++,netType:index,beforePhysics:mesh.position.clone(),blocksPlayer:spec.properties?.collidable!==false,precise:settings.preciseHitboxes,type:spec.name,shape:selectedShape,radius:selectedShape.radius,mass:spec.mass,start:mesh.position.clone(),startRotation:mesh.quaternion.clone(),
     owner:null,velocity:new T.Vector3(),angular:new T.Vector3(),offset:new T.Vector3(),
     relativeRotation:new T.Quaternion(),shadow:arena.shadow(spec.shape.radius)};
   body.frozen=Boolean(spec.properties?.frozen);body.collidable=spec.properties?.collidable!==false;body.grabbable=spec.properties?.grabbable!==false;body.toolHold=false;body.protected=index===CAMERA_TYPE;body.paint=0;body.materialStyle=-1;
@@ -304,7 +305,7 @@ function release(hand,launch=true) {
 function resetObjects(){
   releaseAll();
   for(const object of objects){
-    object.mesh.position.copy(object.start);object.mesh.quaternion.identity();object.velocity.set(0,0,0);object.angular.set(0,0,0);object.frozen=Boolean(object.spec.properties?.frozen);
+    restoreObject(object);object.frozen=Boolean(object.spec.properties?.frozen);
   }
 }
 function resetPlayer(){
@@ -423,7 +424,7 @@ function captureReport(){
     mode:reportHadVR?'VR':'PC',settings:{...settings},qualityActive:liveLevel,
     debug:lastPlayerDiagnostics,audio:{volume:settings.stepVolume,enabled:settings.stepAudio,clipsPlayed:steps.count,state:steps.state},
     performance:{fps,frames:sorted.length,frameMs:{median:percentile(.5),p95:percentile(.95),max:percentile(1)}},
-    xr:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},cloud:{role:spectator.role,connected:spectator.connected,replicas:spectator.replicaCount,...spectator.stats},targetScore:fixtures.score(),locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
+    xr:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{physics:{...objectPhysicsStats},total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},cloud:{role:spectator.role,connected:spectator.connected,replicas:spectator.replicaCount,...spectator.stats},targetScore:fixtures.score(),locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
   };
   document.querySelector('#download-report').disabled=false;
   hudDirty=true;
@@ -699,7 +700,7 @@ function spawnPlacedModels(){
     if(body){
       body.mesh.rotation.set(T.MathUtils.degToRad(piece.pitch),T.MathUtils.degToRad(piece.yaw),T.MathUtils.degToRad(piece.roll??0),'YXZ');
       body.mesh.updateMatrixWorld(true);
-      body.start.copy(body.mesh.position);
+      body.start.copy(body.mesh.position);body.startRotation.copy(body.mesh.quaternion);
     }
   }
 }
@@ -841,7 +842,7 @@ function resetCoconuts(){
   if(maps?.assetLayer){
     for(const body of objects)if(body.spec.assetId==='spawn-coconut'){
       if(body.owner){body.owner.held=null;body.owner=null;}
-      body.toolHold=false;body.mesh.position.copy(body.start);body.mesh.quaternion.identity();
+      body.toolHold=false;restoreObject(body);
       body.velocity.set(0,0,0);body.angular.set(0,0,0);body.frozen=true;
     }
     return;
@@ -994,7 +995,7 @@ function manipulateBody(body,mode,actor,heldAt){
     toolPosition.copy(body.mesh.position).addScaledVector(up,body.radius*2+.08);
     const duplicate=spawnObject(body.netType,toolPosition);
     if(duplicate){
-      duplicate.mesh.quaternion.copy(body.mesh.quaternion);
+      duplicate.mesh.quaternion.copy(body.mesh.quaternion);duplicate.startRotation.copy(body.mesh.quaternion);
       duplicate.paint=body.paint;duplicate.materialStyle=body.materialStyle;
       if(body.customMaterial){duplicate.mesh.material=clonePropMaterial(body.mesh.material);duplicate.customMaterial=true;grade(duplicate.mesh.material);}
       placeObject(duplicate,arena.boxes);
@@ -1641,9 +1642,9 @@ renderer.setAnimationLoop((time,frame)=>{
   for(const object of objects){
     object.mesh.visible=settings.objects&&!remoteWorld;
     const {x,y,z}=object.mesh.position;
-    const outOfMap=maps.active?y<-24||Math.abs(x)>155||Math.abs(z)>155:y<-8||Math.abs(x)>28||z<-57||z>13;
+    const outOfMap=outsideObjectWorld(object.mesh.position,maps.active);
     if(outOfMap){
-      if(!object.owner){object.mesh.position.copy(object.start);object.velocity.set(0,0,0);object.angular.set(0,0,0);}
+      if(!object.owner)restoreObject(object);
     }
     object.shadow.visible=!remoteWorld&&settings.shadows&&shadowLevel()<3&&settings.objects&&object.mesh.position.y<2;
     if(object.shadow.visible){
