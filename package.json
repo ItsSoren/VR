@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test tests/core.test.js"
+    "test": "node --test tests/core.test.js tests/lot1.test.js"
   },
   "engines": { "node": ">=20" },
   "dependencies": { "three": "0.180.0" },
   "devDependencies": { "esbuild": "0.25.10" }
 }
+
