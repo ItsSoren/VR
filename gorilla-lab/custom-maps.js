@@ -2,7 +2,7 @@
 import * as T from 'three';
 import {shouldKeepArenaAsset} from './arena-map-pieces.js';
 import {tiledBox,transformUVs,decorPrimitiveGeometry,rampGeometry} from './texture-geometry.js';
-import {terrainGeometry,terrainCollider,terrainVegetation,terrainInstanceBoxes,terrainCollisionBudget,disposeVegetation,sculptTerrain,normalizeTerrain,resizeTerrain} from './terrain-edit.js';
+import {terrainGeometry,terrainCollider,terrainVegetation,terrainInstanceBoxes,disposeVegetation,sculptTerrain,normalizeTerrain,resizeTerrain} from './terrain-edit.js';
 import {boxCollider,colliderFor} from './physics.js';
 import {createModelUnitGeometry,createModelMaterial,modelCollisionGeometry,disposeModelMaterial} from './model-pack.js';
 import {mapCode} from './cloud-link.js';
@@ -68,7 +68,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     if(row.vegetation)disposeVegetation(row.vegetation);
     if(row.custom){row.ownTexture?.materials.delete(row.mesh.material);if(row.model)disposeModelMaterial(row.mesh.material);else row.mesh.material.dispose();}
   }
-  function makeRow(piece,index,collisionBudget){
+  function makeRow(piece,index){
     if(piece.model){
       const geometry=createModelUnitGeometry(piece.model);
       geometry.scale(piece.w,piece.h,piece.d);
@@ -105,7 +105,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     const collider={mesh,position:mesh.position,quaternion:mesh.quaternion,half,min:half.clone().negate(),
       shape:piece.primitive==='ramp'?colliderFor(geometry):boxCollider(half),friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:true,type:piece.material};
     if(!piece.terrain)return {mesh,collider,custom,ownTexture};
-    const vegetation=terrainVegetation(piece,collisionBudget);
+    const vegetation=terrainVegetation(piece);
     if(vegetation)mesh.add(vegetation);
     return {mesh,collider:terrainCollider(piece,mesh),custom,ownTexture,vegetation};
   }
@@ -133,15 +133,13 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
       const assetId=mesh.userData?.editorAssetId;
       mesh.visible=!map||!replaceableMeshes.has(mesh)&&shouldKeepArenaAsset(map,assetId,mappedAssets,mappedScenery);
     });
-    let remainingCollisions=terrainCollisionBudget;
     const instanceColliders=[];
     for(const [index,piece] of nodes.entries()){
-      const row=makeRow(piece,index,remainingCollisions);
+      const row=makeRow(piece,index);
       meshRows.push(row);
       for(const box of terrainInstanceBoxes(piece,row.vegetation)){
         instanceColliders.push({...box,min:box.half.clone().negate(),shape:boxCollider(box.half),
           friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:false,type:piece.material});
-        remainingCollisions--;
       }
     }
     for(const row of meshRows)if(row.mesh.userData.mirrorSize)mirrorRows.push(row);
@@ -243,7 +241,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     const shape=moving>=0?map.pieces[moving]:piece;
     if(hit.object.userData.mapIndex===moving)return;
     rotatedNormal.copy(hit.face.normal).transformDirection(hit.object.matrixWorld);
-    const next=shape.terrain?{...shape,x:Math.round(hit.point.x*2)/2,y:hit.point.y,z:Math.round(hit.point.z*2)/2,pitch:0,yaw:0}:snapPlacement(hit.point,rotatedNormal,shape);
+    const next=shape.terrain?{...shape,x:Math.round(hit.point.x*2)/2,y:hit.point.y,z:Math.round(hit.point.z*2)/2,pitch:0,yaw:shape.yaw??0}:snapPlacement(hit.point,rotatedNormal,shape);
     if(!next)return;
     ghost.geometry=next.primitive==="ramp"?ramp:slab;
     ghost.position.set(next.x,next.y,next.z);

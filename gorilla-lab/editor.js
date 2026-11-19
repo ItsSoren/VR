@@ -7,11 +7,11 @@ import {defaultMirrorPiece,shouldKeepArenaAsset} from './arena-map-pieces.js';
 import {tiledBox,transformUVs,decorPrimitiveGeometry,rampGeometry} from './texture-geometry.js';
 import {readModelPack,modelStorageKey,normalizeModelPack,createModelUnitGeometry,createModelMaterial,modelCollisionGeometry,disposeModelMaterial,modelDimensions,modelBounds} from './model-pack.js';
 import {createBuiltinModelTemplates,spawnAssetIds} from './model-assets.js';
-import {normalizeTerrain,normalizeTerrainRule,maxTerrainRules,terrainCollisionBudget,terrainSeam,stitchTerrain,resizeTerrain,sculptTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from './terrain-edit.js';
+import {normalizeTerrain,normalizeTerrainRule,maxTerrainRules,maxTerrainRuleInstances,maxTerrainRuleColors,maxTerrainSizeVariation,terrainQuarterYaw,terrainSeam,stitchTerrain,resizeTerrain,sculptTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from './terrain-edit.js';
 import {texturePresets,seamlessTexture} from './seamless-texture.js';
 import {openTextureStudio} from './texture-studio.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import {resizedCenter} from './editor-scale.js';
+import {resizedCenter,scaleHandleSigns} from './editor-scale.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   parseMap, arenaMap, exampleMap, makePiece, mapMaterials, materialColors, surfacePresets,
@@ -78,6 +78,25 @@ const toolHelp = {
   model: 'Choisis un modèle dans la bibliothèque, puis clique dans la vue 3D ou sur le plan pour le poser.',
 };
 let map, selected = -1, tool = 'move', gesture = null, ghost = null;
+const editorEvents=[];
+function editorTrace(event,details={},level='info'){
+  const entry={time:new Date().toISOString(),event,tool,selected,...details};
+  editorEvents.push(entry);
+  if(editorEvents.length>100)editorEvents.shift();
+  console[level]('[Gorilla Lab éditeur] '+event,entry);
+}
+window.gorillaEditorDiagnostics=()=>{
+  const piece=current(),render=renderer.info.render;
+  return {version:__LAB_RELEASE__,map:{name:map.name,pieces:map.pieces.length},tool,selected,
+    piece:piece?{name:piece.name,terrain:Boolean(piece.terrain),yaw:piece.yaw,w:piece.w,h:piece.h,d:piece.d}:null,
+    rules:piece?.terrain?.rules.map(({kind,density,fit,colors,collidable})=>({kind,density,fit,teintes:colors.length,collidable})),
+    viewport:[screen.width,screen.height],render:{...render},events:[...editorEvents]};
+};
+window.addEventListener('error',event=>{
+  if(event.message)editorTrace('erreur JavaScript',{message:event.message,stack:event.error?.stack},'error');
+});
+window.addEventListener('unhandledrejection',event=>editorTrace('promesse rejetée',
+  {message:String(event.reason),stack:event.reason?.stack},'error'));
 const undoStack = [];
 const screen = $('preview'), plan = $('plan'), context = plan.getContext('2d');
 function presetPiece(){
@@ -277,7 +296,7 @@ function buildWorkspaceShell(){
   const tabs=make('nav','inspector-tabs');
   tabs.setAttribute('aria-label','Propriétés');
   const specs=[['object','Modéliser'],['terrain','Terrain'],['material','Texturer'],['props','Props'],['collision','Collisions'],
-    ['behavior','Comportements'],['scene','Scène'],['publish','Jouer / Exporter']];
+    ['behavior','Physique'],['scene','Scène'],['publish','Jouer / Exporter']];
   for(const [key,label] of specs){
     const button=make('button','inspector-tab',label);
     button.type='button';
@@ -346,6 +365,7 @@ let planRange = { scale: 10, cx: 0, cz: -6, width: 30, height: 40 };
 
 const renderer = new T.WebGLRenderer({ canvas: screen, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+screen.addEventListener('webglcontextlost',()=>editorTrace('contexte WebGL perdu',{},'warn'));
 const camera = new T.PerspectiveCamera(52, 1, .1, 640);
 camera.position.set(16, 15, 19);
 const controls = new OrbitControls(camera, screen);
@@ -687,33 +707,34 @@ function updateSceneSelection() {
   attachGizmo();
 }
 
-// Terrain vertices are baked into a heightfield. Translation and X/Z size
-// editing preserve that representation; rotation is limited to box pieces.
+// Terrain rotates in quarter turns around Y to preserve its heightfield.
 function attachGizmo() {
   if(tool==='spawn'){
     gizmo.enabled=true;
     gizmo.setMode('translate');
     gizmo.setSpace('world');
     gizmo.setTranslationSnap(null);
+    gizmo.setRotationSnap(null);
     gizmo.showX=gizmo.showY=gizmo.showZ=true;
     gizmo.attach(spawn);
     return;
   }
   const mesh=group.children[selected],terrain=current()?.terrain;
-  const active=transformModes.has(tool)&&Boolean(mesh)&&!(terrain&&tool==='rotate');
+  const active=transformModes.has(tool)&&Boolean(mesh);
   gizmo.enabled=active;
   if(!active){
     gizmo.detach();
-    if(terrain&&tool==='rotate')$('tool-help').textContent='Le terrain reste horizontal. Utilise Sculpter pour façonner sa pente.';
     return;
   }
   gizmo.setMode(tool);
   gizmo.setSpace(tool==='translate'?'world':'local');
   gizmo.setTranslationSnap(null);
-  gizmo.showX=gizmo.showZ=true;
+  const terrainRotate=Boolean(terrain&&tool==='rotate');
+  gizmo.setRotationSnap(terrainRotate?Math.PI/2:null);
+  gizmo.showX=gizmo.showZ=!terrainRotate;
   gizmo.showY=!(terrain&&tool==='scale');
   gizmo.attach(mesh);
-  $('tool-help').textContent=toolHelp[tool];
+  $('tool-help').textContent=terrainRotate?'Tourne le terrain à plat par pas de 90° avec l’anneau vert.':toolHelp[tool];
 }
 
 // Default scaling moves one face while preserving the opposite face.
@@ -723,7 +744,7 @@ function syncScaleAnchor(){
   if(tool!=='scale')return;
   const piece=current(),original=beforeTransform?.map.pieces[selected],mesh=gizmo.object;
   if(!piece||!original||!mesh)return;
-  const next=resizedCenter(original,piece,ctrlScaleHeld);
+  const next=resizedCenter(original,piece,ctrlScaleHeld,beforeTransform?.scaleSides);
   const limit=(map.worldSize??240)/2;
   piece.x=T.MathUtils.clamp(next.x,-limit,limit);
   piece.y=T.MathUtils.clamp(next.y,-256,256);
@@ -745,7 +766,11 @@ gizmo.addEventListener('change',queueRender);
 gizmo.addEventListener('mouseDown',()=>{
   const piece=current();
   heldSnap=null;
-  if(piece||gizmo.object===spawn)beforeTransform={map:structuredClone(map),selected};
+  if(piece||gizmo.object===spawn){
+    const scaleSides=tool==='scale'?scaleHandleSigns(gizmo.axis,gizmo.pointStart,gizmo.worldQuaternionStart):undefined;
+    beforeTransform={map:structuredClone(map),selected,scaleSides};
+    editorTrace('transformation démarrée',{name:piece?.name??'Départ',axis:gizmo.axis,scaleSides,terrain:Boolean(piece?.terrain)});
+  }
   ctrlScaleHeld=Boolean(ctrlScaleHeld||window.event?.ctrlKey);
 });
 // Reflète la transformation de Three.js dans le modèle et l’inspecteur à chaque mouvement.
@@ -776,6 +801,11 @@ gizmo.addEventListener('objectChange',()=>{
     piece.pitch=T.MathUtils.radToDeg(mesh.rotation.x);
     piece.yaw=T.MathUtils.radToDeg(mesh.rotation.y);
     piece.roll=T.MathUtils.radToDeg(mesh.rotation.z);
+    if(piece.terrain){
+      piece.pitch=piece.roll=0;
+      piece.yaw=terrainQuarterYaw(piece.yaw);
+      mesh.rotation.set(0,T.MathUtils.degToRad(piece.yaw),0,'YXZ');
+    }
   }else{
     piece.w=clamp(mesh.scale.x*(piece.terrain?original.w:1),.05,maxObjectSize);
     piece.d=clamp(mesh.scale.z*(piece.terrain?original.d:1),.05,maxObjectSize);
@@ -798,7 +828,12 @@ gizmo.addEventListener('dragging-changed',({value})=>{
   const spawnMoved=gizmo.object===spawn;
   const previous=spawnMoved?snapshot.map.spawn:snapshot.map.pieces[selected];
   const next=spawnMoved?map.spawn:current();
-  if(JSON.stringify(previous)===JSON.stringify(next))return;
+  if(JSON.stringify(previous)===JSON.stringify(next)){
+    editorTrace('transformation sans changement',{name:next?.name,axis:gizmo.axis});
+    return;
+  }
+  const pose=piece=>piece&&Object.fromEntries(['x','y','z','w','h','d','pitch','yaw','roll'].filter(key=>key in piece).map(key=>[key,piece[key]]));
+  editorTrace('transformation appliquée',{name:next?.name??'Départ',avant:pose(previous),après:pose(next),scaleSides:snapshot.scaleSides});
   if(undoStack.length>=35)undoStack.shift();
   undoStack.push(snapshot);
   map=parseMap(map);
@@ -832,7 +867,6 @@ function rebuildScene() {
   sun.visible=ambient.visible=!map.arenaBase;
   scene.fog=map.arenaBase?referenceScene.fog:null;
   scene.environment=map.arenaBase?referenceScene.environment:null;
-  let remainingCollisions=terrainCollisionBudget;
   for (const piece of map.pieces) {
     if(piece.model) {
       const mesh=new T.Mesh(createModelUnitGeometry(piece.model),createModelMaterial(piece.model));
@@ -877,8 +911,7 @@ function rebuildScene() {
     const mesh = new T.Mesh(geometry, material);
     mesh.userData.ownsTexture=Boolean(piece.texture);
     if(piece.terrain){
-      const vegetation=terrainVegetation(piece,remainingCollisions);
-      for(const plants of vegetation.children)if(plants.userData.collidable)remainingCollisions-=plants.count;
+      const vegetation=terrainVegetation(piece);
       if(vegetation){mesh.add(vegetation);mesh.userData.vegetation=vegetation;}
     }
     group.add(mesh);
@@ -1040,9 +1073,11 @@ function updateInspector() {
     neighbor.replaceChildren(...(options.length?options:[new Option('Aucun bord à moins de 25 cm','')]));
     if(options.some(option=>option.value===previous))neighbor.value=previous;
     neighbor.disabled=$('terrain-stitch').disabled=!options.length;
-    $('p-pitch').disabled=$('p-yaw').disabled=$('p-roll').disabled=true;
+    $('p-pitch').disabled=$('p-roll').disabled=true;
   }
-  $('rotate').disabled=!piece||Boolean(terrain);
+  $('rotate').disabled=!piece;
+  $('rotate').textContent=terrain?'Tourner +90°':'Tourner +45°';
+  $('p-yaw').step=terrain?'90':'1';
   $('texture-create').disabled=!piece;
   $('surface').value = '';
   $('undo').disabled = undoStack.length === 0;
@@ -1069,6 +1104,7 @@ function sync() {
 function choose(index) {
   if (selected === index) return;
   selected = index;
+  editorTrace('sélection',{name:current()?.name,terrain:Boolean(current()?.terrain)});
   heldSnap=null;rejectedSnaps.clear();
   updateInspector();
   updateSceneSelection();
@@ -1108,9 +1144,11 @@ function duplicatePiece() {
 // Applique le raccourci de formulaire pour pivoter de 45° sur Y.
 function rotatePiece() {
   const piece = current();
-  if (!piece||piece.terrain) return;
+  if(!piece)return;
   remember();
-  piece.yaw = (piece.yaw + 45) % 360;
+  const before=piece.yaw;
+  piece.yaw=(before+(piece.terrain?90:45))%360;
+  editorTrace('rotation via le panneau',{name:piece.name,avant:before,après:piece.yaw});
   sync();
 }
 
@@ -1138,6 +1176,7 @@ function updateToolHelp(){
     ' m (largeur × hauteur × profondeur). '+tip;
 }
 function setTool(next) {
+  if(tool!==next)editorTrace('changement d’outil',{ancien:tool,nouveau:next,name:current()?.name});
   tool = next;
   controls.mouseButtons.LEFT=tool==='view'?T.MOUSE.ROTATE:null;
   attachGizmo();
@@ -1787,6 +1826,7 @@ function renderTerrainRules(piece){
     const update=patch=>{
       remember();
       rules[index]=normalizeTerrainRule({...rule,...patch});
+      editorTrace('règle de props modifiée',{name:piece.name,règle:index+1,champs:Object.keys(patch)});
       sync();
     };
     const select=(options,value,change)=>{
@@ -1804,21 +1844,32 @@ function renderTerrainRules(piece){
     const models=modelLibrary.some(model=>model.id===rule.model?.id)||!rule.model?modelLibrary:[...modelLibrary,rule.model];
     add('Genre',select([['Herbe','grass'],['Buisson','shrub'],...(models.length?[['Modèle','model']]:[])],rule.kind,kind=>{
       const color=kind==='grass'?'#527a34':kind==='shrub'?'#36583c':'#ffffff';
-      update({kind,model:kind==='model'?models[0]:null,colorA:color,colorB:color,fit:'keep',size:1});
+      update({kind,model:kind==='model'?models[0]:null,colors:rule.colors.map(()=>color),fit:'keep',size:1});
     }));
     if(rule.kind==='model')add('Modèle',select(models.map(model=>[model.name,model.id]),rule.model.id,id=>update({model:models.find(model=>model.id===id)})));
-    const colors=document.createElement('span');colors.dataset.pair='';
-    for(const [i,key] of ['colorA','colorB'].entries()){
-      const input=document.createElement('input');input.type='color';input.value=rule[key];
+    const palette=document.createElement('div');palette.className='terrain-palette';
+    palette.style.setProperty('--swatches',Math.min(rule.colors.length,5));
+    const size=select(Array.from({length:maxTerrainRuleColors-1},(_,i)=>[String(i+2),String(i+2)]),String(rule.colors.length),value=>{
+      const colors=rule.colors.slice(0,Number(value));
+      while(colors.length<Number(value))colors.push(colors.at(-1));
+      update({colors});
+    });
+    size.setAttribute('aria-label','Nombre de teintes · règle '+(index+1));
+    palette.append(size);
+    const swatches=document.createElement('div');swatches.className='terrain-swatches';
+    for(const [i,value] of rule.colors.entries()){
+      const input=document.createElement('input');input.type='color';input.value=value;
       input.setAttribute('aria-label','Teinte '+(i+1)+' · règle '+(index+1));
-      input.onchange=()=>update({[key]:input.value});colors.append(input);
+      input.onchange=()=>update({colors:rule.colors.map((color,j)=>j===i?input.value:color)});
+      swatches.append(input);
     }
-    add('Deux teintes',colors);
-    add('Instances / m²',numeric('density',0,100,'any'));
+    palette.append(swatches);
+    add('Palette de teintes',palette,true);
+    add('Instances / m²',numeric('density',0,maxTerrainRuleInstances,'any'));
     add('Graine',numeric('seed',0,2147483647,1));
-    if(rule.model)add('Dimensions du modèle',select([['Conserver les proportions','keep'],['Réduire pour tenir dans un cube','fit'],['Déformer en cube','stretch']],rule.fit,fit=>update({fit})),true);
-    add(rule.fit==='keep'?'Échelle ×':'Côté du cube (m)',numeric('size',.05,10,.05));
-    if(rule.variation)add('Variation de taille',numeric('variation',0,1,.05));
+    if(rule.model)add('Mode de taille',select([['Conserver les proportions','keep'],['Réduire pour tenir dans un cube','fit'],['Déformer en cube','stretch']],rule.fit,fit=>update({fit})),true);
+    add(rule.fit==='keep'?'Taille · facteur ×':'Taille · cube (m)',numeric('size',.05,maxTerrainRuleInstances,.05));
+    add('Variation de taille',numeric('variation',0,maxTerrainSizeVariation,.05));
     const collision=document.createElement('input');collision.type='checkbox';collision.checked=rule.collidable;
     collision.onchange=()=>update({collidable:collision.checked});add('Collision · boîte',collision);
     const count=document.createElement('output');
@@ -2014,3 +2065,5 @@ if(requestedModel){
   }
 }
 
+
+editorTrace('démarrage terminé',{version:__LAB_RELEASE__,name:map.name,pièces:map.pieces.length});

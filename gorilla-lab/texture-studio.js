@@ -208,7 +208,7 @@ export function openTextureStudio({initial=null,tint='#687a86',name='Texture',pa
   const display=find('.texture-canvas'),tile=find('.texture-tile');
   const base=makeCanvas(),overlay=makeCanvas();
   const settings={pattern:patterns.some(([id])=>id===pattern)?pattern:'grain',base:validColor(tint),scale:1,ink:'#e1ad78',size:22,opacity:.85,hardness:.7};
-  const ctx=display.getContext('2d'),background=base.getContext('2d'),top=overlay.getContext('2d');
+  const ctx=display.getContext('2d',{willReadFrequently:true}),background=base.getContext('2d',{willReadFrequently:true}),top=overlay.getContext('2d',{willReadFrequently:true});
   const undo=[],redo=[];
   let changed=false,painting=false,dragPointer=null,tool='paint',last=null;
   find('#studio-title').textContent=name+' / SURFACE LAB';
@@ -389,3 +389,4 @@ export function openTextureStudio({initial=null,tint='#687a86',name='Texture',pa
   find('[data-field=pattern]').focus({preventScroll:true});
   return {close:()=>close(false)};
 }
+

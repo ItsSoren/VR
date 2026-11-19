@@ -13,12 +13,12 @@ import {parseMap,exampleMap} from '../gorilla-lab/map-format.js';
 import {normalizeModelPack,createModelPartGeometry,createModelUnitGeometry,modelDimensions,modelHitbox,modelHitboxGeometry,modelCollisionGeometry,createModelPropDefinitions,disposeModelMaterial} from '../gorilla-lab/model-pack.js';
 import {createKeyboardState} from '../gorilla-lab/flat-controls.js';
 import {screenPixelRatio} from '../gorilla-lab/screen-render.js';
-import {terrainHeight,sculptTerrain,normalizeTerrain,resizeTerrain,terrainGeometry,terrainVegetation,terrainRuleDimensions,terrainInstanceBoxes,stitchTerrain,disposeVegetation} from '../gorilla-lab/terrain-edit.js';
+import {terrainHeight,sculptTerrain,normalizeTerrain,resizeTerrain,terrainGeometry,terrainCollider,normalizeTerrainRule,terrainVegetation,terrainRuleDimensions,terrainInstanceBoxes,stitchTerrain,disposeVegetation} from '../gorilla-lab/terrain-edit.js';
 import {transformUVs,tiledBox,decorPrimitiveGeometry} from '../gorilla-lab/texture-geometry.js';
 import {clonePropMaterial} from '../gorilla-lab/animated-props.js';
 import {sketchPresets,normalizeSketch,validateSketch,sketchOutline,createSketchGeometry} from '../gorilla-lab/custom-shape.js';
 import {rampGeometry} from '../gorilla-lab/texture-geometry.js';
-import {modelFacePosition,modelGroupTransform,resizedCenter} from '../gorilla-lab/editor-scale.js';
+import {modelFacePosition,modelGroupTransform,resizedCenter,scaleHandleSigns} from '../gorilla-lab/editor-scale.js';
 
 test('held trigger emits ten shots each second and stops on release',()=>{
   const scene=new T.Scene(),gun=createArcadeBlaster(scene,{});
@@ -757,13 +757,13 @@ test('terrain rules preserve dimensions, two colours, and deterministic placemen
  ]}});
  const first=parseMap(map).pieces[0],second=parseMap(JSON.stringify(parseMap(map))).pieces[0];
  assert.deepEqual(first.terrain.rules,second.terrain.rules);
- const a=terrainVegetation(first,5),b=terrainVegetation(second,5);
- assert.deepEqual(a.children.map(plant=>plant.count),[5,8]);
+ const a=terrainVegetation(first),b=terrainVegetation(second);
+ assert.deepEqual(a.children.map(plant=>plant.count),[16,8]);
  assert.deepEqual(a.children[0].instanceMatrix.array,b.children[0].instanceMatrix.array);
  assert.deepEqual(a.children[0].instanceColor.array,b.children[0].instanceColor.array);
  assert.ok(a.children[0].instanceColor.array[1]!==a.children[0].instanceColor.array[4]);
  const boxes=terrainInstanceBoxes(first,a);
- assert.equal(boxes.length,5);
+ assert.equal(boxes.length,16);
  assert.ok(boxes.every(box=>box.position.y>4&&box.half.length()>0));
  disposeVegetation(a);disposeVegetation(b);
 });
@@ -782,4 +782,64 @@ test('terrain stitch snaps small gaps and matches a different neighbour grid alo
  assert.equal(terrainHeight(result.piece,result.piece.x,0),0);
  assert.equal(piece.terrain.heights,null);
  assert.equal(stitchTerrain(piece,{...neighbor,x:11}),null);
+});
+
+test('both scale handles anchor the opposite face of a rotated terrain',()=>{
+ const original={x:4,y:0,z:3,w:2,h:1,d:4,pitch:0,yaw:90,roll:0,terrain:{}};
+ const rotation=new T.Quaternion().setFromAxisAngle(new T.Vector3(0,1,0),Math.PI/2);
+ for(const sign of [-1,1]){
+  const worldOffset=new T.Vector3(sign,0,0).applyQuaternion(rotation);
+  const sides=scaleHandleSigns('X',worldOffset,rotation);
+  assert.deepEqual(sides,[sign,1,1]);
+  const expanded=resizedCenter(original,{w:4,h:1,d:4},false,sides);
+  assert.ok(Math.abs(expanded.z-(3-sign))<1e-8);
+  assert.deepEqual(resizedCenter(original,{w:4,h:1,d:4},true,sides),{x:4,y:0,z:3});
+ }
+});
+
+test('terrain quarter turns preserve height, normals, sculpting, props and the neighbour seam',()=>{
+ const terrain=normalizeTerrain({detail:8,amplitude:1,seed:19,rules:[{kind:'grass',density:.5,seed:11,collidable:true}]});
+ const base={x:0,y:0,z:0,w:6,d:10,terrain};
+ const turned={...base,yaw:90};
+ const normal=new T.Vector3(),expected=new T.Vector3();
+ const collider=terrainCollider(turned);
+ assert.deepEqual([collider.xMin,collider.xMax,collider.zMin,collider.zMax],[-5,5,-3,3]);
+ assert.ok(Math.abs(collider.height(2,-1)-terrainHeight(base,1,2))<1e-8);
+ const rotation=new T.Quaternion().setFromAxisAngle(new T.Vector3(0,1,0),Math.PI/2);
+ terrainCollider(base).normalAt(1,2,expected).applyQuaternion(rotation);
+ assert.ok(collider.normalAt(2,-1,normal).distanceTo(expected)<1e-8);
+ const group=terrainVegetation(base);
+ const [oldBox]=terrainInstanceBoxes(base,group),[newBox]=terrainInstanceBoxes(turned,group);
+ assert.ok(oldBox.position.clone().applyQuaternion(rotation).distanceTo(newBox.position)<1e-7);
+ assert.ok(newBox.quaternion.angleTo(rotation.clone().multiply(oldBox.quaternion))<1e-6);
+ const sculpted={...turned,terrain:structuredClone(terrain)};
+ assert.ok(sculptTerrain(sculpted,2,-1,{mode:'raise',radius:2,strength:1}));
+ assert.ok(terrainHeight(sculpted,2,-1)>terrainHeight(turned,2,-1));
+ const neighbor={...base,x:10,w:10,d:6,y:1,terrain:normalizeTerrain({detail:12})};
+ const result=stitchTerrain(turned,neighbor);
+ assert.ok(result&&!result.clipped);
+ assert.ok(Math.abs(terrainHeight(result.piece,5,0)-terrainHeight(neighbor,5,0))<1e-8);
+ const map=exampleMap();map.pieces[0]={...map.pieces[0],...turned};
+ assert.equal(parseMap(JSON.stringify(map)).pieces[0].yaw,90);
+ disposeVegetation(group);
+});
+
+test('props retain up to ten palette stops and render ten thousand models per rule',()=>{
+ const colors=['#110000','#220000','#330000','#440000','#550000','#660000','#770000','#880000','#990000','#aa0000'];
+ assert.deepEqual(normalizeTerrainRule({colorA:'#110000',colorB:'#220000'}).colors,colors.slice(0,2));
+ assert.deepEqual(normalizeTerrainRule({colors:[...colors,'#bb0000']}).colors,colors);
+ assert.equal(normalizeTerrainRule().colors.length,2);
+ const map=exampleMap();
+ const model={id:'custom-model-dense-props',parts:[{shape:'sphere'},{shape:'sphere'}]};
+ const terrain=normalizeTerrain({rules:[
+  {kind:'model',model,colors,density:20000,size:100,variation:5},
+  {kind:'shrub',density:10000,collidable:true},
+ ]});
+ Object.assign(map.pieces[0],{w:2,d:2,terrain});
+ const piece=parseMap(JSON.stringify(map)).pieces[0];
+ assert.deepEqual(piece.terrain.rules[0].colors,colors);
+ const props=terrainVegetation(piece);
+ assert.deepEqual(props.children.map(row=>row.count),[10000,10000]);
+ assert.equal(terrainInstanceBoxes(piece,props).length,10000);
+ disposeVegetation(props);
 });

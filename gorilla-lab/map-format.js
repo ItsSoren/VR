@@ -2,7 +2,7 @@ import {Euler,Vector3} from 'three';
 import {labSpawn} from './lab-layout.js';
 import {normalizeModelPack} from './model-pack.js';
 import {isRetiredArenaAsset,isRetiredArenaModel} from './model-assets.js';
-import {normalizeTerrain} from './terrain-edit.js';
+import {normalizeTerrain,terrainQuarterYaw} from './terrain-edit.js';
 
 
 export const mapMaterials=['Ardoise','Nacre','Brique','Sable','Marbre','Bois','Cuivre','Chrome','Carreaux','Béton','Verre bleu','Verre ambre','Glace','Caoutchouc','Émail','Mosaïque','Benchmark'];
@@ -41,7 +41,7 @@ export function parseMap(input){
         ...(typeof p.sceneryId==='string'&&/^[a-z0-9-]{1,48}$/i.test(p.sceneryId)?{sceneryId:p.sceneryId}:{}),
         x:number(p.x,-maxWorldReach,maxWorldReach,0),y:number(p.y,-256,256,0),z:number(p.z,-maxWorldReach,maxWorldReach,0),
         w,h:number(p.h,.05,256,.5),d,
-        pitch:terrain?0:number(p.pitch,-180,180,0),yaw:terrain?0:number(p.yaw,-360,360,0),roll:terrain?0:number(p.roll,-180,180,0),
+        pitch:terrain?0:number(p.pitch,-180,180,0),yaw:terrain?terrainQuarterYaw(number(p.yaw,-360,360,0)):number(p.yaw,-360,360,0),roll:terrain?0:number(p.roll,-180,180,0),
         ...(terrain?{terrain}:{}),
         ...(model?{model}:{}),
         primitive:['sphere','cylinder','cone','torus','capsule','ramp'].includes(p.primitive)?p.primitive:'box',

@@ -197,10 +197,10 @@
     padding:2px 4px;border-radius:3px}
   #outline-content #pieces option{padding:3px 4px}
   .property-pane{display:flex;flex-direction:column}
-  .inspector-tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:0;min-height:36px;flex-shrink:0;
+  .inspector-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;min-height:36px;flex-shrink:0;
     background:#292d34;border-bottom:1px solid #444951}
   .inspector-tab{border:0;border-right:1px solid #3b4048;border-radius:0;background:transparent;
-    min-width:0;min-height:35px;padding:5px 0;font-size:11px;color:#aab2bd}
+    min-width:0;min-height:35px;padding:5px 4px;font-size:11px;line-height:1.15;white-space:normal;overflow-wrap:anywhere;color:#aab2bd}
   .inspector-tab:nth-child(4n){border-right:0}
   .inspector-tab[aria-pressed="true"]{background:#343942;color:#f4c18a;box-shadow:inset 0 -2px 0 #e0a35f}
   .inspector-tab:disabled{opacity:.38}
@@ -232,7 +232,8 @@
     border:1px solid #485465;border-radius:5px;background:#272f39}
   .terrain-rules td{min-width:0;display:grid;gap:3px;color:#b6c0cd;font-size:11px}
   .terrain-rules td[data-wide]{grid-column:1/-1}
-  .terrain-rules td [data-pair]{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
+  .terrain-palette{display:grid;grid-template-columns:3.2rem minmax(0,1fr);align-items:start;gap:6px}
+  .terrain-swatches{display:grid;grid-template-columns:repeat(var(--swatches),minmax(0,1fr));gap:4px}
   .terrain-rules td input:not([type=checkbox]),.terrain-rules td select{width:100%;min-width:0}
   .terrain-rules td button{justify-self:end}
   .add-terrain-rule{width:100%;min-height:43px;margin-top:8px;border-style:dashed}

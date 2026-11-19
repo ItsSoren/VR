@@ -9,7 +9,7 @@ import {
 import {createBuiltinModelTemplates} from './model-assets.js';
 import {openTextureStudio} from './texture-studio.js';
 import {openShapeStudio} from './shape-studio.js';
-import {modelFacePosition,modelGroupTransform} from './editor-scale.js';
+import {modelFacePosition,modelGroupTransform,scaleHandleSigns} from './editor-scale.js';
 import {startingSketch} from './custom-shape.js';
 
 // GORILLA / FOUNDRY. Geometry remains in the Gorilla model-pack v1 format:
@@ -404,9 +404,16 @@ try{
       mesh.geometry.computeBoundingBox();
       bounds.copy(mesh.geometry.boundingBox);
     }
+    const sides=viewMode==='scale'
+      ?scaleHandleSigns(gizmo.axis,gizmo.pointStart,gizmo.worldQuaternionStart):[1,1,1];
+    const anchor=new T.Vector3();
+    for(let axis=0;axis<3;axis++){
+      const negative=sides[axis]<0||$('negative-scale-face').checked;
+      anchor.setComponent(axis,(negative?bounds.max:bounds.min).getComponent(axis));
+    }
     transformStart={
       position:mesh.position.clone(),rotation:mesh.quaternion.clone(),scale:mesh.scale.clone(),
-      anchor:($('negative-scale-face').checked?bounds.max:bounds.min).clone(),rawScale:mesh.scale.clone(),
+      anchor,rawScale:mesh.scale.clone(),
       parts:meshes.map(m=>({mesh:m,data:structuredClone(currentModel().parts[previews.children.indexOf(m)])})),
     };
   });

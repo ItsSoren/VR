@@ -3,9 +3,10 @@ import {normalizeModelPack,createModelUnitGeometry,createModelMaterial,disposeMo
 
 export const maxTerrainDetail=256;
 export const defaultTerrainTextureDensity=1/2.6**2;
-export const maxTerrainRules=16;
-export const terrainCollisionBudget=256;
-const maxVegetationDensity=100;
+export const maxTerrainRules=10000;
+export const maxTerrainRuleInstances=10000;
+export const maxTerrainRuleColors=10;
+export const maxTerrainSizeVariation=10;
 const maxTextureDensity=256;
 const defaultDetail = 16;
 const maxSculptHeight = 24;
@@ -29,11 +30,11 @@ function terrainDetail(value,fallback=defaultDetail){
 }
 
 function readVegetationDensity(value,name,area,legacyRate,legacyMax){
-  if(Number.isFinite(value[name+'Density']))return bounded(value[name+'Density'],0,maxVegetationDensity,0);
+  if(Number.isFinite(value[name+'Density']))return bounded(value[name+'Density'],0,maxTerrainRuleInstances,0);
   const legacy=bounded(value[name],0,1,0);
   if(!legacy)return 0;
   const count=Math.max(1,Math.round(Math.min(legacyMax,area*legacyRate)*legacy));
-  return bounded(count/area,0,maxVegetationDensity,0);
+  return bounded(count/area,0,maxTerrainRuleInstances,0);
 }
 
 const distributionKinds=['grass','shrub','model'];
@@ -44,15 +45,17 @@ export function normalizeTerrainRule(rule={}){
   const model=validVegetationModel(rule.model);
   const kind=model?'model':rule.kind==='shrub'?'shrub':'grass';
   const color=kind==='grass'?'#527a34':kind==='shrub'?'#36583c':'#ffffff';
+  const palette=(Array.isArray(rule.colors)?rule.colors:[rule.colorA,rule.colorB])
+    .slice(0,maxTerrainRuleColors).map(value=>colorPattern.test(value)?value:color);
+  while(palette.length<2)palette.push(palette.at(-1)??color);
   return {
-    kind,model,density:bounded(rule.density,0,maxVegetationDensity,1),
-    colorA:colorPattern.test(rule.colorA)?rule.colorA:color,
-    colorB:colorPattern.test(rule.colorB)?rule.colorB:color,
+    kind,model,density:bounded(rule.density,0,maxTerrainRuleInstances,1),
+    colors:palette,
     seed:Math.round(bounded(rule.seed,0,2147483647,1)),
-    size:bounded(rule.size,.05,10,1),
+    size:bounded(rule.size,.05,maxTerrainRuleInstances,1),
     fit:fitModes.includes(rule.fit)?rule.fit:'keep',
     collidable:rule.collidable===true,
-    variation:bounded(rule.variation,0,1,0),
+    variation:bounded(rule.variation,0,maxTerrainSizeVariation,0),
   };
 }
 
@@ -170,21 +173,40 @@ function localHeight(grid, x, z) {
   return sampleGrid(surface, detail, (x / w + .5) * detail, (z / d + .5) * detail);
 }
 
+export function terrainQuarterYaw(yaw=0){
+  return (Math.round(yaw/90)%4+4)%4*90;
+}
+
+function terrainAxes(piece){
+  const yaw=terrainQuarterYaw(piece.yaw);
+  return {cos:[1,0,-1,0][yaw/90],sin:[0,1,0,-1][yaw/90]};
+}
+
+function terrainLocalXZ(piece,x,z){
+  const {cos,sin}=terrainAxes(piece),dx=x-piece.x,dz=z-piece.z;
+  return [cos*dx-sin*dz,sin*dx+cos*dz];
+}
+
+function terrainWorldSize(piece){
+  return terrainQuarterYaw(piece.yaw)%180?{w:piece.d,d:piece.w}:{w:piece.w,d:piece.d};
+}
+
 export function terrainHeight(piece, x, z) {
-  return piece.y + localHeight(gridFor(piece), x - piece.x, z - piece.z);
+  return piece.y+localHeight(gridFor(piece),...terrainLocalXZ(piece,x,z));
 }
 
 const seamTolerance=.25;
 export function terrainSeam(piece,neighbor){
   if(!piece?.terrain||!neighbor?.terrain||piece===neighbor)return null;
   let best=null;
+  const size=terrainWorldSize(piece),neighborSize=terrainWorldSize(neighbor);
   for(const [axis,along,length,span] of [['x','z','w','d'],['z','x','d','w']]){
-    const lo=Math.max(piece[along]-piece[span]/2,neighbor[along]-neighbor[span]/2);
-    const hi=Math.min(piece[along]+piece[span]/2,neighbor[along]+neighbor[span]/2);
+    const lo=Math.max(piece[along]-size[span]/2,neighbor[along]-neighborSize[span]/2);
+    const hi=Math.min(piece[along]+size[span]/2,neighbor[along]+neighborSize[span]/2);
     if(hi-lo<.05)continue;
     for(const side of [-1,1]){
-      const edge=neighbor[axis]-side*neighbor[length]/2;
-      const delta=edge-(piece[axis]+side*piece[length]/2);
+      const edge=neighbor[axis]-side*neighborSize[length]/2;
+      const delta=edge-(piece[axis]+side*size[length]/2);
       if(Math.abs(delta)<=seamTolerance&&(!best||Math.abs(delta)<Math.abs(best.delta)))
         best={axis,along,length,span,lo,hi,side,edge,delta};
     }
@@ -197,7 +219,7 @@ export function stitchTerrain(piece,neighbor,width=1.5){
   if(!seam)return null;
   const {axis,along,length,span,lo,hi,side,edge,delta}=seam;
   let terrain=piece.terrain;
-  if(Math.abs(piece[span]-neighbor[span])<1e-6&&Math.abs(piece[along]-neighbor[along])<1e-6){
+  if(Math.abs(terrainWorldSize(piece)[span]-terrainWorldSize(neighbor)[span])<1e-6&&Math.abs(piece[along]-neighbor[along])<1e-6){
     const source=neighbor.terrain.detail;
     const aligned=Math.ceil(terrain.detail/source)*source;
     if(aligned<=maxTerrainDetail)terrain=resizeTerrain(terrain,aligned);
@@ -205,10 +227,12 @@ export function stitchTerrain(piece,neighbor,width=1.5){
   const placed={...piece,[axis]:piece[axis]+delta,terrain};
   const {detail,procedural,heights,surface}=gridFor(placed);
   const offsets=heights?.slice()??Array((detail+1)**2).fill(0);
-  const band=Math.max(width,placed[length]/detail);
+  const band=Math.max(width,terrainWorldSize(placed)[length]/detail);
+  const {cos,sin}=terrainAxes(placed);
   let clipped=false;
   for(let row=0;row<=detail;row++)for(let col=0;col<=detail;col++){
-    const x=placed.x+(col/detail-.5)*placed.w,z=placed.z+(row/detail-.5)*placed.d;
+    const dx=(col/detail-.5)*placed.w,dz=(row/detail-.5)*placed.d;
+    const x=placed.x+cos*dx+sin*dz,z=placed.z-sin*dx+cos*dz;
     const alongValue=along==='x'?x:z;
     if(alongValue<lo-1e-6||alongValue>hi+1e-6)continue;
     const distance=Math.max(0,side*(edge-(axis==='x'?x:z)));
@@ -244,7 +268,7 @@ export function sculptTerrain(piece, x, z, { mode, radius, strength, target } = 
 
   const grid = gridFor(piece);
   const { detail, w, d, surface, procedural } = grid;
-  const localX = x - piece.x, localZ = z - piece.z;
+  const [localX,localZ]=terrainLocalXZ(piece,x,z);
   const nearestX = clamp(localX, -w / 2, w / 2), nearestZ = clamp(localZ, -d / 2, d / 2);
   if ((localX - nearestX) ** 2 + (localZ - nearestZ) ** 2 >= radius ** 2) return false;
 
@@ -347,21 +371,24 @@ export function updateTerrainGeometry(geometry, piece) {
 // Matches the diagonal and vertices written by terrainGeometry(), including at steep crests.
 function terrainNormal(piece, x, z, out) {
   const {detail,w,d,surface}=gridFor(piece);
-  const u=clamp(((x-piece.x)/w+.5)*detail,0,detail);
-  const v=clamp(((z-piece.z)/d+.5)*detail,0,detail);
+  const [localX,localZ]=terrainLocalXZ(piece,x,z);
+  const u=clamp((localX/w+.5)*detail,0,detail);
+  const v=clamp((localZ/d+.5)*detail,0,detail);
   const col=Math.min(detail-1,Math.floor(u)),row=Math.min(detail-1,Math.floor(v));
   const stride=detail+1, i=row*stride+col;
   const lower=u-col+v-row<=1;
   const dx=lower?surface[i+1]-surface[i]:surface[i+stride+1]-surface[i+stride];
   const dz=lower?surface[i+stride]-surface[i]:surface[i+stride+1]-surface[i+1];
-  return out.set(-dx*detail/w,1,-dz*detail/d).normalize();
+  const {cos,sin}=terrainAxes(piece),nx=-dx*detail/w,nz=-dz*detail/d;
+  return out.set(cos*nx+sin*nz,1,-sin*nx+cos*nz).normalize();
 }
 
 export function terrainCollider(piece, mesh) {
+  const {w,d}=terrainWorldSize(piece);
   return {
     mesh, heightfield: true,
-    xMin: piece.x - piece.w / 2, xMax: piece.x + piece.w / 2,
-    zMin: piece.z - piece.d / 2, zMax: piece.z + piece.d / 2,
+    xMin:piece.x-w/2,xMax:piece.x+w/2,
+    zMin:piece.z-d/2,zMax:piece.z+d/2,
     height: (x, z) => terrainHeight(piece, x, z),
     normalAt: (x,z,out) => terrainNormal(piece,x,z,out),
     friction: piece.grip, gravity: piece.gravity, bounce: piece.bounce,
@@ -394,12 +421,12 @@ export function terrainRuleDimensions(dimensions,fit,size){
   return dimensions.clone().multiplyScalar(factor);
 }
 
-export function terrainVegetation(piece,collisionBudget=terrainCollisionBudget) {
+export function terrainVegetation(piece) {
   const group=new T.Group();
-  let trianglesLeft=240000,instancesLeft=4800,collidersLeft=Math.min(128,collisionBudget);
   for(const [index,rule] of (piece.terrain.rules??[]).entries()){
     const requested=Math.round(piece.w*piece.d*rule.density);
-    if(!requested||!trianglesLeft||!instancesLeft||(rule.collidable&&!collidersLeft))continue;
+    const count=Math.min(requested,maxTerrainRuleInstances);
+    if(!count)continue;
     const grass=rule.kind==='grass';
     const geometry=rule.model?createModelUnitGeometry(rule.model):grass?grassGeometry():shrubGeometry();
     if(rule.model)geometry.scale(...terrainRuleDimensions(modelDimensions(rule.model),rule.fit,rule.size));
@@ -407,10 +434,6 @@ export function terrainVegetation(piece,collisionBudget=terrainCollisionBudget) 
     geometry.computeBoundingBox();
     geometry.translate(0,-geometry.boundingBox.min.y,0);
     geometry.computeBoundingBox();
-    const triangles=(geometry.index?.count??geometry.attributes.position.count)/3;
-    const count=Math.min(requested,rule.kind==='shrub'?1024:3200,Math.floor(trianglesLeft/Math.max(1,triangles)),
-      instancesLeft,rule.collidable?collidersLeft:Infinity);
-    if(!count){geometry.dispose();continue;}
     const material=rule.model?createModelMaterial(rule.model):
       new T.MeshLambertMaterial({color:'#ffffff',side:grass?T.DoubleSide:T.FrontSide,flatShading:true});
     if(grass&&piece.terrain.grassTexture){
@@ -422,11 +445,12 @@ export function terrainVegetation(piece,collisionBudget=terrainCollisionBudget) 
     plants.userData={ruleIndex:index,seed:rule.seed,variation:rule.variation,collidable:rule.collidable,requestedCount:requested};
     plants.instanceMatrix.setUsage(T.DynamicDrawUsage);
     plants.receiveShadow=true;
-    const a=new T.Color(rule.colorA),b=new T.Color(rule.colorB),tint=new T.Color();
-    for(let i=0;i<count;i++)plants.setColorAt(i,tint.copy(a).lerp(b,hash(i,41,rule.seed)));
+    const colors=rule.colors.map(value=>new T.Color(value)),tint=new T.Color();
+    for(let i=0;i<count;i++){
+      const position=hash(i,41,rule.seed)*(colors.length-1),index=Math.floor(position);
+      plants.setColorAt(i,tint.copy(colors[index]).lerp(colors[index+1],position-index));
+    }
     group.add(plants);
-    trianglesLeft-=count*triangles;instancesLeft-=count;
-    if(rule.collidable)collidersLeft-=count;
   }
   updateTerrainVegetation(group,piece);
   return group;
@@ -440,7 +464,7 @@ export function updateTerrainVegetation(group,piece){
       const x=(hash(i,27,seed)-.5)*.96*piece.w,z=(hash(i,27,seed+1)-.5)*.96*piece.d;
       plant.position.set(x,localHeight(grid,x,z),z);
       plant.rotation.y=hash(i,27,seed+2)*Math.PI*2;
-      plant.scale.setScalar(1+variation*(2*hash(i,27,seed+3)-1));
+      plant.scale.setScalar(lerp(Math.max(.05,1-variation),1+variation,hash(i,27,seed+3)));
       plant.updateMatrix();
       plants.setMatrixAt(i,plant.matrix);
     }
@@ -451,6 +475,8 @@ export function updateTerrainVegetation(group,piece){
 
 export function terrainInstanceBoxes(piece,group){
   const result=[],matrix=new T.Matrix4(),scale=new T.Vector3();
+  const yaw=new T.Quaternion().setFromAxisAngle(new T.Vector3(0,1,0),terrainQuarterYaw(piece.yaw)*Math.PI/180);
+  const origin=new T.Vector3(piece.x,piece.y,piece.z),minHalf=new T.Vector3(.005,.005,.005);
   for(const mesh of group?.children??[]){
     if(!mesh.userData.collidable)continue;
     const bounds=mesh.geometry.boundingBox;
@@ -461,8 +487,9 @@ export function terrainInstanceBoxes(piece,group){
       const position=new T.Vector3(),quaternion=new T.Quaternion();
       matrix.decompose(position,quaternion,scale);
       position.add(center.clone().multiply(scale).applyQuaternion(quaternion));
-      position.add(new T.Vector3(piece.x,piece.y,piece.z));
-      result.push({position,quaternion,half:half.clone().multiply(scale).max(new T.Vector3(.005,.005,.005))});
+      position.applyQuaternion(yaw).add(origin);
+      quaternion.premultiply(yaw);
+      result.push({position,quaternion,half:half.clone().multiply(scale).max(minHalf)});
     }
   }
   return result;

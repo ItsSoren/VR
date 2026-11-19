@@ -1,14 +1,18 @@
 import {Euler,MathUtils,Vector3,Quaternion} from 'three';
 
-// Three TransformControls exposes the positive-axis scale handle.
-// Without Ctrl, moving this handle preserves the opposite face. Ctrl keeps
-// the centre fixed and scales both faces. Works for rotated decor as well.
-export function resizedCenter(original,next,symmetric=false){
+// Both end handles use the same axis name. The start point identifies the side.
+export function scaleHandleSigns(axis,worldOffset,worldRotation){
+  const local=worldOffset.clone().applyQuaternion(worldRotation.clone().invert());
+  return ['x','y','z'].map(key=>axis?.includes(key.toUpperCase())&&local[key]<-1e-6?-1:1);
+}
+
+// Moving one handle preserves the opposite face. Ctrl keeps the centre fixed.
+export function resizedCenter(original,next,symmetric=false,sides=[1,1,1]){
   if(symmetric)return {x:original.x,y:original.y,z:original.z};
   const delta=new Vector3(
-    (next.w-original.w)/2,
-    original.terrain?0:(next.h-original.h)/2,
-    (next.d-original.d)/2
+    sides[0]*(next.w-original.w)/2,
+    original.terrain?0:sides[1]*(next.h-original.h)/2,
+    sides[2]*(next.d-original.d)/2
   );
   delta.applyEuler(new Euler(
     MathUtils.degToRad(original.pitch),
