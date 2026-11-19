@@ -1,7 +1,7 @@
 import {labMirror} from './lab-layout.js';
 import {makePiece} from './map-format.js';
 
-export const editableArenaIds = new Set(['lab-hill', 'range-target', 'chrome-sphere', 'lab-mirror']);
+export const editableArenaIds = new Set(['lab-hill', 'chrome-sphere', 'lab-mirror']);
 
 export function defaultMirrorPiece(){
   return makePiece({name:'Miroir',sceneryId:'lab-mirror',x:labMirror.x,y:labMirror.y,z:labMirror.z+.064,

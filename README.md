@@ -4,7 +4,7 @@
 
 `npm install`, puis `npm run build` et `npm test` à la racine du dépôt.
 
-Ouvrir index.html pour l'aperçu PC. Publier en HTTPS pour entrer en WebXR depuis le casque. Le site est statique. Placer index.html et game-lab-r37.js ensemble à la racine d'un dépôt GitHub Pages.
+Ouvrir index.html pour l'aperçu PC. Publier en HTTPS pour entrer en WebXR depuis le casque. Le site est statique. Placer les pages et scripts générés par npm run build ensemble à la racine d'un dépôt GitHub Pages.
 ## Debug et calibration
 
 Dans **Debug**, active les repères de prise, de paume et de corps, les hitboxes, les collisions invisibles ou les vecteurs. La simulation peut tourner à ×1, ×0,75, ×0,5 ou ×0,25 en solo. Le volume des appuis va de 1 à 10, avec un bouton pour écouter un pas. Le rapport JSON inclut les dernières mesures de pose et les réglages.
@@ -30,11 +30,10 @@ Ouvre l’[éditeur de carte](./editor.html) ou l’[éditeur de modèles](./mod
 Les modules du jeu et des éditeurs sont dans `gorilla-lab/`. Depuis la racine, `npm run build` génère les trois pages publiques et leurs scripts versionnés.
 
 
-## Bornes et cocotier
+## Bornes
 - Vise une borne avec la manette droite, puis appuie sur la gâchette. Sur PC, vise au centre et appuie sur E.
 - La borne Rendu permet de changer de qualité, résolution XR et taille des textures. La résolution XR s'applique à la session suivante.
 - Du côté du parcours, une borne permet de revenir au départ, de remettre les objets en place, de changer de hitboxes ou de couper les appuis.
-- Gâchette pour détacher une noix à distance, grip pour la cueillir à portée de main. La borne voisine remet les noix sur l'arbre.
 
 
 
@@ -100,3 +99,4 @@ Dans **Objets → Pistolet de tir**, active le pistolet. En VR, maintiens la gâ
 ## Affichage sur écran
 
 Dans **Rendu → Image → Champ de vision écran**, le champ vertical de la caméra se règle de 50 à 105°. En VR, le casque fournit sa propre projection. Sur mobile, la qualité de rendu plafonne aussi le coût des ombres et des lumières, et réduit la résolution interne sans changer la taille du canvas.
+

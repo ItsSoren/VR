@@ -78,7 +78,11 @@ try{
   }
 }catch{}
 if(pack.models.some(model=>model.id===workspace.lastModel))modelId=workspace.lastModel;
-const requestedModel=new URLSearchParams(location.search).get('model');
+const editorParams=new URLSearchParams(location.search);
+const requestedModel=editorParams.get('model');
+const fromCards=editorParams.get('from')==='cards';
+const requestedAsset=editorParams.get('asset');
+let contextModel=requestedModel;
 if(pack.models.some(model=>model.id===requestedModel))modelId=requestedModel;
 const references=new Set(workspace.references);
 function storeWorkspace(){
@@ -252,7 +256,10 @@ function updateInspector(){
     $('model-kind').value=model.kind||'prop';
     $('in-game').checked=model.inGame;
     const destination='./editor.html?model='+encodeURIComponent(model.id);
-    for(const id of ['send-to-map','quick-send-to-map','go-cards'])$(id).href=destination;
+    for(const id of ['send-to-map','quick-send-to-map'])$(id).href=destination;
+    const returnToInstance=fromCards&&model.id===contextModel;
+    $('go-cards').href=returnToInstance?'./editor.html?applyModel='+encodeURIComponent(model.id):'./editor.html';
+    $('go-cards').textContent=returnToInstance?'Appliquer à la pièce et revenir':'Cartes →';
     for(const key of Object.keys(defaultModelProperties))$(key).checked=!!model.properties[key];
   }
   if($('model-inspector').dataset.tab==='collision')updateHitboxControls();
@@ -874,8 +881,12 @@ function sendToCards(event){
   }
   if(!saveNow())event.preventDefault();
 }
-for(const id of ['send-to-map','quick-send-to-map','go-cards'])
+for(const id of ['send-to-map','quick-send-to-map'])
   $(id).addEventListener('click',sendToCards);
+$('go-cards').addEventListener('click',event=>{
+  if(fromCards&&modelId===contextModel)sendToCards(event);
+  else if(dirty&&!saveNow())event.preventDefault();
+});
 $('delete-model').onclick=()=>{
   const model=currentModel();if(!model||!confirm('Supprimer le modèle « '+model.name+' » ?'))return;
   remember();
@@ -1060,8 +1071,8 @@ for(const button of menu.querySelectorAll('button')){
   };
 }
 window.addEventListener('keydown',event=>{
-  if(event.key==='Escape'){closeMenu();setTool('select');return;}
   const editing=event.target.closest?.('input,select,textarea,[contenteditable]');
+  if(event.key==='Escape'){closeMenu();if(!editing)setTool('select');return;}
   const modifier=event.ctrlKey||event.metaKey;
   if(modifier&&!editing){
     const key=event.key.toLowerCase();
@@ -1098,7 +1109,7 @@ window.addEventListener('keyup',event=>{
   if(event.key==='Alt')attachGizmo();
 });
 window.addEventListener('beforeunload',event=>{if(dirty)event.preventDefault();});
-const requestedAsset=new URLSearchParams(location.search).get('asset');
-if(requestedAsset)importBuiltinAsset(requestedAsset,true);
+if(requestedAsset)contextModel=importBuiltinAsset(requestedAsset,true)?.id;
 refreshModel();
 if(dirty)status('Brouillon récupéré automatiquement');
+

@@ -2,7 +2,7 @@ import * as T from 'three';
 import {buildArena} from './arena.js';
 import {addLabFixtures} from './fixtures.js';
 import {createArenaObjectSpecs,forEachStartupObject} from './arena-objects.js';
-import {labMirror,labProbe,labTarget} from './lab-layout.js';
+import {labMirror,labProbe} from './lab-layout.js';
 import {defaultMirrorPiece,shouldKeepArenaAsset} from './arena-map-pieces.js';
 import {tiledBox,transformUVs,decorPrimitiveGeometry} from './texture-geometry.js';
 import {readModelPack,modelStorageKey,normalizeModelPack,createModelUnitGeometry,createModelMaterial,modelCollisionGeometry,disposeModelMaterial,modelDimensions,modelBounds} from './model-pack.js';
@@ -44,7 +44,9 @@ function refreshModelSelectors(preferredModel){
     if(modelLibrary.some(model=>model.id===previous))input.value=previous;
   }
 }
-const requestedModel = new URLSearchParams(location.search).get('model');
+const editorParams=new URLSearchParams(location.search);
+const requestedModel=editorParams.get('model');
+const modelEditKey='gorilla-lab-edit-map-model';
 refreshModelSelectors(requestedModel);
 function selectedModel() { return modelLibrary.find(model => model.id === $('model-library').value); }
 function modelPiece() {
@@ -79,7 +81,7 @@ const toolHelp = {
   terrain:'Clique pour poser un terrain. Sélectionne-le pour régler le bruit ou la végétation.',
   sculpt:'Clique ou glisse sur un terrain. Le pinceau est réglable dans Relief et végétation.',
   preset:'Choisis une forme rapide et clique où la placer. Tu peux ensuite la modifier ou la remplacer par un modèle.',
-  spawn: 'Clique sur une surface pour placer le départ du joueur.',
+  spawn: 'Déplace l’anneau avec les flèches ou clique sur une surface pour placer le départ.',
   model: 'Choisis un modèle dans la bibliothèque, puis clique dans la vue 3D ou sur le plan pour le poser.',
 };
 let map, selected = -1, tool = 'move', gesture = null, ghost = null;
@@ -105,10 +107,19 @@ function applyLayout(){
 }
 for(const id of ['layout-mode','view-split','sidebar-width'])$(id).addEventListener('input',applyLayout);
 $('sidebar-toggle').onclick=()=>{document.body.classList.toggle('inspector-hidden');applyLayout();};
-$('workspace-fullscreen').onclick=()=>{
-  if(document.fullscreenElement)document.exitFullscreen();
-  else document.querySelector('main').requestFullscreen?.();
+const workspaceFullscreen=$('workspace-fullscreen');
+workspaceFullscreen.onclick=async()=>{
+  try{
+    if(document.fullscreenElement===document.documentElement)await document.exitFullscreen();
+    else await document.documentElement.requestFullscreen();
+  }catch{notice('Plein écran indisponible dans ce navigateur.');}
 };
+document.addEventListener('fullscreenchange',()=>{
+  const active=document.fullscreenElement===document.documentElement;
+  workspaceFullscreen.setAttribute('aria-pressed',String(active));
+  workspaceFullscreen.textContent=active?'Quitter le plein écran':'Plein écran';
+  requestAnimationFrame(()=>{resizeRenderer();resizePlan();});
+});
 $('focus-3d').onclick=()=>{$('layout-mode').value='only-3d';applyLayout();};
 $('focus-plan').onclick=()=>{$('layout-mode').value='only-plan';applyLayout();};
 
@@ -378,7 +389,6 @@ const defaultMap=()=>{
     if(assetId)next.pieces.push(assetPiece(assetId,position));
   });
   next.pieces.push(assetPiece('chrome-sphere',new T.Vector3(labProbe.x,labProbe.y,labProbe.z)));
-  next.pieces.push(assetPiece('range-target',new T.Vector3(labTarget.x,labTarget.y,labTarget.z)));
   return parseMap(next);
 };
 map=defaultMap();
@@ -483,7 +493,13 @@ function alignTranslation(piece,raw,axes,free){
 }
 const sharedBox = new T.BoxGeometry(1, 1, 1);
 const loader = new T.TextureLoader();
-const spawn = new T.Mesh(new T.ConeGeometry(.32, .75, 5), new T.MeshBasicMaterial({ color: '#ffcd63' }));
+const spawnOffset=.025;
+const spawnGeometry=new T.RingGeometry(.24,.36,40).rotateX(-Math.PI/2);
+const spawnMaterial=new T.MeshBasicMaterial({color:'#ffcd63',side:T.DoubleSide});
+const spawn=new T.Mesh(spawnGeometry,spawnMaterial);
+const heading=new T.Mesh(new T.PlaneGeometry(.12,.2).rotateX(-Math.PI/2),spawnMaterial);
+heading.position.set(0,0,-.39);
+spawn.add(heading);
 scene.add(spawn);
 const ghostBox = new T.Mesh(sharedBox, new T.MeshBasicMaterial({
   color: '#8ee7fc', opacity: .44, transparent: true, depthWrite: false,
@@ -491,7 +507,7 @@ const ghostBox = new T.Mesh(sharedBox, new T.MeshBasicMaterial({
 const midpointMarker=new T.Mesh(new T.SphereGeometry(.055,10,8),new T.MeshBasicMaterial({color:'#ffc85a',depthTest:false}));
 midpointMarker.visible=false;midpointMarker.renderOrder=20;scene.add(midpointMarker);
 const ghostMarker = new T.Mesh(spawn.geometry, new T.MeshBasicMaterial({
-  color: '#ffe084', opacity: .65, transparent: true, depthWrite: false,
+  color: '#ffe084', side:T.DoubleSide, opacity: .65, transparent: true, depthWrite: false,
 }));
 ghostBox.visible = ghostMarker.visible = false;
 scene.add(ghostBox, ghostMarker);
@@ -586,16 +602,12 @@ function drawMarker(point, isGhost) {
   context.save();
   context.translate(x, z);
   context.rotate(T.MathUtils.degToRad(-point.yaw));
-  context.fillStyle = isGhost ? '#fff0bb' : '#ffd16e';
-  context.strokeStyle = '#263740';
-  context.lineWidth = 1.5;
+  context.strokeStyle = isGhost ? '#fff0bb' : '#ffd16e';
+  context.lineWidth = 2;
   context.beginPath();
-  context.moveTo(0, -8);
-  context.lineTo(6, 5);
-  context.lineTo(0, 3);
-  context.lineTo(-6, 5);
-  context.closePath();
-  context.fill();
+  context.arc(0,0,6,0,Math.PI*2);
+  context.moveTo(0,-6);
+  context.lineTo(0,-11);
   context.stroke();
   context.restore();
 }
@@ -664,6 +676,15 @@ function updateSceneSelection() {
 // Terrain vertices are baked into a heightfield. Translation and X/Z size
 // editing preserve that representation; rotation is limited to box pieces.
 function attachGizmo() {
+  if(tool==='spawn'){
+    gizmo.enabled=true;
+    gizmo.setMode('translate');
+    gizmo.setSpace('world');
+    gizmo.setTranslationSnap(null);
+    gizmo.showX=gizmo.showY=gizmo.showZ=true;
+    gizmo.attach(spawn);
+    return;
+  }
   const mesh=group.children[selected],terrain=current()?.terrain;
   const active=transformModes.has(tool)&&Boolean(mesh)&&!(terrain&&tool==='rotate');
   gizmo.enabled=active;
@@ -710,12 +731,23 @@ gizmo.addEventListener('change',queueRender);
 gizmo.addEventListener('mouseDown',()=>{
   const piece=current();
   heldSnap=null;
-  if(piece)beforeTransform={map:structuredClone(map),selected};
+  if(piece||gizmo.object===spawn)beforeTransform={map:structuredClone(map),selected};
   ctrlScaleHeld=Boolean(ctrlScaleHeld||window.event?.ctrlKey);
 });
 // Reflète la transformation de Three.js dans le modèle et l’inspecteur à chaque mouvement.
 gizmo.addEventListener('objectChange',()=>{
   const piece=current(),mesh=gizmo.object,original=beforeTransform?.map.pieces[selected];
+  if(mesh===spawn&&beforeTransform){
+    const limit=(map.worldSize??240)/2;
+    const clamp=T.MathUtils.clamp;
+    map.spawn.x=clamp(spawn.position.x,-limit,limit);
+    map.spawn.y=clamp(spawn.position.y-spawnOffset,-256,256);
+    map.spawn.z=clamp(spawn.position.z,-limit,limit);
+    spawn.position.set(map.spawn.x,map.spawn.y+spawnOffset,map.spawn.z);
+    for(const key of ['x','y','z'])$('spawn-'+key).value=map.spawn[key].toFixed(2);
+    paintPlan();
+    return;
+  }
   if(!piece||!mesh||!original)return;
   const clamp=T.MathUtils.clamp;
   if(tool==='translate'){
@@ -749,7 +781,10 @@ gizmo.addEventListener('dragging-changed',({value})=>{
   if(value||!beforeTransform)return;
   const snapshot=beforeTransform;
   beforeTransform=null;
-  if(JSON.stringify(snapshot.map.pieces[selected])===JSON.stringify(current()))return;
+  const spawnMoved=gizmo.object===spawn;
+  const previous=spawnMoved?snapshot.map.spawn:snapshot.map.pieces[selected];
+  const next=spawnMoved?map.spawn:current();
+  if(JSON.stringify(previous)===JSON.stringify(next))return;
   if(undoStack.length>=35)undoStack.shift();
   undoStack.push(snapshot);
   map=parseMap(map);
@@ -832,7 +867,8 @@ function rebuildScene() {
     group.add(mesh);
     placeMesh(mesh, piece);
   }
-  spawn.position.set(map.spawn.x, map.spawn.y + .38, map.spawn.z);
+  spawn.position.set(map.spawn.x, map.spawn.y+spawnOffset, map.spawn.z);
+  spawn.rotation.y=T.MathUtils.degToRad(map.spawn.yaw);
   refreshDiagnostics();
   updateSceneSelection();
 }
@@ -855,9 +891,57 @@ function pendingSave() {
   try {
     localStorage.setItem(draftKey, JSON.stringify(map));
     $('draft-status').textContent = 'Brouillon sauvegardé sur cet appareil';
+    return true;
   } catch {
     $('draft-status').textContent = 'Sauvegarde locale indisponible. Exporte le JSON pour garder la carte.';
+    return false;
   }
+}
+
+$('model-asset-edit-link').onclick=event=>{
+  const piece=current();
+  if(!piece?.model||!pendingSave()){
+    event.preventDefault();
+    return;
+  }
+  try{
+    sessionStorage.setItem(modelEditKey,JSON.stringify({index:selected,piece}));
+  }catch{
+    event.preventDefault();
+    notice('Impossible de préparer le retour à la carte.');
+  }
+};
+
+function applyEditedModel(){
+  const editedModelId=editorParams.get('applyModel');
+  if(!editedModelId)return;
+  history.replaceState(null,'',location.pathname);
+  let edit;
+  try{
+    edit=JSON.parse(sessionStorage.getItem(modelEditKey));
+    sessionStorage.removeItem(modelEditKey);
+  }catch{return;}
+  const piece=map.pieces[edit?.index];
+  const model=modelPack.models.find(model=>model.id===editedModelId&&model.parts.length);
+  const expected=piece?.model;
+  const matches=model&&expected&&(model.id===expected.id||
+    (expected.id==='custom-model-game-'+expected.assetId&&model.assetId===expected.assetId));
+  if(!matches||JSON.stringify(piece)!==JSON.stringify(edit.piece)){
+    notice('La pièce ou le modèle a changé avant le retour à la carte.');
+    return;
+  }
+  selected=edit.index;
+  const oldSize=modelDimensions(piece.model),newSize=modelDimensions(model);
+  const resize=(length,from,to,max)=>T.MathUtils.clamp(length*to/Math.max(from,.001),.05,max);
+  const dimensions={w:resize(piece.w,oldSize.x,newSize.x,maxObjectSize),
+    h:resize(piece.h,oldSize.y,newSize.y,256),d:resize(piece.d,oldSize.z,newSize.z,maxObjectSize)};
+  const replacement=makePiece({...piece,...dimensions,
+    model:{...piece.model,id:model.id,parts:model.parts,hitbox:model.hitbox}});
+  if(JSON.stringify(replacement)!==JSON.stringify(piece)){
+    remember();
+    map.pieces[selected]=replacement;
+  }
+  notice('Géométrie appliquée à « '+piece.name+' ». Ctrl Z pour annuler.');
 }
 
 // Recherche insensible aux accents et à la casse.
@@ -892,9 +976,14 @@ function updateInspector() {
   $('model-object-controls').hidden=!isGrabProp;
   $('model-structure-note').hidden=!piece?.model||piece.model.kind!=='structure';
   const assetEditLink=$('model-asset-edit-link');
-  if(assetEditLink){
-    assetEditLink.hidden=!piece?.model;
-    assetEditLink.href='./model-editor.html'+(piece?.model?(piece.model.assetId&&piece.model.id==='custom-model-game-'+piece.model.assetId?'?asset='+encodeURIComponent(piece.model.assetId):'?model='+encodeURIComponent(piece.model.id)):'');
+  const isLibraryModel=piece?.model&&modelLibrary.some(model=>model.id===piece.model.id);
+  assetEditLink.hidden=!isLibraryModel;
+  if(isLibraryModel){
+    const asset=piece.model.assetId;
+    const builtin=asset&&piece.model.id==='custom-model-game-'+asset;
+    const params=new URLSearchParams(builtin?{asset}:{model:piece.model.id});
+    params.set('from','cards');
+    assetEditLink.href='./model-editor.html?'+params;
   }
   if(isGrabProp){
     $('model-grabbable').checked=piece.model.properties?.grabbable!==false;
@@ -1209,7 +1298,7 @@ function showGhost(preview) {
   if(midpointMarker.visible)midpointMarker.position.copy(edgeMidpoint);
   ghostMarker.visible = Boolean(ghost && tool === 'spawn');
   ghostBox.visible = Boolean(ghost && tool !== 'spawn');
-  if (ghostMarker.visible) ghostMarker.position.set(ghost.x, ghost.y + .38, ghost.z);
+  if(ghostMarker.visible)ghostMarker.position.set(ghost.x,ghost.y+spawnOffset,ghost.z);
   if (ghostBox.visible) placeMesh(ghostBox, ghost);
   paintPlan();
   queueRender();
@@ -1244,16 +1333,18 @@ function commitPlacement(canvas, event) {
 // Répartit le pointeur entre caméra, poignées, sélection, pinceau et création.
 function beginGesture(canvas, event) {
   if (tool==='view'||event.button !== 0 || !event.isPrimary || gesture||gizmo.dragging) return;
-  if(transformModes.has(tool)){
+  if(tool==='spawn'||transformModes.has(tool)){
     if(canvas===screen&&gizmo.enabled){
       const rect=screen.getBoundingClientRect();
       gizmo.pointerHover({x:(event.clientX-rect.left)/rect.width*2-1,y:1-(event.clientY-rect.top)/rect.height*2,button:0});
       if(gizmo.axis){controls.enabled=false;return;}
     }
-    event.stopImmediatePropagation();
-    const hit=pointUnderPointer(canvas,event);
-    choose(hit?group.children.indexOf(hit.object):-1);
-    return;
+    if(tool!=='spawn'){
+      event.stopImmediatePropagation();
+      const hit=pointUnderPointer(canvas,event);
+      choose(hit?group.children.indexOf(hit.object):-1);
+      return;
+    }
   }
   event.stopImmediatePropagation();
   canvas.focus({ preventScroll: true });
@@ -1275,7 +1366,7 @@ function beginGesture(canvas, event) {
 
 // Met à jour un aperçu, un déplacement au sol ou les passages du pinceau.
 function moveGesture(canvas, event) {
-  if(tool==='view'||transformModes.has(tool))return;
+  if(tool==='view'||transformModes.has(tool)||gizmo.dragging)return;
   if (!gesture) {
     if (tool === 'move') canvas.toggleAttribute('data-hit', Boolean(pointUnderPointer(canvas, event)));
     else showGhost(placementAt(canvas, event));
@@ -1748,7 +1839,7 @@ document.addEventListener('keydown', event => {
   } else if (event.altKey) return;
   else if (toolKeys[key]) setTool(toolKeys[key]);
   else if (key === 'f') fitViews();
-  else if (key === 'delete') removePiece();
+  else if (key === 'delete' || key === 'backspace') removePiece();
   else return;
   event.preventDefault();
 });
@@ -1803,6 +1894,7 @@ try {
     }
   }
 } catch {}
+applyEditedModel();
 setTool('move');
 sync();
 resizeRenderer();

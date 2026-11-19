@@ -11,10 +11,10 @@ export const labZones={
   objects:{name:'Bac à objets',color:'#d6a990',bounds:bounds(9,23,-5,6),sign:[16,-3.9]},
   ice:{name:'Glace',color:'#a0d4e0',bounds:bounds(-23,-9,-23,-8),sign:[-16,-9.2]},
   jumping:{name:'Sauts muraux',color:'#d7ac84',bounds:bounds(-6,6,-23,-8),sign:[-4.55,-9.5]},
-  throwing:{name:'Lancers et cible',color:'#dfc78a',bounds:bounds(9,23,-23,-8),sign:[12,-9.25]},
+  throwing:{name:'Lancers',color:'#dfc78a',bounds:bounds(9,23,-23,-8),sign:[12,-9.25]},
   hills:{name:'Terrain vallonné',color:'#b5cb99',bounds:bounds(-23,-9,-49,-27),sign:[-16,-28.5]},
   course:{name:'Parcours en hauteur',color:'#c5b4da',bounds:bounds(-6,6,-49,-27),sign:[0,-28.4]},
-  coconuts:{name:'Zone libre',color:'#a4c99c',bounds:bounds(9,23,-34,-27),sign:[12,-28.25]},
+  openArea:{name:'Zone libre',color:'#a4c99c',bounds:bounds(9,23,-34,-27),sign:[12,-28.25]},
   gravity:{name:'Gravité faible',color:'#dfd3a1',bounds:bounds(9,23,-48,-37),sign:[16,-38.2]},
 };
 
@@ -43,7 +43,6 @@ export const labStations={
 };
 export const labObjectSpawns=[{x:13,y:1,z:-.3},{x:18.8,y:1,z:-.3}];
 export const labObjectSlots=[1.75,4.75].flatMap(z=>[11.5,14,16.5,19,21.5].map(x=>({x,z})));
-export const labTarget={x:16,y:1.52,z:-21};
 export const labProbe={x:-19.4,y:.68,z:-3.25};
 export const labMaterialSample=i=>({x:-20+(i%6)*1.52,z:.5-Math.floor(i/6)*1.25});
 
@@ -59,7 +58,7 @@ export const labStructures={
     ['Marche',4.65,.21,-11,1.1,.42,1.6,3],
     ['Appui haut',4.65,.48,-13.3,1.1,.96,1.8,0],
   ],
-  throwing:[['Pas de tir',labTarget.x,-.096,-14,4.2,.2,4.7,16]],
+  throwing:[['Pas de tir',16,-.096,-14,4.2,.2,4.7,16]],
   course:[
     ...Array.from({length:5},(_,i)=>{
       const height=.3+i*.265;

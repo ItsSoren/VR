@@ -2,7 +2,7 @@ import * as T from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
 import {normalizeSketch,createSketchGeometry} from './custom-shape.js';
-import {getBuiltinAsset,isBuiltinAsset} from './model-assets.js';
+import {getBuiltinAsset,isBuiltinAsset,isRetiredArenaAsset,isRetiredArenaModel} from './model-assets.js';
 
 export const modelStorageKey = 'gorilla-lab-models-v1';
 export const modelLimits = Object.freeze({ models: 24, parts: 64, fileBytes: 2_500_000, textureBytes: 160_000 });
@@ -40,7 +40,7 @@ export function normalizeModelPack(input) {
     throw new Error('Ce fichier ne contient pas un atelier de modèles Gorilla Lab valide.');
   }
   const ids = new Set();
-  const models = input.models.map(raw => {
+  const models = input.models.filter(raw=>!isRetiredArenaModel(raw)).map(raw => {
     if (typeof raw?.id !== 'string' || !identifier.test(raw.id) || ids.has(raw.id) ||
         !Array.isArray(raw.parts) || raw.parts.length > modelLimits.parts) {
       throw new Error('Un modèle comporte un identifiant ou une liste de pièces invalide.');
@@ -56,7 +56,7 @@ export function normalizeModelPack(input) {
         key, typeof raw.properties?.[key] === 'boolean' ? raw.properties[key] : fallback,
       ])),
       hitbox:normalizeHitbox(raw?.hitbox),
-      parts: raw.parts.map((part, index) => ({
+      parts: raw.parts.filter(part=>!isRetiredArenaAsset(part?.assetId)).map((part, index) => ({
         name: label(part?.name, `Pièce ${index + 1}`),
         shape: part?.shape==='asset'&&isBuiltinAsset(part?.assetId)?'asset':Object.hasOwn(modelShapes, part?.shape)&&part.shape!=='asset'?part.shape:'box',
         ...(part?.shape==='asset'&&isBuiltinAsset(part?.assetId)?{assetId:part.assetId}:{}),
@@ -314,3 +314,4 @@ export function createModelAvatarHead(pack) {
   head.add(mesh);
   return head;
 }
+

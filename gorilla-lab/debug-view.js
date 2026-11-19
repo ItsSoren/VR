@@ -48,6 +48,19 @@ export function createDebugView(scene){
     }
     wire(edges,position,quaternion,unit,color);
   }
+  function terrainGrid(box,color){
+    const segments=16;
+    const dx=(box.xMax-box.xMin)/segments,dz=(box.zMax-box.zMin)/segments;
+    for(let i=0;i<=segments;i++){
+      for(let j=0;j<=segments;j++){
+        if(count+2>budget){stats.truncated=true;return;}
+        const x=box.xMin+i*dx,z=box.zMin+j*dz;
+        a.set(x,box.height(x,z),z);
+        if(i<segments)line(a,b.set(x+dx,box.height(x+dx,z),z),color);
+        if(j<segments)line(a,b.set(x,box.height(x,z+dz),z+dz),color);
+      }
+    }
+  }
   function vector(origin,value,scale,color){
     if(value.lengthSq()<1e-8)return;
     center.copy(origin).addScaledVector(value,scale);
@@ -68,6 +81,23 @@ export function createDebugView(scene){
     lines.visible=settings.debugPalm||settings.debugHitboxes||settings.debugInvisible||settings.debugForces||settings.debugBody||settings.debugMesh;
     if(!lines.visible){geometry.setDrawRange(0,0);return;}
     if(settings.debugHitboxes||settings.debugInvisible||settings.debugMesh){
+      const totalBudget=budget;
+      // Leave room for scenery even when many movable objects are nearby.
+      if(settings.debugScene!==false&&boxes.length)budget=Math.floor(totalBudget*.65/2)*2;
+      if(settings.debugObjects!==false)for(const object of bodies){
+        if(count+2>budget){stats.truncated=true;break;}
+        if(!object.mesh.visible||!nearby(object.mesh.position,object.shape.radius))continue;
+        stats.bodies++;
+        if(settings.debugHitboxes&&object.collidable!==false&&object.blocksPlayer!==false)
+          collider(object.shape,object.mesh.position,object.mesh.quaternion,object.owner?palette.proxy:palette.solid);
+        if(settings.debugMesh&&object.mesh.geometry){
+          const source=object.mesh.geometry,version=source.attributes.position.version;
+          let entry=wireCache.get(source);
+          if(entry?.version!==version){entry?.edges.dispose();entry={version,edges:new T.WireframeGeometry(source)};wireCache.set(source,entry);}
+          wire(entry.edges.attributes.position,object.mesh.position,object.mesh.quaternion,object.mesh.scale,palette.grip);
+        }
+      }
+      budget=totalBudget;
       if(settings.debugScene!==false)for(const box of boxes){
         if(count+2>budget){stats.truncated=true;break;}
         const radius=box.shape?.radius??box.half?.length()??Math.hypot((box.xMax-box.xMin)||0,(box.zMax-box.zMin)||0);
@@ -82,30 +112,7 @@ export function createDebugView(scene){
         }
         if(visible?!settings.debugHitboxes:!settings.debugInvisible)continue;
         if(box.shape)collider(box.shape,box.position,box.quaternion,visible?palette.solid:palette.proxy);
-        else if(box.heightfield&&box.mesh?.geometry){
-          const source=box.mesh.geometry;
-          let entry=wireCache.get(source);
-          const version=source.attributes.position.version;
-          if(entry?.version!==version){
-            entry?.edges.dispose();
-            entry={version,edges:new T.WireframeGeometry(source)};
-            wireCache.set(source,entry);
-          }
-          wire(entry.edges.attributes.position,box.mesh.position,box.mesh.quaternion,unit,palette.solid);
-        }
-      }
-      if(settings.debugObjects!==false)for(const object of bodies){
-        if(count+2>budget){stats.truncated=true;break;}
-        if(!object.mesh.visible||!nearby(object.mesh.position,object.shape.radius))continue;
-        stats.bodies++;
-        if(settings.debugHitboxes&&object.collidable!==false&&object.blocksPlayer!==false)
-          collider(object.shape,object.mesh.position,object.mesh.quaternion,object.owner?palette.proxy:palette.solid);
-        if(settings.debugMesh&&object.mesh.geometry){
-          const source=object.mesh.geometry,version=source.attributes.position.version;
-          let entry=wireCache.get(source);
-          if(entry?.version!==version){entry?.edges.dispose();entry={version,edges:new T.WireframeGeometry(source)};wireCache.set(source,entry);}
-          wire(entry.edges.attributes.position,object.mesh.position,object.mesh.quaternion,object.mesh.scale,palette.grip);
-        }
+        else if(box.heightfield) terrainGrid(box,visible?palette.solid:palette.proxy);
       }
     }
     if(playerActive){

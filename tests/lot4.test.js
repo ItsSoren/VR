@@ -31,3 +31,10 @@ test('GL020 arena serialization preserves all rotations and bounce in v1 maps',(
   assert.ok(restored.angleTo(mesh.quaternion)<1e-7);
   assert.equal(piece.bounce,1.4);
 });
+test('GL016 retired palm, coconuts and target cannot return from custom map imports',()=>{
+ const pieces=[{name:'Floor'},...['palm-tree','spawn-coconut','range-target'].map(assetId=>({name:assetId,model:{assetId}})),
+   {name:'Old target',sceneryId:'range-target'},{name:'Target ring in imported model',
+    model:{id:'custom-target',parts:[{shape:'asset',assetId:'target-ring-inner'}]}}];
+ const map=parseMap({format:'gorilla-lab-map',version:1,pieces});
+ assert.deepEqual(map.pieces.map(piece=>piece.name),['Floor']);
+});

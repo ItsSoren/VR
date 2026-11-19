@@ -184,6 +184,11 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
 .side{grid-column:2;height:650px;grid-template-rows:240px 1fr}
 .viewport-controls .ghost-note,.viewport-foot .preview-footer{display:none}
 }
+
+:is(input,select,textarea):not([type="color"],[type="checkbox"],[type="range"],[type="file"]):enabled{color:#f3f6fa;background:#18232e;border-color:#61748a}
+:where(input,textarea)::placeholder{color:#adbac9;opacity:1}
+:where(input,select,textarea):disabled{color:#a5b5c4}
+:where(button,a,input,select,textarea):focus-visible{outline:2px solid #9bdfff;outline-offset:2px}
 </style>
 </head>
 <body>
@@ -214,10 +219,10 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
 </header>
 <main class="layout">
   <nav class="tool-rail" aria-label="Outils de modélisation">
-    <button class="rail-btn" data-tool="select" aria-pressed="true" title="Sélection · V"><span class="glyph">⌖</span><span>Sélection</span></button>
-    <button class="rail-btn" data-tool="translate" aria-pressed="false" title="Déplacer · G"><span class="glyph">✣</span><span>Déplacer</span></button>
-    <button class="rail-btn" data-tool="rotate" aria-pressed="false" title="Rotation · R"><span class="glyph">⟳</span><span>Tourner</span></button>
-    <button class="rail-btn" data-tool="scale" aria-pressed="false" title="Échelle · S"><span class="glyph">⤢</span><span>Échelle</span></button>
+    <button class="rail-btn" data-tool="select" aria-keyshortcuts="V" aria-pressed="true" title="Sélection · V"><span class="glyph">⌖</span><span>Sélection</span></button>
+    <button class="rail-btn" data-tool="translate" aria-keyshortcuts="G" aria-pressed="false" title="Déplacer · G"><span class="glyph">✣</span><span>Déplacer</span></button>
+    <button class="rail-btn" data-tool="rotate" aria-keyshortcuts="R" aria-pressed="false" title="Rotation · R"><span class="glyph">⟳</span><span>Tourner</span></button>
+    <button class="rail-btn" data-tool="scale" aria-keyshortcuts="S" aria-pressed="false" title="Échelle · S"><span class="glyph">⤢</span><span>Échelle</span></button>
     <div class="rail-split"></div>
     <button class="rail-btn" data-shape="box" title="Ajouter un cube · 1"><span class="glyph">▣</span><span>Cube</span></button>
     <button class="rail-btn" data-shape="sphere" title="Ajouter une sphère · 2"><span class="glyph">◉</span><span>Sphère</span></button>

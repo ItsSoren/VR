@@ -105,3 +105,16 @@ test('GL015 PC and VR samples remain distinct in captured metrics',()=>{
  assert.equal(d.snapshot('missing').metrics.frameMs.median,null);
 });
 
+test('GL014 legacy dune and movable object lines coexist at the minimum budget',()=>{
+ const scene=new T.Scene(),view=createDebugView(scene);
+ const dune={mesh:new T.Mesh(new T.PlaneGeometry(14,22,64,64)),heightfield:{},xMin:-7,xMax:7,zMin:-11,zMax:11,
+   height:(x,z)=>Math.cos(x*.4)*Math.cos(z*.3),position:new T.Vector3()};
+ const ctx=context({boxes:[dune],bodies:[item()]});
+ Object.assign(ctx.settings,{debugHitboxes:true,debugBudget:1,debugScene:true,debugObjects:true});
+ view.update(ctx);
+ const combined=view.stats.segments;
+ assert.deepEqual([view.stats.boxes,view.stats.bodies,view.stats.truncated],[1,1,false]);
+ ctx.settings.debugObjects=false;view.update(ctx);assert.equal(view.stats.segments,544);
+ ctx.settings.debugObjects=true;ctx.settings.debugScene=false;view.update(ctx);
+ assert.equal(view.stats.segments+544,combined);
+});

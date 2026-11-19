@@ -111,10 +111,10 @@ function disposeArt(root){
   for(const material of materials)material.dispose();
 }
 
-export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,applyCoconuts,applyScore,onAction,onShot,onStatus}){
+export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,onAction,onShot,onStatus}){
   const peers=new Map(),replicas=new Map(),feed=createObjectFeed();
-  let replicaHost=0,replicaMap=-1,replicaLight=-1,replicaCoconuts=-1;
-  let cachedMap='',cachedId=0,replicaScore=-1;
+  let replicaHost=0,replicaMap=-1,replicaLight=-1;
+  let cachedMap='',cachedId=0;
   function localMap(){
     const name=currentMap();
     if(name!==cachedMap){cachedMap=name;cachedId=mapCode(name);}
@@ -129,8 +129,6 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     for(const id of replicas.keys())removeReplica(id);
     replicaHost=0;replicaMap=-1;
     if(replicaLight!==-1){replicaLight=-1;applyLight?.(null);}
-    if(replicaCoconuts!==-1){replicaCoconuts=-1;applyCoconuts?.(null);}
-    if(replicaScore!==-1){replicaScore=-1;applyScore?.(0);}
   }
   function setReplicaAppearance(replica,record){
     if(replica.color===record.color&&replica.style===record.style)return;
@@ -154,8 +152,6 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     if(!readyHere(pose)){clearReplicas();return;}
     if(replicaHost!==pose.id||replicaMap!==pose.map){clearReplicas();replicaHost=pose.id;replicaMap=pose.map;}
     if(pose.avatar&&pose.avatar.light!==replicaLight){replicaLight=pose.avatar.light;applyLight?.(replicaLight);}
-    if(pose.avatar&&pose.avatar.coconuts!==replicaCoconuts){replicaCoconuts=pose.avatar.coconuts;applyCoconuts?.(replicaCoconuts);}
-    if(pose.score!==undefined&&pose.score!==replicaScore){replicaScore=pose.score;applyScore?.(replicaScore);}
     if(!pose.objects)return;
     const present=pose.objects.full?new Set():null;
     for(const record of pose.objects.records){
@@ -339,7 +335,7 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     if(status.textContent!==caption){status.textContent=caption;onStatus?.();}
   }
   function update(frame){
-    const {inVR,time,dt,position,yaw,camera,rig,keys,avatar,bodies,score}=frame;
+    const {inVR,time,dt,position,yaw,camera,rig,keys,avatar,bodies}=frame;
     if(!client.role){clearReplicas();return;}
     const ready=client.role!=='pc'||!inVR,now=performance.now();
     const map=localMap(),host=client.role!=='vr'?client.remote:null;
@@ -365,7 +361,7 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
         position.copy(rig.position);
       }else fly(frame);
     }
-    client.tick({x:position.x,y:position.y,z:position.z,yaw,map,ready,avatar:ready&&client.role!=='pc'?avatar:null,score,
+    client.tick({x:position.x,y:position.y,z:position.z,yaw,map,ready,avatar:ready&&client.role!=='pc'?avatar:null,
       objectFeed:ready&&client.role==='vr'&&bodies?t=>feed.capture(t,bodies):null});
     if(now-statusAt>=150){statusAt=now;updateStatus(ready,now);}
   }
@@ -378,3 +374,4 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     get remoteLight(){return replicaLight===-1?null:replicaLight;},get replicaCount(){return replicas.size;},
     forEachReplica(fn){for(const r of replicas.values())if(r.mesh.visible)fn(r.mesh);}};
 }
+

@@ -40,7 +40,7 @@
   .view-frame{position:relative}
   canvas{display:block;width:100%;height:clamp(302px,53vh,640px);touch-action:none;outline:none;cursor:crosshair}
   canvas:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
-  canvas[data-tool="move"]{cursor:default}
+  canvas[data-tool="move" aria-keyshortcuts="V"]{cursor:default}
   canvas[data-tool="move"][data-hit]{cursor:grab}
   canvas[data-dragging]{cursor:grabbing!important}
   .view-frame .axes{pointer-events:none;position:absolute;bottom:9px;right:10px;color:#cce0e6;font-size:11px}
@@ -300,6 +300,12 @@
     #scene-sidebar{grid-column:2;min-height:560px;height:75dvh;display:grid}
     #editor-views[data-layout="split"]{grid-template-columns:1fr}
   }
+
+:is(input,select,textarea):not([type="color"],[type="checkbox"],[type="range"],[type="file"]):enabled{color:#f3f6fa;background:#18232e;border-color:#61748a}
+:where(input,textarea)::placeholder{color:#adbac9;opacity:1}
+:where(input,select,textarea):disabled{color:#a5b5c4}
+:where(button,a,input,select,textarea):focus-visible{outline:2px solid #9bdfff;outline-offset:2px}
+#model-asset-edit-link:not([hidden]){display:block}
 </style>
 </head>
 <body>
@@ -313,7 +319,7 @@
         <option value="only-plan">Plan uniquement</option><option value="stack">Vues empilées</option>
       </select></label>
       <button id="sidebar-toggle" title="Masquer ou afficher le panneau de propriétés">Propriétés</button>
-      <button id="workspace-fullscreen" title="Éditeur plein écran">⛶ Plein écran</button>
+      <button id="workspace-fullscreen" aria-pressed="false" title="Éditeur plein écran">⛶ Plein écran</button>
       <button id="new-example">Arène de départ</button>
       <button id="blank-map">Nouvelle map</button>
       <label class="file">Importer JSON<input id="import-map" type="file" accept=".json,application/json"></label>
@@ -328,9 +334,9 @@
           <div class="tools" role="group" aria-label="Outils">
             <button class="tool" id="move-tool" data-tool="move" aria-pressed="true">Sélectionner <kbd>V</kbd></button>
             <div class="transform-tools" role="group" aria-label="Transformer une pièce">
-              <button class="tool" data-tool="translate" aria-pressed="false"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3m12-6 3 3-3 3"/></svg>Déplacer <kbd>G</kbd></button>
-              <button class="tool" data-tool="rotate" aria-pressed="false"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2.4 5.7"/></svg>Tourner <kbd>R</kbd></button>
-              <button class="tool" data-tool="scale" aria-pressed="false"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6m-9 3 9-9M10 20H4v-6m9-3-9 9"/></svg>Redimensionner <kbd>S</kbd></button>
+              <button class="tool" data-tool="translate" aria-keyshortcuts="G" aria-pressed="false"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3m12-6 3 3-3 3"/></svg>Déplacer <kbd>G</kbd></button>
+              <button class="tool" data-tool="rotate" aria-keyshortcuts="R" aria-pressed="false"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2.4 5.7"/></svg>Tourner <kbd>R</kbd></button>
+              <button class="tool" data-tool="scale" aria-keyshortcuts="S" aria-pressed="false"><svg class="tool-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6m-9 3 9-9M10 20H4v-6m9-3-9 9"/></svg>Redimensionner <kbd>S</kbd></button>
             </div>
             <button class="tool" data-tool="view" aria-pressed="false">Caméra <kbd>C</kbd></button>
             <button class="tool" id="add-block" data-tool="block" aria-pressed="false">Bloc <kbd>1</kbd></button>
@@ -433,7 +439,7 @@
           <p style="font-size:11px;color:var(--muted)">Ces réglages sont enregistrés dans le modèle intégré à la carte et appliqués en jeu.</p>
         </details>
         <p id="model-structure-note" hidden style="font-size:11px;color:var(--muted)">Structure de décor : tu peux la déplacer, la tourner et la redimensionner ici. Sa géométrie détaillée se modifie dans l’atelier des modèles.</p>
-        <a id="model-asset-edit-link" href="./model-editor.html" hidden style="display:block;margin:7px 0;padding:7px 9px;color:#c7e8dd;border:1px solid #486b61;border-radius:6px;text-align:center">✎ Modifier la géométrie dans FOUNDRY ↗</a>
+        <a id="model-asset-edit-link" href="./model-editor.html" hidden style="margin:7px 0;padding:7px 9px;color:#c7e8dd;border:1px solid #486b61;border-radius:6px;text-align:center">✎ Modifier la géométrie dans FOUNDRY ↗</a>
         <details id="terrain-controls" hidden>
           <summary>Relief et végétation</summary>
           <div class="fields">

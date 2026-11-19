@@ -107,7 +107,7 @@ Pour reproduire la vérification des commandes sur PC, charge l’arène, ferme 
 
 1. En solo, ouvre **Debug** et active **Prises et paumes**. Au repos, avec le bras à portée, le repère cyan doit rester au centre de la paume verte. Tourne la manette autour des trois axes, puis pose la paume à plat. L’écart en appui montre la correction du solveur.
 2. Active **Corps et tête**. Regarde vers le sol et tends les deux mains vers l’avant, puis étends une seule main sur le côté. Observe le pivot du cou, le tangage et le roulis. La vue reste pilotée par le casque.
-3. Active **Hitboxes visibles** et **Collisions sans maillage** près d’une borne ou du cocotier. Le jaune indique les surfaces visibles, le rose les volumes sans maillage dédié. En **Forces et vitesse**, l’orange suit la normale, le bleu la vitesse, et le rouge la gravité.
+3. Active **Hitboxes visibles** et **Collisions sans maillage** près d’une borne ou du terrain vallonné. Le jaune indique les surfaces visibles, le rose les volumes sans maillage dédié. En **Forces et vitesse**, l’orange suit la normale, le bleu la vitesse, et le rouge la gravité.
 4. Passe à ×0,25 en solo, compare un appui au sol, sur un rebord puis au mur. Le suivi direct du casque et des manettes continue pendant que le mouvement et les objets ralentissent.
 5. Compare les volumes **1/10**, **5/10** et **10/10** avec **Écouter un pas**, puis en marchant sur PC ou en posant une paume au sol en VR. Un appui tenu ne doit produire qu’un son.
 6. Capture le rapport après avoir reproduit le geste. `debug.hands[].idleAlignmentMeters` mesure l’alignement mathématique avant résolution. `palmCenter`, `gripPosition`, `contactCenter` et `normal` sont en coordonnées du monde. Le diagnostic prend un échantillon environ toutes les 350 ms. `torsoDegrees` donne le tangage puis le roulis.
@@ -118,3 +118,4 @@ Pour reproduire la vérification des commandes sur PC, charge l’arène, ferme 
 - Sur PC/mobile, marche puis relâche les commandes sur une rampe normale. Recommence sur la glace. Le soutien du sol pour la marche s’arrête autour de 52° ; les surfaces plus raides se traitent comme des parois.
 - Dans le casque, active les paumes et les normales dans **Debug**. Compare un appui à 45°, un à 70° puis un au mur. Le test de la paume utilise la normale du triangle sculpté, indépendamment de l’angle retenu pour la marche PC. Le ressenti et l’écart résiduel du suivi se vérifient au casque.
 - Dans l’atelier, sélectionne un bloc, utilise **G**, **R** et **S** sur chaque axe. Annule, exporte et recharge la carte, puis joue-la. Vérifie aussi le redimensionnement X/Z d’un terrain.
+

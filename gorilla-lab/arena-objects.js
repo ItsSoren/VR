@@ -17,14 +17,16 @@ export function createArenaObjectSpecs(){
     ['Brique',new T.BoxGeometry(.56,.19,.28),'#b35a71',0,1.5],
     ['Grand rectangle',new T.BoxGeometry(1.42,.75,.88),'#738aa5',0,4.2],
     ['Grande sphère',new T.IcosahedronGeometry(.60,4),'#dbab58',.60,3.7],
-    ['Coco',new T.IcosahedronGeometry(.124,1),'#956238',.124,.44],
   ].map(([name,geo,color,sphere,mass])=>({name,geo,mass,shape:colliderFor(geo,sphere),
     material:new T.MeshStandardMaterial({color,roughness:.44,metalness:.1,flatShading:true}),
     lowShape:sphere?null:boxCollider(geo.computeBoundingBox()??geo.boundingBox.getSize(new T.Vector3()).multiplyScalar(.5)),
   }));
+  // Leave the old network type 6 vacant so later type IDs stay stable.
+  objectSpecs.length=7;
   for(const {collisionGeo,sphere=0,...spec} of makeLabProps()){
     const hull=colliderFor(collisionGeo??spec.geo,sphere);
     objectSpecs.push({...spec,shape:hull,lowShape:hull});
   }
   return objectSpecs;
 }
+

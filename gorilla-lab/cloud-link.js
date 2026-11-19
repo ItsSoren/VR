@@ -313,7 +313,7 @@ function packAvatar(avatar){
     const pressure=hand?.pressure?.[i]??0;
     return Math.round(Math.max(0,Math.min(1,pressure))*9);
   }).join('')).join('');
-  return head+hands.join('')+height+arms+light+digits(avatar.coconuts??31,2)+digits(avatar.color??0,2)+pressures;
+  return head+hands.join('')+height+arms+light+'00'+digits(avatar.color??0,2)+pressures;
 }
 function encodeAction(action){
   if(!action)return null;
@@ -371,10 +371,11 @@ function unpackAvatar(value,start,legacy){
     pressure:legacy?null:[0,1,2].map(k=>Number(value[start+79+3*hand+k])/9),
   }:null);
   if(hands.some(h=>h&&(!h.position||!h.quaternion)))return null;
-  const light=Number(value[start+74]),coconuts=Number(value.slice(start+75,start+77));
-  if(light>2||coconuts>31)return null;
+  const light=Number(value[start+74]);
+  // Two legacy digits are reserved to preserve the following field offsets.
+  if(light>2||Number(value.slice(start+75,start+77))>31)return null;
   return {head,hands,height:Number(value.slice(start+68,start+71))/100,armSpan:Number(value.slice(start+71,start+74))/100,
-    light,coconuts,color:legacy?0:Number(value.slice(start+77,start+79))};
+    light,color:legacy?0:Number(value.slice(start+77,start+79))};
 }
 export function decodeAvatar(value,now){
   if(typeof value!=='string'||value.length>maxValueLength||!/^[0-9]+$/.test(value))return null;
@@ -501,4 +502,5 @@ export function createObjectFeed(){
   }
   return {capture,reset(){previous.clear();recent.clear();slowAt=fullAt=-Infinity;}};
 }
+
 

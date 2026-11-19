@@ -194,7 +194,7 @@ function supportAxisFor(spec){
   const k=axisSize.x>=axisSize.y&&axisSize.x>=axisSize.z?0:axisSize.y>=axisSize.z?1:2;
   return new T.Vector3().setComponent(k,axisSize.getComponent(k)*.49);
 }
-for(const spec of objectSpecs)spec.supportAxis=supportAxisFor(spec);
+for(const spec of objectSpecs)if(spec)spec.supportAxis=supportAxisFor(spec);
 function cameraDetails(mesh){
   const lens=new T.Mesh(new T.CylinderGeometry(.058,.074,.10,12).rotateX(Math.PI/2),
     new T.MeshStandardMaterial({color:'#28313a',roughness:.30,metalness:.5}));
@@ -214,34 +214,6 @@ function makePropMesh(type,ownMaterial=false){
 }
 let maps=null;
 const objects=[],noBodies=[];
-const targetFrameCache={model:null,bounds:null,center:new T.Vector3(),size:new T.Vector3()};
-const targetFrame={position:new T.Vector3(),right:new T.Vector3(),up:new T.Vector3(),normal:new T.Vector3(),scaleX:1,scaleY:1};
-const targetRotation=new T.Quaternion(),targetOffset=new T.Vector3(),targetEuler=new T.Euler(0,0,0,'YXZ');
-function editableTargetFrame(){
-  const piece=maps?.getAssetPiece?.('range-target');
-  if(!piece)return null;
-  if(targetFrameCache.model!==piece.model){
-    targetFrameCache.model=piece.model;
-    const bounds=modelBounds(piece.model);
-    bounds.getCenter(targetFrameCache.center);bounds.getSize(targetFrameCache.size);
-  }
-  const {center,size}=targetFrameCache;
-  targetEuler.set(T.MathUtils.degToRad(piece.pitch),T.MathUtils.degToRad(piece.yaw),T.MathUtils.degToRad(piece.roll??0),'YXZ');
-  targetRotation.setFromEuler(targetEuler);
-  targetFrame.position.set(piece.x,piece.y,piece.z);
-  targetOffset.set(
-    -center.x/Math.max(.0001,size.x)*piece.w,
-    -center.y/Math.max(.0001,size.y)*piece.h,
-    -center.z/Math.max(.0001,size.z)*piece.d
-  ).applyQuaternion(targetRotation);
-  targetFrame.position.add(targetOffset);
-  targetFrame.right.set(1,0,0).applyQuaternion(targetRotation);
-  targetFrame.up.set(0,1,0).applyQuaternion(targetRotation);
-  targetFrame.normal.set(0,0,1).applyQuaternion(targetRotation);
-  targetFrame.scaleX=piece.w/Math.max(.0001,size.x);
-  targetFrame.scaleY=piece.h/Math.max(.0001,size.y);
-  return targetFrame;
-}
 const desktopActor={held:null},remoteActors=new Map();
 let remoteHeld=0;
 let nextNetId=1;
@@ -275,7 +247,7 @@ function spawnObject(index,origin,actor,quiet=false){
   const mesh=makePropMesh(index);
   mesh.position.copy(origin);scene.add(mesh);
   const selectedShape=settings.preciseHitboxes?spec.shape:(spec.lowShape??spec.shape);
-  const body={mesh,spec,netId:nextNetId++,netType:index,beforePhysics:mesh.position.clone(),blocksPlayer:spec.properties?.collidable!==false,precise:settings.preciseHitboxes,type:spec.name,shape:selectedShape,radius:selectedShape.radius,mass:spec.mass,start:mesh.position.clone(),startRotation:mesh.quaternion.clone(),
+  const body={mesh,spec,netId:nextNetId++,netType:index,blocksPlayer:spec.properties?.collidable!==false,precise:settings.preciseHitboxes,type:spec.name,shape:selectedShape,radius:selectedShape.radius,mass:spec.mass,start:mesh.position.clone(),startRotation:mesh.quaternion.clone(),
     owner:null,velocity:new T.Vector3(),angular:new T.Vector3(),offset:new T.Vector3(),
     relativeRotation:new T.Quaternion(),shadow:arena.shadow(spec.shape.radius)};
   body.frozen=Boolean(spec.properties?.frozen);body.collidable=spec.properties?.collidable!==false;body.grabbable=spec.properties?.grabbable!==false;body.toolHold=false;body.protected=index===CAMERA_TYPE;body.paint=0;body.materialStyle=-1;
@@ -437,7 +409,7 @@ function captureReport(){
     haptics:hands.map(h=>({side:h.side,tracked:Boolean(h.valid),...h.hapticStats})),
     debug:lastPlayerDiagnostics,audio:{volume:settings.stepVolume,enabled:settings.stepAudio,clipsPlayed:steps.count,state:steps.state},
     performance:{fps,frames:captured.frames.length,frameMs:captured.metrics.frameMs},
-    xr:renderer.xr.isPresenting?lastVR:null,previousVR:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{physics:{...objectPhysicsStats},total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},cloud:{role:spectator.role,connected:spectator.connected,replicas:spectator.replicaCount,...spectator.stats},targetScore:fixtures.score(),locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
+    xr:renderer.xr.isPresenting?lastVR:null,previousVR:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{physics:{...objectPhysicsStats},total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},cloud:{role:spectator.role,connected:spectator.connected,replicas:spectator.replicaCount,...spectator.stats},locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
   };
   document.querySelector('#download-report').disabled=false;
   hudDirty=true;
@@ -660,7 +632,7 @@ const panel=display(640,652,.84,.86,scene);
 panel.mesh.visible=false;
 const wrist=display(416,84,.32,.065,scene);
 wrist.mesh.visible=false;
-const reflectionView=new T.PerspectiveCamera(75,1,.07,140);
+const reflectionView=new T.PerspectiveCamera(75,1,.07,20);
 const mirrorFace=new Reflector(new T.PlaneGeometry(1.7,1.95),{
   color:0xf4f6ff,textureWidth:mobileScreen?128:256,textureHeight:mobileScreen?128:256,clipBias:.004,multisample:0,
 });
@@ -691,7 +663,7 @@ function updateMirror(now,pose){
     reflectionView.quaternion.set(q.x,q.y,q.z,q.w).premultiply(headRotation.setFromAxisAngle(up,yaw));
   }else camera.getWorldQuaternion(reflectionView.quaternion);
   mirrorForward.set(0,0,-1).applyQuaternion(reflectionView.quaternion);
-  let source=null,bestDistance=4;
+  let source=null,bestDistance=3;
   function consider(candidate,position,rotation){
     toMirror.subVectors(position,worldHead);
     const distance=toMirror.length();
@@ -713,7 +685,7 @@ function updateMirror(now,pose){
   mirrorFace.visible=true;
   if(mirrorSource!==source){mirrorSource=source;lastMirrorRender=-Infinity;}
   const quality=settings.mirrorQuality;
-  const resolution=quality===3?256:128;
+  const resolution=quality===3?(mobileScreen||renderer.xr.isPresenting?256:768):128;
   if(mirrorResolution!==resolution){mirrorFace.getRenderTarget().setSize(resolution,resolution);mirrorResolution=resolution;lastMirrorRender=-Infinity;}
   if(now-lastMirrorRender<(quality===3?45:110))return;
   lastMirrorRender=now;
@@ -777,7 +749,7 @@ maps=connectMaps({scene,arena,boot,onReset:angle=>{
 },onVisual:applyVisual,
   getLevel:()=>liveLevel,defaultObjects:[...arena.builtObjects,...scene.children.filter(n=>!beforeFixtures.has(n)),mirrorBacking],
 });
-const spectator=addSpectator({scene,applyCoconuts:()=>{},currentMap:()=>(maps.signature||'arena-r25-'+arena.hillSeed)+modelSignature,
+const spectator=addSpectator({scene,currentMap:()=>(maps.signature||'arena-r25-'+arena.hillSeed)+modelSignature,
   seedArena:seed=>arena.setHillSeed(seed),
   makeReplica:type=>{
     const mesh=makePropMesh(type,true);
@@ -788,7 +760,6 @@ const spectator=addSpectator({scene,applyCoconuts:()=>{},currentMap:()=>(maps.si
   onStatus:()=>{if(page===5)hudDirty=true;},
   onShot:shot=>blaster.receiveShot(shot,spectator.role==='vr'),
   applyLight:mode=>{arena.setTimeOfDay(mode??settings.timeOfDay-1);hudDirty=true;if(!renderer.xr.isPresenting)desktopMenu();},
-  applyScore:value=>fixtures.setScore(value),
 });
 function saveVRModel(asHead){
   const pieces=maps.modelPieces();
@@ -1647,7 +1618,7 @@ function captureNetworkAvatar(){
   return {
     head:avatarHead.quaternion,hands:inVR?hands.map(h=>h.valid?{position:h.mesh.position,quaternion:h.mesh.quaternion,pressure:h.pressure}:null):[null,toolState.mode?desktopHand:null],
     height:head.y,armSpan:armSegmentLength()*2,light:settings.timeOfDay-1,
-    color:avatarColor,coconuts:0,
+    color:avatarColor,
     tool:toolState.mode?toolState:null,gun:blaster.gun,
   };
 }
@@ -1696,15 +1667,10 @@ renderer.setAnimationLoop((time,frame)=>{
     }
   }
   if(!remoteWorld&&settings.objects){
-    // La cible compare le début et la fin du pas pour repérer les impacts rapides.
-    for(const object of objects)object.beforePhysics.copy(object.mesh.position);
     const physicsStart=performance.now();
     solveObjects(objects,arena.boxes,dt,9.81*settings.gravity/5,.12+settings.bounce*.064,surfaceAt);
     physicsCpuMs=performance.now()-physicsStart;
-    if(maps.builtIn){
-      const targetFrame=editableTargetFrame();
-      if(targetFrame||fixtures.target.visible)fixtures.updateTarget(objects,targetFrame);
-    }
+
   }
   if(inVR&&!menu&&spectator.role!=='pc')for(const hand of hands)touchFixture(hand);
   arena.probe.rotation.y+=dt*.29;
@@ -1747,7 +1713,7 @@ renderer.setAnimationLoop((time,frame)=>{
     flatFiring:blasterTrigger.held||keys.has('KeyJ'),
   });
   spectator.update({inVR,time,dt:inputDt,position:worldHead,yaw:spectating?yaw:bodyYaw,pitch,camera,rig,keys,actions,flat,avatar:captureNetworkAvatar,
-    bodies:settings.objects?objects:noBodies,score:fixtures.score()});
+    bodies:settings.objects?objects:noBodies});
   actions.clear();
   const debugStart=performance.now();
   debugView.update({settings,boxes:activeBoxes,bodies:remoteWorld?(settings.debugHitboxes?replicaBlockers():noBodies):objects,hands,locomotion,velocity,
