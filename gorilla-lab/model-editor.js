@@ -3,13 +3,14 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {TransformControls} from 'three/addons/controls/TransformControls.js';
 import {GLTFExporter} from 'three/addons/exporters/GLTFExporter.js';
 import {
-  createModelMaterial,createModelPartMaterial,disposeModelMaterial,createModelPartGeometry,createModelUnitGeometry,modelHitbox,modelHitboxGeometry,modelCollisionZones,modelPartOwnMaterial,modelPartUv,modelPhysics,modelPartZones,modelFinishes,defaultModelProperties,
+  createModelMaterial,createModelPartMaterial,disposeModelMaterial,createModelPartGeometry,createModelUnitGeometry,modelBounds,modelHitbox,modelHitboxGeometry,modelCollisionZones,modelPartOwnMaterial,modelPartUv,modelPhysics,modelPartZones,modelFinishes,defaultModelProperties,
   modelLimits,modelShapes,modelStorageKey,modelSurfaces,normalizeModelPack,readModelPack,
 } from './model-pack.js';
 import {createBuiltinModelTemplates} from './model-assets.js';
 import {openTextureStudio} from './texture-studio.js';
 import {openShapeStudio} from './shape-studio.js';
 import {modelFacePosition,modelGroupTransform,scaleHandleSigns} from './editor-scale.js';
+import {avatarJoints,avatarTemplateParts,avatarReady,createAvatarRig,normalizeAvatarJoint,normalizeAvatarRig} from './avatar-rig.js';
 import {startingSketch} from './custom-shape.js';
 
 // GORILLA / FOUNDRY. Geometry remains in the Gorilla model-pack v1 format:
@@ -43,7 +44,23 @@ const undoStack=[],redoStack=[],maxUndo=48;
 const previews=new T.Group();
 const groupPivot=new T.Object3D();
 const referencePreviews=new T.Group();
+let rigPreview=null;
+const avatarAngles=new Map();
+const pivotHandle=new T.Object3D(),skeletonGuide=new T.Group();
+let moveAvatarPivot=false;
+const jointMarkerGeometry=new T.SphereGeometry(1,10,6);
+const jointMarkers={};
+const skeletonLinks=new T.LineSegments(
+  new T.BufferGeometry().setAttribute('position',new T.Float32BufferAttribute(6*(Object.keys(avatarJoints).length-1),3)),
+  new T.LineBasicMaterial({color:'#49d3ec',depthTest:false,depthWrite:false,transparent:true,opacity:.85}),
+);
+skeletonLinks.frustumCulled=false;skeletonLinks.renderOrder=9;skeletonGuide.add(skeletonLinks);
+for(const key of Object.keys(avatarJoints)){
+  const marker=new T.Mesh(jointMarkerGeometry,new T.MeshBasicMaterial({color:'#55d8ee',depthTest:false,depthWrite:false}));
+  marker.renderOrder=10;marker.userData.avatarJoint=key;skeletonGuide.add(marker);jointMarkers[key]=marker;
+}
 const scene=new T.Scene();
+skeletonGuide.visible=false;scene.add(pivotHandle,skeletonGuide);
 scene.background=new T.Color('#152229');
 const camera=new T.PerspectiveCamera(45,1,.005,110);
 const guide=new T.GridHelper(8,32,'#64818a','#334b54');
@@ -192,10 +209,11 @@ function updateModelLists(){
   $('models').disabled=!list.length;
   const model=currentModel();
   $('model-title').disabled=!model;
+  $('delete-model').disabled=!model;
   if(document.activeElement!==$('model-title'))$('model-title').value=model?.name??'';
   $('duplicate-model').disabled=!model||pack.models.length>=modelLimits.models;
   $('model-count').textContent=pack.models.length+' / '+modelLimits.models;
-  setOptions($('avatar'),[['','Singe d’origine'],...list.filter(([id])=>pack.models.find(m=>m.id===id)?.parts.length)],pack.avatarId);
+  setOptions($('avatar'),[['','Singe d’origine'],...pack.models.filter(avatarReady).map(m=>[m.id,m.name+(m.kind==='avatar'?'':' · tête')])],pack.avatarId);
   const container=$('model-list'),scroll=container.scrollTop;
   const rows=pack.models.map(entry=>{
     const row=document.createElement('div');row.className='model-entry-wrap';
@@ -263,10 +281,12 @@ function updateInspector(){
   const model=currentModel(),part=currentPart();
   $('model-details').hidden=!model;
   $('part-inspector').hidden=!part;
-  $('part-empty').hidden=!!part||['settings','collision','publish'].includes($('model-inspector').dataset.tab);
+  $('part-empty').hidden=!!part||['settings','collision','publish','avatar'].includes($('model-inspector').dataset.tab);
   if(model){
     if(document.activeElement!==$('model-name'))$('model-name').value=model.name;
     $('model-kind').value=model.kind||'prop';
+    $('model-kind').disabled=model.kind==='avatar';
+    $('in-game').disabled=model.kind==='avatar';
     const physics=modelPhysics(model);
     for(const key of ['gravity','bounce'])if(document.activeElement!==$('model-'+key))$('model-'+key).value=physics[key];
     $('in-game').checked=model.inGame;
@@ -309,8 +329,10 @@ function updateInspector(){
   $('viewport-title').textContent=model
     ?'ATELIER / '+model.name.toUpperCase()
     :'ESPACE DE CONSTRUCTION / 3D';
-  $('quick-send-to-map').setAttribute('aria-disabled',String(!model?.parts.length));
-  $('send-to-map').setAttribute('aria-disabled',String(!model?.parts.length));
+  for(const id of ['quick-send-to-map','send-to-map'])$(id).setAttribute('aria-disabled',String(!model?.parts.length||model.kind==='avatar'));
+  $('avatar-new').disabled=pack.models.length>=modelLimits.models;
+  $('avatar-copy').disabled=!model?.parts.length||model.kind==='avatar'||$('avatar-new').disabled;
+  updateAvatarInspector();
 }
 // The visual preview uses Foundry's uncentred model coordinates.
 // When exported, physics recentres the geometry and applies the same offset.
@@ -389,15 +411,18 @@ function setPanel(tab){
     setTool('select');
   }
   $('model-inspector').dataset.tab=tab;
+  if(tab!=='avatar'){avatarAngles.clear();moveAvatarPivot=false;}
   updateInspector();
   updateHitboxPreview();
   attachGizmo();
+  updateAvatarPreview();
 }
 for(const button of document.querySelectorAll('.tab')){
   button.onclick=()=>setPanel(button.dataset.panel);
 }
 
 function render(){
+  updateSkeletonGuide();
   renderer?.render(scene,camera);
 }
 try{
@@ -428,7 +453,7 @@ try{
     transformMoved=false;
     pickStart=null;
     const mesh=gizmo.object;
-    if(mesh===hitboxPreview)return;
+    if(mesh===hitboxPreview||mesh===pivotHandle)return;
     const meshes=mesh===groupPivot?selectedMeshes():[mesh];
     const bounds=new T.Box3();
     if(mesh===groupPivot){
@@ -454,6 +479,13 @@ try{
   gizmo.addEventListener('objectChange',()=>{
     const mesh=gizmo.object;
     if(!mesh||!gizmo.dragging)return;
+    if(mesh===pivotHandle&&rigPreview){
+      const key=$('avatar-joint').value;
+      const pivot=rigPreview.setPivot(key,mesh.position.toArray());
+      currentModel().avatarRig[key].pivot=pivot;
+      mesh.position.fromArray(pivot);
+      transformMoved=true;updateAvatarInspector();render();return;
+    }
     if(hitboxEditing&&mesh===hitboxPreview&&['box','custom'].includes(currentModel()?.hitbox?.mode)){
       const hitbox=currentModel().hitbox;
       hitbox.center=mesh.position.toArray().map(v=>clamp(v,-6,6));
@@ -573,6 +605,15 @@ function partMesh(part){
 }
 function attachGizmo(){
   if(!gizmo)return;
+  if($('model-inspector').dataset.tab==='avatar'){
+    if(moveAvatarPivot&&rigPreview){
+      const key=$('avatar-joint').value;
+      pivotHandle.position.fromArray(normalizeAvatarJoint(key,currentModel()?.avatarRig?.[key]).pivot);
+      pivotHandle.updateMatrixWorld(true);
+      gizmo.setMode('translate');gizmo.attach(pivotHandle);
+    }else gizmo.detach();
+    return;
+  }
   const meshes=visibleSelectedMeshes();
   let selectedMesh=meshes[0];
   if(meshes.length&&selectedIndices().length>1){
@@ -671,9 +712,10 @@ function updatePreview(frame=false){
     :currentModel()?'Ajoute une forme avec la barre à gauche pour commencer.'
     :'Crée un modèle avec + Nouveau modèle puis assemble tes pièces.';
   $('preview-tag').textContent=parts.length+' PIÈCE'+(parts.length>1?'S':'')+
-    ' / '+(currentModel()?.kind==='structure'?'DÉCOR':'OBJET')+
+    ' / '+({avatar:'AVATAR',structure:'DÉCOR'}[currentModel()?.kind]??'OBJET')+
     (referencePreviews.children.length?' · '+referencePreviews.children.length+' RÉF.':'');
   showSelection();
+  updateAvatarPreview();
   if(frame&&(parts.length||referencePreviews.children.length))frameModel();
   else render();
 }
@@ -720,7 +762,7 @@ function groupSelection(ungroup=false){
 }
 function switchModel(id){
   if(!pack.models.some(entry=>entry.id===id)||id===modelId)return;
-  modelId=id;partIndex=0;multi.clear();
+  modelId=id;partIndex=0;multi.clear();avatarAngles.clear();
   refreshModel();
   status('Modèle actif : '+currentModel().name);
 }
@@ -751,7 +793,7 @@ for(const button of document.querySelectorAll('.rail-btn[data-tool]')){
 let pickStart=null,rightStart=null;
 const raycaster=new T.Raycaster(),pointer=new T.Vector2();
 function pick(event){
-  if(!renderer)return -1;
+  if(!renderer||rigPreview)return -1;
   const rect=canvas.getBoundingClientRect();
   pointer.set(2*(event.clientX-rect.left)/rect.width-1,1-2*(event.clientY-rect.top)/rect.height);
   raycaster.setFromCamera(pointer,camera);
@@ -768,8 +810,20 @@ canvas.addEventListener('pointerup',event=>{
   const from=pickStart;pickStart=null;
   if(event.button!==0||from?.id!==event.pointerId
       ||Math.hypot(event.clientX-from.x,event.clientY-from.y)>5)return;
+  const extend=event.shiftKey||event.ctrlKey||event.metaKey;
+  if(rigPreview){
+    const rect=canvas.getBoundingClientRect();
+    pointer.set(2*(event.clientX-rect.left)/rect.width-1,1-2*(event.clientY-rect.top)/rect.height);
+    raycaster.setFromCamera(pointer,camera);
+    const marker=skeletonGuide.visible&&!extend?
+      raycaster.intersectObjects(Object.values(jointMarkers),false)[0]?.object:null;
+    if(marker){selectAvatarJoint(marker.userData.avatarJoint);return;}
+    const mesh=raycaster.intersectObjects(rigPreview.meshes.filter(mesh=>mesh.visible),false)[0]?.object;
+    if(mesh){selectPart(rigPreview.meshes.indexOf(mesh),extend);render();}
+    return;
+  }
   const index=pick(event);
-  if(index>=0)selectPart(index,event.shiftKey||event.ctrlKey||event.metaKey);
+  if(index>=0)selectPart(index,extend);
 });
 const menu=$('part-context');
 function closeMenu(){menu.hidden=true;}
@@ -906,6 +960,8 @@ function mirrorPart(){
   copy.name=part.name.slice(0,36)+' · miroir';
   delete copy.group;
   copy.position[0]=-copy.position[0];
+  if(copy.avatarJoint?.startsWith('left'))copy.avatarJoint='right'+copy.avatarJoint.slice(4);
+  else if(copy.avatarJoint?.startsWith('right'))copy.avatarJoint='left'+copy.avatarJoint.slice(5);
   copy.rotation[1]=-copy.rotation[1];
   copy.rotation[2]=-copy.rotation[2];
   model.parts.push(copy);
@@ -1044,6 +1100,10 @@ $('file').onchange=async event=>{
 };
 function sendToCards(event){
   const model=currentModel();
+  if(model?.kind==='avatar'){
+    event.preventDefault();
+    status('Équipe cet avatar dans l’onglet Avatar.');return;
+  }
   if(!model?.parts.length){
     event.preventDefault();
     status('Ajoute au moins une pièce avant de placer le modèle sur une carte.',true);
@@ -1126,7 +1186,7 @@ for(const key of ['center','size'])for(let i=0;i<3;i++){
   input.onchange=updateHitboxControls;
 }
 $('model-kind').onchange=event=>{
-  if(!currentModel())return;beforeChange(event.target);
+  if(!currentModel()||currentModel().kind==='avatar')return;beforeChange(event.target);
   currentModel().kind=event.target.value;markDirty();updateInspector();updatePreview();
 };
 $('in-game').onchange=event=>{
@@ -1142,6 +1202,137 @@ for(const key of Object.keys(defaultModelProperties)){
 $('avatar').onchange=event=>{
   beforeChange(event.target);pack.avatarId=event.target.value||null;markDirty();
 };
+const jointOptions=Object.entries(avatarJoints).map(([key,joint])=>[key,joint.label]);
+setOptions($('avatar-assignment'),jointOptions,'torso');
+setOptions($('avatar-joint'),jointOptions,'torso');
+function updateAvatarInspector(){
+  const model=currentModel(),part=currentPart(),show=model?.kind==='avatar';
+  $('avatar-rig-controls').hidden=!show;
+  if(!show)return;
+  $('avatar-assignment').disabled=!part;
+  $('avatar-attach').disabled=!part;
+  $('avatar-move').setAttribute('aria-pressed',String(moveAvatarPivot));
+  $('avatar-assignment').value=part?.avatarJoint??'torso';
+  const key=$('avatar-joint').value||'torso',joint=normalizeAvatarJoint(key,model.avatarRig?.[key]);
+  for(const [index,axis] of ['x','y','z'].entries())$('avatar-'+axis).value=joint.pivot[index];
+  $('avatar-axis').value=joint.axis;
+  $('avatar-limit').value=joint.limit;
+  $('avatar-bend').value=(avatarAngles.get(key)??0)*100;
+}
+const guidePoint=new T.Vector3(),guideParentPoint=new T.Vector3();
+function updateSkeletonGuide(){
+  skeletonGuide.visible=Boolean(rigPreview)&&$('avatar-display').value!=='model';
+  if(!skeletonGuide.visible)return;
+  const selected=$('avatar-joint').value;
+  rigPreview.root.updateMatrixWorld(true);
+  const position=skeletonLinks.geometry.attributes.position;
+  let offset=0;
+  for(const [key,marker] of Object.entries(jointMarkers)){
+    rigPreview.bones[key].getWorldPosition(guidePoint);
+    marker.position.copy(guidePoint);
+    marker.scale.setScalar(key.includes('Finger')?.011:.018).multiplyScalar(key===selected?1.35:1);
+    marker.material.color.set(key===selected?'#ffc16e':'#55d8ee');
+    const parent=avatarJoints[key].parent;
+    if(parent){
+      rigPreview.bones[parent].getWorldPosition(guideParentPoint);
+      position.setXYZ(offset++,guidePoint.x,guidePoint.y,guidePoint.z);
+      position.setXYZ(offset++,guideParentPoint.x,guideParentPoint.y,guideParentPoint.z);
+    }
+  }
+  position.needsUpdate=true;skeletonGuide.updateMatrixWorld(true);
+}
+function updateAvatarPreview(){
+  const model=currentModel(),show=renderer&&model?.kind==='avatar'&&$('model-inspector').dataset.tab==='avatar';
+  rigPreview?.dispose();rigPreview=null;
+  previews.visible=!show;
+  if(!show){if(renderer)showSelection();render();return;}
+  const hidden=hiddenParts();
+  rigPreview=createAvatarRig(model,(part,index)=>{
+    const mesh=partMesh(part);
+    mesh.visible=!hidden.has(index)&&$('avatar-display').value!=='bones';
+    return mesh;
+  },mesh=>{mesh.geometry.dispose();if(mesh.userData.ownMaterial)disposeModelMaterial(mesh.material);});
+  scene.add(rigPreview.root);
+  for(const [joint,amount] of avatarAngles)rigPreview.setBend(joint,amount);
+  selection.visible=false;attachGizmo();
+  $('avatar-cost').textContent=model.parts.length+' pièces · '+rigPreview.triangles.toLocaleString('fr-FR')+
+    ' triangles'+(avatarReady(model)?'':' · ajoute une tête et un torse pour l’équiper');
+  render();
+}
+function createAvatar(source=null){
+  if(pack.models.length>=modelLimits.models)return;
+  remember();
+  const parts=source?structuredClone(source.parts):avatarTemplateParts();
+  const avatarRig=normalizeAvatarRig();
+  if(source){
+    const bounds=modelBounds(source),center=bounds.getCenter(new T.Vector3()),size=bounds.getSize(new T.Vector3());
+    for(const joint of Object.values(avatarRig)){
+      const [x,y,z]=joint.pivot;
+      joint.pivot=[
+        clamp(center.x+x*size.x/.95,-3,3),
+        clamp(bounds.max.y-size.y*.15+y*size.y/1.08,-3,3),
+        clamp(center.z+z*size.z/.42,-3,3),
+      ];
+    }
+  }
+  const model=normalizeModelPack({version:1,models:[{
+    id:newModelId(),name:source?(source.name+' · avatar').slice(0,48):'Mon gorille',kind:'avatar',avatarRig,parts,
+  }]}).models[0];
+  pack.models.push(model);modelId=model.id;partIndex=0;multi.clear();avatarAngles.clear();moveAvatarPivot=false;
+  markDirty();refreshModel();setPanel('avatar');
+}
+function selectAvatarJoint(key){
+  $('avatar-joint').value=key;updateAvatarInspector();attachGizmo();render();
+}
+function assignAvatarSelection(key){
+  const model=currentModel(),indices=selectedIndices();
+  if(model?.kind!=='avatar'||!indices.length)return;
+  if(indices.every(index=>model.parts[index].avatarJoint===key))return;
+  remember();
+  for(const index of indices)model.parts[index].avatarJoint=key;
+  $('avatar-joint').value=key;
+  markDirty();updateModelLists();updateAvatarInspector();updateAvatarPreview();
+}
+$('avatar-new').onclick=()=>createAvatar();
+$('avatar-copy').onclick=()=>{const model=currentModel();if(model?.parts.length&&model.kind!=='avatar')createAvatar(model);};
+$('avatar-assignment').onchange=event=>assignAvatarSelection(event.target.value);
+$('avatar-joint').onchange=event=>selectAvatarJoint(event.target.value);
+$('avatar-attach').onclick=()=>assignAvatarSelection($('avatar-joint').value);
+$('avatar-display').onchange=updateAvatarPreview;
+$('avatar-move').onclick=()=>{
+  moveAvatarPivot=!moveAvatarPivot;
+  if(moveAvatarPivot){
+    avatarAngles.clear();
+    if($('avatar-display').value==='model')$('avatar-display').value='overlay';
+  }
+  updateAvatarInspector();updateAvatarPreview();
+};
+$('avatar-focus').onclick=()=>{
+  if(!orbit||!rigPreview)return;
+  const key=$('avatar-joint').value;
+  const direction=camera.position.clone().sub(orbit.target).normalize();
+  rigPreview.bones[key].getWorldPosition(orbit.target);
+  camera.position.copy(orbit.target).addScaledVector(direction,key.includes('Finger')?.30:.72);
+  orbit.update();render();
+};
+$('avatar-reset-pose').onclick=()=>{avatarAngles.clear();updateAvatarInspector();updateAvatarPreview();};
+for(const field of ['x','y','z','axis','limit'])$('avatar-'+field).onchange=()=>{
+  const model=currentModel(),key=$('avatar-joint').value;
+  if(model?.kind!=='avatar')return;
+  remember();
+  model.avatarRig[key]=normalizeAvatarJoint(key,{
+    pivot:['x','y','z'].map(axis=>$('avatar-'+axis).valueAsNumber),
+    axis:$('avatar-axis').value,limit:$('avatar-limit').valueAsNumber,
+  });
+  markDirty();updateAvatarInspector();updateAvatarPreview();
+};
+$('avatar-bend').oninput=event=>{
+  const key=$('avatar-joint').value,amount=event.target.valueAsNumber/100;
+  if(moveAvatarPivot){moveAvatarPivot=false;updateAvatarInspector();attachGizmo();}
+  avatarAngles.set(key,amount);$('avatar-bend').value=amount*100;
+  rigPreview?.setBend(key,amount);render();
+};
+$('avatar-play').onclick=event=>{if(!saveNow())event.preventDefault();};
 setOptions($('new-shape'),Object.entries(modelShapes).filter(([id])=>id!=='asset'),'box');
 setOptions($('part-shape'),Object.entries(modelShapes),'box');
 setOptions($('game-asset'),builtinModels.map(model=>[model.assetId,model.name]),builtinModels[0]?.assetId);
@@ -1314,5 +1505,6 @@ window.addEventListener('keyup',event=>{
 window.addEventListener('beforeunload',event=>{if(dirty)event.preventDefault();});
 if(requestedAsset)contextModel=importBuiltinAsset(requestedAsset,true)?.id;
 refreshModel();
+if(editorParams.get('tab')==='avatar')setPanel('avatar');
 if(dirty)status('Brouillon récupéré automatiquement');
 

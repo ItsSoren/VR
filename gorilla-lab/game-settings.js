@@ -41,3 +41,28 @@ export const visualPresets={
   'Benchmark':{shadowQuality:10,lightQuality:10,post:true,rayTrace:true,quality:10,auto:false,texturePower:10,resolution:7,shadows:true,reflections:true,bloom:false,focus:false},
 };
 
+
+// Screen render preferences are local to the player and never part of a map or room.
+const screenRenderSettings={
+  shaderMode:[1,shaderNames.length],viewFov:[50,105],exposure:[1,10],contrast:[1,10],
+  saturation:[1,10],warmth:[1,10],shadowQuality:[1,10],lightQuality:[1,10],
+  mirrorQuality:[1,3],quality:[1,10],texturePower:[1,12],preset:[1,Object.keys(visualPresets).length],
+  auto:null,lightmap:null,textures:null,reflections:null,shadows:null,bloom:null,
+};
+const screenRenderKey=mobile=>'gorilla-lab-screen-render-v1-'+(mobile?'mobile':'pc');
+function screenPreferenceValues(source){
+  const values={};
+  for(const [key,range] of Object.entries(screenRenderSettings)){
+    const value=source?.[key];
+    if(range?Number.isInteger(value)&&value>=range[0]&&value<=range[1]:typeof value==='boolean')values[key]=value;
+  }
+  return values;
+}
+export function readScreenRenderSettings(storage,mobile){
+  try{return screenPreferenceValues(JSON.parse(storage.getItem(screenRenderKey(mobile))));}
+  catch{return {};}
+}
+export function saveScreenRenderSettings(storage,mobile,settings){
+  try{storage.setItem(screenRenderKey(mobile),JSON.stringify(screenPreferenceValues(settings)));}
+  catch{}
+}

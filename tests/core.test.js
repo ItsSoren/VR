@@ -1,5 +1,6 @@
+import {avatarTemplateParts,createAvatarRig} from '../gorilla-lab/avatar-rig.js';
 import {palmCenter,palmHalfExtent} from '../gorilla-lab/hand-skin.js';
-import {createSettings} from '../gorilla-lab/game-settings.js';
+import {createSettings,readScreenRenderSettings,saveScreenRenderSettings} from '../gorilla-lab/game-settings.js';
 import {GorillaLocomotion} from '../gorilla-lab/locomotion.js';
 import {boxCollider,colliderFor,palmContact,playerObjectContact} from '../gorilla-lab/physics.js';
 import {createCloudClient,createObjectFeed,decodeAvatar} from '../gorilla-lab/cloud-link.js';
@@ -973,4 +974,48 @@ test('map environment normalizes imported values and survives a map JSON round t
  const invalid=parseMap({...old,environment:{sky:'image',skyImage:'https://example.test/sky.jpg'}});
  assert.equal(invalid.environment.sky,'preset');
  assert.equal(invalid.environment.skyImage,null);
+});
+
+test('screen preferences persist separately and exclude locomotion, XR and map settings',()=>{
+ const data=new Map(),storage={getItem:key=>data.get(key)??null,setItem:(key,value)=>data.set(key,value)};
+ saveScreenRenderSettings(storage,false,{quality:9,auto:false,mirrorQuality:3,viewFov:105,gravity:2,resolution:4,mapEdit:true});
+ saveScreenRenderSettings(storage,true,{quality:2,auto:true,viewFov:65});
+ assert.deepEqual(readScreenRenderSettings(storage,false),{viewFov:105,mirrorQuality:3,quality:9,auto:false});
+ assert.deepEqual(readScreenRenderSettings(storage,true),{viewFov:65,quality:2,auto:true});
+ for(const key of data.keys())data.set(key,'{"quality":99,"auto":"false"}');
+ assert.deepEqual(readScreenRenderSettings(storage,false),{});
+});
+
+test('avatar joints keep their hierarchy and flex around persisted pivots',()=>{
+ const id='custom-model-rig-test';
+ const raw={version:1,avatarId:id,models:[{
+  id,name:'Gorilla',kind:'avatar',inGame:true,avatarRig:{leftFinger1:{pivot:[-.37,-.83,0],axis:'z',limit:150}},
+  parts:avatarTemplateParts(),
+ }]};
+ const pack=normalizeModelPack(raw),model=pack.models[0];
+ assert.equal(pack.avatarId,id);
+ assert.equal(model.inGame,false);
+ assert.deepEqual(normalizeModelPack(JSON.parse(JSON.stringify(pack))),pack);
+ const rig=createAvatarRig(model,part=>{
+  const mesh=new T.Mesh(new T.BoxGeometry());
+  mesh.position.fromArray(part.position);return mesh;
+ },mesh=>mesh.geometry.dispose());
+ assert.equal(rig.bones.leftFinger1.parent,rig.bones.leftHand);
+ const finger=rig.bones.leftFinger1;
+ const forearm=rig.bones.leftForearm,forearmMesh=forearm.children.find(node=>node.isMesh);
+ const oldMeshPosition=forearmMesh.getWorldPosition(new T.Vector3()),oldFingerPosition=finger.getWorldPosition(new T.Vector3());
+ const movedPivot=[-.36,-.56,.05];
+ assert.deepEqual(rig.setPivot('leftForearm',movedPivot),movedPivot);
+ assert.ok(forearm.getWorldPosition(new T.Vector3()).distanceTo(new T.Vector3(...movedPivot))<1e-8);
+ assert.ok(forearmMesh.getWorldPosition(new T.Vector3()).distanceTo(oldMeshPosition)<1e-8);
+ assert.ok(finger.getWorldPosition(new T.Vector3()).distanceTo(oldFingerPosition)<1e-8);
+ const rest=finger.getWorldPosition(new T.Vector3());
+ rig.setBend('leftForearm',.7);
+ assert.ok(finger.getWorldPosition(new T.Vector3()).distanceTo(rest)>.05);
+ rig.setBend('leftFinger1',2);
+ assert.equal(finger.rotation.z,T.MathUtils.degToRad(150));
+ assert.equal(rig.triangles,12*model.parts.length);
+ rig.dispose();
+ raw.models[0].parts=raw.models[0].parts.filter(part=>part.avatarJoint!=='head');
+ assert.equal(normalizeModelPack(raw).avatarId,null);
 });

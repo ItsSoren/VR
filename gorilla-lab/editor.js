@@ -26,7 +26,7 @@ const toolButtons = [...document.querySelectorAll('.tool')];
 const draftKey = 'gorilla-lab-editor-draft';
 const modelPack = readModelPack(localStorage);
 const builtinModelLibrary=createBuiltinModelTemplates();
-const modelLibrary=[...new Map([...builtinModelLibrary,...modelPack.models].map(model=>[model.id,model])).values()].filter(model=>model.parts.length);
+const modelLibrary=[...new Map([...builtinModelLibrary,...modelPack.models.filter(model=>model.kind!=='avatar')].map(model=>[model.id,model])).values()].filter(model=>model.parts.length);
 function refreshModelSelectors(preferredModel){
   const selected=preferredModel??$('model-library').value;
   $('model-library').replaceChildren(
@@ -323,14 +323,16 @@ function buildWorkspaceShell(){
   behavior.append(make('h3','','Propriétés physiques'));
   behavior.append(fieldset,objectSection.querySelector('#model-object-controls'));
   const publish=make('section');publish.id='publish-options';
-  const buttons=make('div','piece-actions');
-  for(const [id,label] of [['test-map','Jouer cette map'],['export-map','Exporter JSON']]){
+  for(const [id,label,title] of [
+    ['test-map','Jouer cette map','Tester la carte'],['export-map','Exporter JSON','Exporter la carte'],
+  ]){
+    const actions=make('div','piece-actions');
     const button=make('button','',label);
     button.type='button';
     button.addEventListener('click',()=>$(id).click());
-    buttons.append(button);
+    actions.append(button);
+    publish.append(make('h3','',title),actions);
   }
-  publish.append(buttons);
   content.append(objectSection,collision,behavior,publish);
   const sceneOptions=make('section','scene-options');
   sceneOptions.id='scene-options';

@@ -14,12 +14,13 @@ import { GorillaLocomotion } from './locomotion.js';
 import { updateGroundHaptics,pulseHand } from './ground-haptics.js';
 import { createToolVisual } from './tool-visual.js';
 import {createBlasterSystem,bindBlasterTrigger} from './blaster-system.js';
-import {createSettings,toolModes,shaderNames,visualPresets} from './game-settings.js';
+import {createSettings,toolModes,shaderNames,visualPresets, readScreenRenderSettings, saveScreenRenderSettings } from './game-settings.js';
+import {avatarReady,createAvatarRig} from './avatar-rig.js';
 import { avatarPalettes,createAvatarStyle } from './avatar-style.js';
 import {createArenaObjectSpecs,forEachStartupObject} from './arena-objects.js';
 import {spawnAssetIds} from './model-assets.js';
 import { makeAnimatedProps,clonePropMaterial } from './animated-props.js';
-import {readModelPack,createModelPropDefinitions,createModelAvatarHead,createModelUnitGeometry,createModelMaterial,modelPhysics,modelCollisionGeometry,modelBounds,normalizeModelPack,modelLimits,modelStorageKey} from './model-pack.js';
+import {readModelPack,createModelPropDefinitions,createModelAvatarHead,createModelUnitGeometry,createModelMaterial,createModelPartGeometry,createModelPartMaterial,disposeModelMaterial,modelPhysics,modelCollisionGeometry,modelBounds,normalizeModelPack,modelLimits,modelStorageKey} from './model-pack.js';
 import {mapCode,publicRooms} from './cloud-link.js';
 import { createHandSkin,palmCenter } from './hand-skin.js';
 import {placeTrackedPalm} from './xr-palm.js';
@@ -71,6 +72,7 @@ scene.add(vrFovMask);
 const updateRayProbe=addRayProbe(arena.probe);
 const settings=createSettings(mobileScreen);
 const defaults={...settings};
+try{Object.assign(settings,readScreenRenderSettings(localStorage,mobileScreen));}catch{}
 try{
   const saved=Number(localStorage.getItem('gorilla-lab-step-volume'));
   if(Number.isInteger(saved)&&saved>=1&&saved<=10)settings.stepVolume=saved;
@@ -112,7 +114,16 @@ function shape(parent,material,x,y,z,sx,sy,sz) {
   parent.add(m);m.castShadow=true;return m;
 }
 const modelPack=readModelPack(localStorage);
-const modelSignature=modelPack.models.length?'|atelier-'+mapCode(JSON.stringify(modelPack)):'';
+const mapModels=modelPack.models.filter(model=>model.kind!=='avatar');
+const equippedRig=modelPack.models.find(model=>model.id===modelPack.avatarId&&model.kind==='avatar'&&avatarReady(model));
+const mapModelPack={...modelPack,models:mapModels,avatarId:equippedRig?null:modelPack.avatarId};
+const modelSignature=mapModels.length?'|atelier-'+mapCode(JSON.stringify(mapModelPack)):'';
+const pcAvatar=equippedRig?createAvatarRig(equippedRig,part=>{
+  const mesh=new T.Mesh(createModelPartGeometry(part),createModelPartMaterial(part));
+  mesh.castShadow=true;mesh.receiveShadow=true;
+  return mesh;
+},mesh=>{mesh.geometry.dispose();disposeModelMaterial(mesh.material);}):null;
+if(pcAvatar){pcAvatar.root.visible=false;scene.add(pcAvatar.root);}
 const avatarHead=createModelAvatarHead(modelPack)??avatarStyle.createHead();
 avatarHead.visible=false;scene.add(avatarHead);
 const headForward=new T.Vector3(),headRotation=new T.Quaternion(),panelFacing=new T.Vector3();
@@ -468,10 +479,15 @@ function saveStepVolume(){try{localStorage.setItem('gorilla-lab-step-volume',Str
 const title=document.querySelector('#section'), desktop=document.querySelector('#settings');
 const readings=document.querySelector('#readings');
 const debugSpeeds=[1,.75,.5,.25];
+function persistScreenRendering(){
+  if(renderer.xr.isPresenting)return;
+  try{saveScreenRenderSettings(localStorage,mobileScreen,settings);}catch{}
+}
 function change(key,step){
   diagnostics.record('setting',{key,step,previous:settings[key]});
   if(key==='mirrorQuality'){
     settings.mirrorQuality=T.MathUtils.clamp(settings.mirrorQuality+step,1,3);
+    persistScreenRendering();
     hudDirty=true;return;
   }
   if(key==='debugSpeed'){
@@ -484,7 +500,7 @@ function change(key,step){
   }
   if(key==='viewFov'){
     settings.viewFov=T.MathUtils.clamp(settings.viewFov+5*step,50,105);
-    resize();hudDirty=true;return;
+    resize();persistScreenRendering();hudDirty=true;return;
   }
   if(key==='vrFov'){
     settings.vrFov=T.MathUtils.clamp(settings.vrFov+5*step,55,100);
@@ -492,10 +508,10 @@ function change(key,step){
   }
   if(key==='shaderMode'){
     settings.shaderMode=(settings.shaderMode-1+step+shaderNames.length)%shaderNames.length+1;
-    shaderMode.value=settings.shaderMode-1;hudDirty=true;return;
+    shaderMode.value=settings.shaderMode-1;persistScreenRendering();hudDirty=true;return;
   }
   if(key==='timeOfDay'){
-    if(spectator.role==='player'){
+    if(spectator.guestActive){
       const next=((spectator.remoteLight??settings.timeOfDay-1)+step+3)%3;
       spectator.sendAction({type:'world',mode:1,typeId:next});
     }else settings.timeOfDay=(settings.timeOfDay-1+step+3)%3+1;
@@ -516,6 +532,7 @@ function change(key,step){
     const names=Object.keys(visualPresets);
     settings.preset=(settings.preset-1+step+names.length)%names.length+1;
     usePreset(names[settings.preset-1]);
+    persistScreenRendering();
     return;
   }
   if(typeof settings[key]==='boolean') settings[key]=!settings[key];
@@ -532,6 +549,7 @@ function change(key,step){
     releaseFlat(false);
   }
   if(key==='preciseHitboxes')syncHitboxes();
+  if(renderGroups.slice(0,3).some(([,rows])=>rows.some(([,setting])=>setting===key)))persistScreenRendering();
   applyVisual();
 }
 function syncHitboxes(){
@@ -549,7 +567,7 @@ function restore(){
   if(page===0) resetPlayer();
   if(page===1){syncHitboxes();resetObjects();}
   if(page===3)clearSpawnBank();
-  if(page===2) liveLevel=settings.quality;
+  if(page===2){liveLevel=settings.quality;persistScreenRendering();}
   applyVisual();
 }
 function button(text,action){
@@ -689,7 +707,7 @@ function updateMirror(now,pose){
   if(now-lastMirrorRender<(quality===3?45:110))return;
   lastMirrorRender=now;
   reflectionView.updateMatrixWorld(true);mirrorFace.updateMatrixWorld(true);
-  avatarHead.visible=settings.body;
+  avatarHead.visible=settings.body&&!pcAvatar?.root.visible;
   const started=performance.now();
   try{renderReflection(renderer,scene,reflectionView);}finally{avatarHead.visible=false;}
   mirrorCpuMs=performance.now()-started;
@@ -859,7 +877,7 @@ function releaseFlat(launch){
 }
 function requestObjectChange(typeId,local){
   if(spectator.role==='pc'){showGameHint('Rejoins le salon en joueur pour modifier les objets.');return;}
-  if(spectator.role!=='player'){local();return;}
+  if(!spectator.guestActive){local();return;}
   if(!spectator.sendAction({type:'world',mode:3,typeId}))showGameHint('Attends la connexion à l’hôte.');
 }
 function clearSpawnBank(){requestObjectChange(0,clearObjects);}
@@ -867,7 +885,7 @@ function requestResetObjects(){requestObjectChange(1,resetObjects);}
 function requestSpawn(index,origin=null){
   settings.objects=true;
   if(spectator.role==='pc'){showGameHint('Commence par rejoindre le salon en joueur.');return;}
-  if(spectator.role==='player'){
+  if(spectator.guestActive){
     if(!spectator.sendAction({type:'spawn',typeId:index}))showGameHint('Attends la connexion à l’hôte.');
   }else spawnObject(index,origin);
 }
@@ -1025,7 +1043,7 @@ function manipulateBody(body,mode,actor,heldAt){
 const toolTargets=[];
 function useToolRay(origin,direction,activate,hand){
   if(!settings.objects)return;
-  const onlinePlayer=spectator.role==='player';
+  const onlinePlayer=spectator.guestActive;
   toolTargets.length=0;
   if(onlinePlayer)spectator.forEachReplica(mesh=>toolTargets.push(mesh));
   else for(const body of objects)if(!body.owner&&body.mesh.visible)toolTargets.push(body.mesh);
@@ -1202,7 +1220,7 @@ addEventListener('keyup',e=>keyboard.up(e.code));
 addEventListener('blur',()=>{keyboard.clear();flat.clear();blasterTrigger.clear();});
 function grabFlat(origin,direction){
   if(!settings.objects)return false;
-  const online=spectator.role==='player';
+  const online=spectator.guestActive;
   if(online&&remoteHeld){
     spectator.sendAction({type:'release',objectId:remoteHeld});remoteHeld=0;return true;
   }
@@ -1326,7 +1344,7 @@ function trackHands(frame,space,dt){
     h.gamepad=pose?source.gamepad:null;
     h.mesh.visible=Boolean(pose)&&settings.hands&&!settings.body;
     if(!pose){
-      if(spectator.role==='player')trackRemoteGrip(h,false);
+      if(spectator.guestActive)trackRemoteGrip(h,false);
       h.valid=false;h.surface=null;release(h,false);continue;
     }
     placeTrackedPalm(h,pose.transform,drop,yaw,rig.position);
@@ -1334,7 +1352,7 @@ function trackHands(frame,space,dt){
     const grip=Boolean(source.gamepad?.buttons[1]?.pressed);
     gripRotation.copy(h.controllerRotation);
     animateFingers(h,source.gamepad?.buttons??[],dt);
-    if(spectator.role==='player')trackRemoteGrip(h,grip);
+    if(spectator.guestActive)trackRemoteGrip(h,grip);
     else if(!menu&&grip&&!h.grip&&settings.objects&&!h.held){
       let body=null, best=.15;
       for(const o of objects){
@@ -1447,7 +1465,7 @@ function character(frame,space,pose,dt,inputDt=dt){
   const gravity=9.81*(settings.gravity/5)*(floor?.gravity??1);
   currentGravity=gravity;
   priorPlayer.copy(rig.position);
-  const blockers=spectator.role==='player'?replicaBlockers():objects;
+  const blockers=spectator.guestActive?replicaBlockers():objects;
   if(inVR){
     trackHands(frame,space,inputDt);
     updateTorso(true,inputDt);
@@ -1540,14 +1558,14 @@ function character(frame,space,pose,dt,inputDt=dt){
   }
   const bodyScale=.72+settings.size*.05;
   const torsoScale=(armSegmentLength()*2)*(2/3)/.82;
-  monkey.visible=settings.body;
+  monkey.visible=settings.body&&(inVR||!pcAvatar);
   avatarHead.position.copy(worldHead);
   if(inVR)avatarHead.quaternion.copy(headRotation).premultiply(spin.setFromAxisAngle(up,yaw));
   else avatarHead.quaternion.setFromEuler(new T.Euler(pitch,yaw,0,'YXZ'));
   neck.set(0,-.145,.045).applyQuaternion(avatarHead.quaternion).add(worldHead);
   // Le sommet du maillage (profil dans body-skin.js) reste au cou malgré le tilt.
   monkey.position.set(0,.46*torsoScale,.04*bodyScale).applyQuaternion(monkey.quaternion).negate().add(neck);
-  poseBody(bodyScale,torsoScale);
+  if(monkey.visible)poseBody(bodyScale,torsoScale);
   rig.updateMatrixWorld(true);
   camera.updateWorldMatrix(true,false);
 }
@@ -1624,6 +1642,7 @@ function captureNetworkAvatar(){
   };
 }
 // Une image enchaîne les entrées, la simulation locale, la réception des états distants et le rendu.
+let wasGuestActive=false;
 renderer.setAnimationLoop((time,frame)=>{
   const actual=frameTime?Math.max(0,(time-frameTime)/1000):.014;
   frameTime=time;
@@ -1634,6 +1653,9 @@ renderer.setAnimationLoop((time,frame)=>{
   const inVR=renderer.xr.isPresenting;
   const space=renderer.xr.getReferenceSpace(), pose=frame&&space&&frame.getViewerPose(space);
   if(inVR&&!pose)return;
+  const guestActive=spectator.guestActive;
+  if(guestActive&&!wasGuestActive)releaseAll();
+  wasGuestActive=guestActive;
   animateProps(time*.001);
   if(hintUntil&&time>hintUntil){hint.hidden=true;hintUntil=0;vrHint='';}
   cursor.visible=false;toolVisual.hide();toolState.mode=0;
@@ -1652,8 +1674,8 @@ renderer.setAnimationLoop((time,frame)=>{
     if(event.phase==='enter')showGameHint('Déclencheur · '+event.part);
   }
   // En spectateur ou joueur invité, les objets reçus sont dessinés comme répliques du monde VR.
-  const remoteWorld=spectating||spectator.role==='player';
-  if(spectator.role!=='player'){remoteHeld=0;for(const h of hands)h.remoteHeld=0;}
+  const remoteWorld=spectating||spectator.guestActive;
+  if(!spectator.guestActive){remoteHeld=0;for(const h of hands)h.remoteHeld=0;}
   if(!remoteWorld){updateHeldBodies(dt);maintainSpectatorCamera();}
 
   physicsCpuMs=0;
@@ -1745,6 +1767,22 @@ renderer.setAnimationLoop((time,frame)=>{
   if(renderer.shadowMap.enabled&&time-lastShadowRender>=interval){
     renderer.shadowMap.needsUpdate=true;lastShadowRender=time;
   }
+  if(pcAvatar){
+    pcAvatar.root.visible=settings.body&&!inVR&&!spectating;
+    if(pcAvatar.root.visible){
+      pcAvatar.root.quaternion.setFromAxisAngle(up,bodyYaw);
+      pcAvatar.root.scale.setScalar(.72+settings.size*.05);
+      pcAvatar.root.position.copy(worldHead).sub(wristReach.copy(pcAvatar.headPivot)
+        .multiplyScalar(pcAvatar.root.scale.x).applyQuaternion(pcAvatar.root.quaternion));
+      pcAvatar.setBend('head',pitch/(Math.PI/2));
+      const swing=Math.sin(time*.012)*Math.min(.32,Math.hypot(velocity.x,velocity.z)*.07);
+      for(const [side,sign] of [['left',1],['right',-1]]){
+        pcAvatar.setBend(side+'Arm',swing*sign);
+        pcAvatar.setBend(side+'Forearm',-.12-Math.max(0,swing*sign));
+        pcAvatar.bones[side+'Hand'].visible=settings.hands;
+      }
+    }
+  }
   updateMirror(time,pose);
   const renderStart=performance.now();
   const useVrPost=inVR&&settings.post;
@@ -1754,7 +1792,15 @@ renderer.setAnimationLoop((time,frame)=>{
   if(!useVrPost||!vrEffects.render(scene,camera,{bloom:settings.bloom,visibleField})){
     vrFovMask.material.uniforms.visibleField.value=visibleField;
     vrFovMask.visible=inVR&&visibleField<1;
-    try{renderer.render(scene,camera);}finally{vrFovMask.visible=false;}
+    const bodyVisible=monkey.visible,rigVisible=pcAvatar?.root.visible;
+    if(!inVR){
+      if(pitch<-.52){monkey.visible=false;if(pcAvatar)pcAvatar.root.visible=false;}
+      if(pcAvatar)pcAvatar.bones.head.visible=false;
+    }
+    try{renderer.render(scene,camera);}finally{
+      vrFovMask.visible=false;monkey.visible=bodyVisible;
+      if(pcAvatar){pcAvatar.root.visible=rigVisible;pcAvatar.bones.head.visible=true;}
+    }
   }
   renderSubmissionCpuMs=performance.now()-renderStart;
   diagnostics.sample({mode:inVR?'VR':'PC',frameMs:actual*1000,physicsCpuMs,debugCpuMs,mirrorCpuMs,renderSubmissionCpuMs,objects:objects.length,moving:objects.filter(o=>!o.owner&&!o.frozen&&!o.sleeping&&o.velocity.lengthSq()>.0001).length,debugSegments:debugView.stats.segments});

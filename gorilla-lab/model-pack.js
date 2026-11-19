@@ -1,3 +1,4 @@
+import {avatarJoints,avatarReady,normalizeAvatarRig} from './avatar-rig.js';
 import * as T from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
@@ -65,9 +66,10 @@ export function normalizeModelPack(input) {
     return {
       id: raw.id,
       name: label(raw.name, 'Modèle sans nom'),
-      kind: raw.kind === 'structure' ? 'structure' : 'prop',
+      kind: raw.kind === 'avatar' ? 'avatar' : raw.kind === 'structure' ? 'structure' : 'prop',
+      ...(raw.kind==='avatar'?{avatarRig:normalizeAvatarRig(raw.avatarRig)}:{}),
       ...(isBuiltinAsset(raw.assetId)?{assetId:raw.assetId}:{}),
-      inGame: raw.inGame === true,
+      inGame: raw.kind!=='avatar'&&raw.inGame===true,
       properties: Object.fromEntries(Object.entries(defaultModelProperties).map(([key, fallback]) => [
         key, typeof raw.properties?.[key] === 'boolean' ? raw.properties[key] : fallback,
       ])),
@@ -76,6 +78,7 @@ export function normalizeModelPack(input) {
       ...(raw.partCollisions===true?{partCollisions:true}:{}),
       parts: raw.parts.filter(part=>!isRetiredArenaAsset(part?.assetId)).map((part, index) => ({
         name: label(part?.name, `Pièce ${index + 1}`),
+        ...(Object.hasOwn(avatarJoints,part?.avatarJoint)?{avatarJoint:part.avatarJoint}:{}),
         ...(Number.isInteger(part?.group)&&part.group>0&&part.group<=modelLimits.parts?{group:part.group}:{}),
         shape: part?.shape==='asset'&&isBuiltinAsset(part?.assetId)?'asset':Object.hasOwn(modelShapes, part?.shape)&&part.shape!=='asset'?part.shape:'box',
         ...(part?.shape==='asset'&&isBuiltinAsset(part?.assetId)?{assetId:part.assetId}:{}),
@@ -93,7 +96,7 @@ export function normalizeModelPack(input) {
       })),
     };
   });
-  return { version: 1, models, avatarId: typeof input.avatarId === 'string' && ids.has(input.avatarId) ? input.avatarId : null };
+  return { version: 1, models, avatarId: typeof input.avatarId==='string'&&avatarReady(models.find(model=>model.id===input.avatarId)) ? input.avatarId : null };
 }
 
 export function readModelPack(storage) {
@@ -401,7 +404,7 @@ export function modelCollisionZones(model,mapDimensions=null){
 }
 
 export function createModelPropDefinitions(pack) {
-  return pack.models.filter(model => model.inGame && model.parts.length).map(model => {
+  return pack.models.filter(model => model.kind!=='avatar'&&model.inGame&&model.parts.length).map(model => {
     const geo = centeredGeometry(model.parts);
     const size = geo.boundingBox.getSize(new T.Vector3());
     return {
@@ -415,7 +418,7 @@ export function createModelPropDefinitions(pack) {
 
 export function createModelAvatarHead(pack) {
   const model = pack.models.find(candidate => candidate.id === pack.avatarId);
-  if (!model?.parts.length) return null;
+  if (!model?.parts.length||model.kind==='avatar') return null;
   const geometry = centeredGeometry(model.parts);
   const size = geometry.boundingBox.getSize(new T.Vector3());
   const scale = .36 / Math.max(size.x, size.y, size.z);

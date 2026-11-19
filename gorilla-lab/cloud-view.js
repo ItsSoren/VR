@@ -121,6 +121,9 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     return cachedId;
   }
   function readyHere(pose){return !!pose?.ready&&pose.map===localMap();}
+  function guestActive(){
+    return client.role==='player'&&client.state==='open'&&readyHere(client.remote)&&client.remote.protocol>=5;
+  }
   function removeReplica(id){
     const r=replicas.get(id);
     if(r){scene.remove(r.mesh);r.mesh.material?.dispose();replicas.delete(id);}
@@ -323,6 +326,7 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
       else if(client.role!=='vr'&&host&&!host.ready)caption=prefix+'hôte connecté · partie en préparation';
       else if(client.role==='player'&&host&&host.protocol<5)caption=prefix+'mets à jour le jeu chez l’hôte pour synchroniser la partie';
       else if(client.role!=='vr'&&readyHere(host))caption=prefix+'hôte connecté';
+      else if(client.role==='player'&&!host)caption=prefix+'aucun hôte pour l’instant · tu joues en solo en attendant';
       else if(client.role==='vr'){
         const local=readyPeers.filter(readyHere);
         const count=local.filter(p=>p.role==='player').length;
@@ -339,7 +343,7 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     if(!client.role){clearReplicas();return;}
     const ready=client.role!=='pc'||!inVR,now=performance.now();
     const map=localMap(),host=client.role!=='vr'?client.remote:null;
-    const showWorld=ready&&readyHere(host);
+    const showWorld=ready&&(client.role==='player'?guestActive():readyHere(host));
     if(!showWorld&&replicaMap!==-1)clearReplicas();
     drawReplicas(dt,showWorld,now);
     renderPeers(ready,time,dt,now);
@@ -369,7 +373,7 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
   return {update,getPeer,connect,leave:()=>client.leave(),get caption(){return status.textContent;},handMotion(id,index){return peers.get(id)?.handMotion[index];},sendAction(action){return client.sendAction(action,localMap());},
     sendShot(position,quaternion){client.queueShot(position,quaternion,localMap());},
     get stats(){return client.stats;},
-    get role(){return client.role;},get connected(){return readyHere(client.remote);},
+    get role(){return client.role;},get connected(){return readyHere(client.remote);},get guestActive(){return guestActive();},
     get remoteSpectator(){return client.peers.find(p=>p.role==='pc'&&readyHere(p))??null;},
     get remoteLight(){return replicaLight===-1?null:replicaLight;},get replicaCount(){return replicas.size;},
     forEachReplica(fn){for(const r of replicas.values())if(r.mesh.visible)fn(r.mesh);}};
