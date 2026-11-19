@@ -117,7 +117,8 @@ export function openShapeStudio({initial=startingSketch(),name='Forme libre',onA
         <strong>VOLUME ET FINITION</strong>
         <label data-depth>Profondeur d’extrusion (m)<input data-field="depth" type="range" min=".025" max="1.5" step=".025"></label>
         <label data-bevel>Arrondir les arêtes<input data-field="bevel" type="range" min="0" max=".15" step=".005"></label>
-        <label data-segments>Segments de révolution<input data-field="segments" type="range" min="8" max="64" step="4"></label>
+        <label data-segments>Segments de révolution<input data-field="segments" type="number" min="3" max="128" step="1"></label>
+        <output data-triangles aria-live="polite"></output>
         <strong>PRÉCISION</strong>
         <label class="sketch-check"><input data-field="snap" type="checkbox" checked> Grille aimantée</label>
         <label>Pas de grille<select data-field="step"><option value=".025">2,5 cm</option>
@@ -255,13 +256,17 @@ export function openShapeStudio({initial=startingSketch(),name='Forme libre',onA
     $('[data-act=apply]').disabled=Boolean(error);
   }
   function updatePreview(){
-    if(!renderer)return;
     try{
       const geometry=createSketchGeometry(sketch);
+      $('[data-triangles]').textContent=((geometry.index?.count??geometry.attributes.position.count)/3).toLocaleString('fr-FR')+' triangles';
+      if(!renderer){geometry.dispose();return;}
       if(previewMesh){scene.remove(previewMesh);previewMesh.geometry.dispose();}
       previewMesh=new T.Mesh(geometry,material);
       scene.add(previewMesh);renderer.render(scene,camera);
-    }catch{renderer.render(scene,camera);}
+    }catch{
+      $('[data-triangles]').textContent='—';
+      renderer?.render(scene,camera);
+    }
   }
   let pending=false;
   function schedulePreview(){
@@ -366,7 +371,13 @@ export function openShapeStudio({initial=startingSketch(),name='Forme libre',onA
       sketch[field]=Number(e.target.value);
       draw();schedulePreview();
     };
-    $('[data-field='+field+']').onchange=e=>{e.target.dataset.started='0';};
+    $('[data-field='+field+']').onchange=e=>{
+      e.target.dataset.started='0';
+      if(field==='segments'){
+        sketch.segments=normalizeSketch(sketch).segments;
+        e.target.value=sketch.segments;
+      }
+    };
   }
   $('[data-field=step]').onchange=draw;
   $('[data-field=snap]').onchange=draw;
@@ -410,3 +421,4 @@ export function openShapeStudio({initial=startingSketch(),name='Forme libre',onA
   sync();draw();schedulePreview();
   return {close:()=>close(false)};
 }
+

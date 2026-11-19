@@ -128,7 +128,11 @@ color:#aabcc4}
 .inspector[data-tab=geometry] #geometry-panel,
 .inspector[data-tab=appearance] #appearance-panel,
 .inspector[data-tab=collision] #collision-panel,
-.inspector[data-tab=settings] #settings-panel{display:block}
+.inspector[data-tab=settings] #settings-panel,
+.inspector[data-tab=publish] #publish-panel{display:block}
+.tabs{flex-wrap:wrap}
+#negative-scale-option{display:flex;align-items:center;gap:4px}
+#negative-scale-option[hidden]{display:none}
 #part-fields>label{margin-bottom:9px}
 .vectors{margin:11px 0 0;padding:0;border:0}
 .vectors legend{font-size:11px;color:#d5e5e7;padding-bottom:5px;font-weight:700}
@@ -231,6 +235,7 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
     <button class="rail-btn" data-shape="torus" title="Ajouter un anneau · 5"><span class="glyph">◎</span><span>Anneau</span></button>
     <button class="rail-btn" data-shape="capsule" title="Ajouter une capsule · 6"><span class="glyph">⬭</span><span>Capsule</span></button>
     <button class="rail-btn" data-shape="diamond" title="Ajouter un diamant · 7"><span class="glyph">◇</span><span>Diamant</span></button>
+    <button class="rail-btn" data-shape="tetrahedron" title="Ajouter un tétraèdre régulier · 9"><span class="glyph">△</span><span>Tétraèdre</span></button>
     <div class="rail-split"></div>
     <button class="rail-btn" data-shape="custom" title="Dessiner une forme sur mesure · 8"><span class="glyph">✎</span><span>Forme libre</span></button>
     <div class="rail-split"></div>
@@ -258,7 +263,8 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
       <p id="preview-empty" class="preview-empty">Nouveau modèle : ajoute une forme avec la barre de gauche pour commencer.</p>
     </div>
     <div class="viewport-foot">
-      <span class="preview-footer">Clic : sélectionner · 8 : forme libre · G/R/S : transformer · Shift D : dupliquer · M : miroir · F : cadrer · Alt : sans aimant</span>
+      <span class="preview-footer">Maj ou Ctrl + clic : sélection multiple · G/R/S : transformer · Ctrl pendant le redimensionnement : symétrie · Ctrl D : dupliquer</span>
+      <label id="negative-scale-option" hidden><input id="negative-scale-face" type="checkbox"> Modifier la face −</label>
       <span id="status" role="status" aria-live="polite">Prêt à construire.</span>
     </div>
   </section>
@@ -280,14 +286,20 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
           <button id="solo-part" title="Masquer toutes les autres pièces">Isoler</button>
           <button id="show-all-parts" title="Rendre toutes les pièces visibles">Tout voir</button>
         </div>
+        <div class="outline-tools">
+          <button id="group-parts" title="Grouper · Ctrl G">Grouper</button>
+          <button id="ungroup-parts" title="Dégrouper · Ctrl Maj G">Dégrouper</button>
+          <small id="selection-count" aria-live="polite"></small>
+        </div>
         <div id="part-list" aria-label="Pièces et masques de visibilité"></div>
       </div>
     </section>
     <section class="side-section inspector" id="model-inspector" data-tab="geometry">
-      <nav class="tabs" aria-label="Propriétés"><button class="tab" data-panel="geometry" aria-pressed="true">Géométrie</button>
-      <button class="tab" data-panel="appearance" aria-pressed="false">Aspect</button>
-      <button class="tab" data-panel="collision" aria-pressed="false">Hitbox</button>
-      <button class="tab" data-panel="settings" aria-pressed="false">Modèle</button></nav>
+      <nav class="tabs" aria-label="Propriétés"><button class="tab" data-panel="geometry" aria-pressed="true">Modéliser</button>
+      <button class="tab" data-panel="appearance" aria-pressed="false">Texturer</button>
+      <button class="tab" data-panel="collision" aria-pressed="false">Collisions</button>
+      <button class="tab" data-panel="settings" aria-pressed="false">Comportements</button>
+      <button class="tab" data-panel="publish" aria-pressed="false">Publier / Placer</button></nav>
       <div class="side-body">
         <p id="part-empty">Sélectionne ou ajoute une pièce dans la scène.</p>
         <div id="model-details" hidden>
@@ -376,7 +388,6 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
             <label>Nom du modèle<input id="model-name" maxlength="48" autocomplete="off"></label>
             <label>Utilisation<select id="model-kind"><option value="structure">Décor fixe / terrain</option>
               <option value="prop">Objet manipulable</option></select></label>
-            <a id="send-to-map" href="./editor.html">↗ Placer ce modèle sur une carte</a>
             <label class="check"><input id="in-game" type="checkbox"> Disponible dans le menu Spawn</label>
             <h3>PROPRIÉTÉS DE JEU</h3>
             <label class="check"><input id="grabbable" type="checkbox"> Saisissable</label>
@@ -387,6 +398,10 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
             <label>Tête du joueur<select id="avatar"></select></label>
             <p class="hint">L’avant du modèle regarde vers −Z.</p>
             <button id="delete-model">Supprimer ce modèle</button>
+          </div>
+          <div class="panel-body" id="publish-panel">
+            <div class="inline-actions"><button id="publish-save" type="button">Enregistrer le modèle</button></div>
+            <a id="send-to-map" href="./editor.html">↗ Placer ce modèle sur une carte</a>
           </div>
         </div>
       </div>

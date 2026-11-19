@@ -9,7 +9,7 @@ export const modelLimits = Object.freeze({ models: 24, parts: 64, fileBytes: 2_5
 const texturePattern=/^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=\r\n]+$/i;
 export const modelShapes = Object.freeze({
   box: 'Cube', sphere: 'Sphère', cylinder: 'Cylindre', cone: 'Cône',
-  torus: 'Anneau', capsule: 'Capsule', diamond: 'Diamant',custom:'Forme libre',asset:'Asset du jeu',
+  torus: 'Anneau', capsule: 'Capsule', tetrahedron:'Tétraèdre régulier', diamond: 'Diamant',custom:'Forme libre',asset:'Asset du jeu',
 });
 export const modelSurfaces = Object.freeze({
   plain: 'Uni', grid: 'Grille', stripes: 'Rayures', wood: 'Bois', speckle: 'Minéral',
@@ -58,6 +58,7 @@ export function normalizeModelPack(input) {
       hitbox:normalizeHitbox(raw?.hitbox),
       parts: raw.parts.filter(part=>!isRetiredArenaAsset(part?.assetId)).map((part, index) => ({
         name: label(part?.name, `Pièce ${index + 1}`),
+        ...(Number.isInteger(part?.group)&&part.group>0&&part.group<=modelLimits.parts?{group:part.group}:{}),
         shape: part?.shape==='asset'&&isBuiltinAsset(part?.assetId)?'asset':Object.hasOwn(modelShapes, part?.shape)&&part.shape!=='asset'?part.shape:'box',
         ...(part?.shape==='asset'&&isBuiltinAsset(part?.assetId)?{assetId:part.assetId}:{}),
         ...(part?.shape==='custom'?{profile:normalizeSketch(part?.profile)}:{}),
@@ -86,6 +87,7 @@ export function readModelPack(storage) {
 
 function primitive(shape) {
   switch (shape) {
+    case 'tetrahedron':return new T.TetrahedronGeometry(Math.sqrt(3)/2);
     case 'sphere': return new T.SphereGeometry(.5, 20, 12);
     case 'cylinder': return new T.CylinderGeometry(.5, .5, 1, 20);
     case 'cone': return new T.ConeGeometry(.5, 1, 20);

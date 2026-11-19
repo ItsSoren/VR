@@ -9,6 +9,7 @@ import {
 import {createBuiltinModelTemplates} from './model-assets.js';
 import {openTextureStudio} from './texture-studio.js';
 import {openShapeStudio} from './shape-studio.js';
+import {modelFacePosition,modelGroupTransform} from './editor-scale.js';
 import {startingSketch} from './custom-shape.js';
 
 // GORILLA / FOUNDRY. Geometry remains in the Gorilla model-pack v1 format:
@@ -25,6 +26,7 @@ const pack=readModelPack(localStorage);
 const builtinModels=createBuiltinModelTemplates();
 const draftKey='gorilla-foundry-draft-v1';
 let dirty=false,modelId=pack.models[0]?.id??null,partIndex=0;
+let multi=new Set(),transformStart=null,ctrlScale=false;
 try{
   const draft=localStorage.getItem(draftKey);
   if(draft){
@@ -39,6 +41,7 @@ let transformMoved=false;
 let pendingDraft=0,gestureStart=null,fieldHistory=null;
 const undoStack=[],redoStack=[],maxUndo=48;
 const previews=new T.Group();
+const groupPivot=new T.Object3D();
 const referencePreviews=new T.Group();
 const scene=new T.Scene();
 scene.background=new T.Color('#152229');
@@ -56,7 +59,7 @@ hitboxPreview.renderOrder=8;
 hitboxPreview.visible=false;
 
 const material=createModelMaterial();
-scene.add(previews,referencePreviews,guide,selection,hitboxPreview,new T.HemisphereLight('#ecf7ff','#4c5960',2.4));
+scene.add(groupPivot,previews,referencePreviews,guide,selection,hitboxPreview,new T.HemisphereLight('#ecf7ff','#4c5960',2.4));
 const sun=new T.DirectionalLight('#ffe5c2',2.05);
 sun.position.set(-2.5,4,-3);
 scene.add(sun);
@@ -66,6 +69,9 @@ camera.lookAt(0,0,0);
 const clamp=T.MathUtils.clamp;
 const currentModel=()=>pack.models.find(model=>model.id===modelId);
 const currentPart=()=>currentModel()?.parts[partIndex];
+const selectedIndices=()=>multi.size?[...multi]:currentPart()?[partIndex]:[];
+const selectedMeshes=()=>selectedIndices().map(i=>previews.children[i]).filter(Boolean);
+const visibleSelectedMeshes=()=>selectedMeshes().filter(mesh=>mesh.visible);
 // Display masks are editor-only views, never deleted from the model export.
 const workspaceKey='gorilla-foundry-visibility-v1';
 let workspace={active:{},masks:{},references:[]};
@@ -103,7 +109,7 @@ function resetModelMasks(){
   if(modelId)delete workspace.masks[modelId];
   storeWorkspace();
 }
-const snapshot=()=>({data:structuredClone(pack),modelId,partIndex});
+const snapshot=()=>({data:structuredClone(pack),modelId,partIndex,multi:[...multi]});
 function status(message,error=false){
   $('status').textContent=message;
   $('status').dataset.error=String(error);
@@ -150,7 +156,7 @@ function updateHistoryButtons(){
 function restore(saved){
   Object.assign(pack,structuredClone(saved.data));
   modelId=saved.modelId;
-  partIndex=saved.partIndex;
+  partIndex=saved.partIndex;multi=new Set(saved.multi??[]);
   markDirty();refreshModel();
   updateHistoryButtons();
 }
@@ -214,7 +220,12 @@ function updateParts(){
   const parts=currentModel()?.parts??[];
   $('part-count').textContent=parts.length+' / '+modelLimits.parts;
   $('add-part').disabled=parts.length>=modelLimits.parts||!currentModel();
-  $('duplicate-part').disabled=parts.length>=modelLimits.parts||!currentPart();
+  const selected=selectedIndices();
+  const groups=new Set(selected.map(i=>parts[i]?.group).filter(Boolean));
+  $('duplicate-part').disabled=!selected.length||parts.length+selected.length>modelLimits.parts;
+  $('group-parts').disabled=selected.length<2||(groups.size===1&&selected.every(i=>parts[i]?.group));
+  $('ungroup-parts').disabled=!groups.size;
+  $('selection-count').textContent=selected.length+' sélectionnée'+(selected.length===1?'':'s');
   const hidden=hiddenParts();
   $('mask-set').value=activeMask();
   $('solo-part').disabled=!parts.length||!currentPart();
@@ -224,15 +235,15 @@ function updateParts(){
     const row=document.createElement('div');row.className='part-row';
     const button=document.createElement('button');
     button.type='button';button.className='part-entry';
-    button.setAttribute('aria-pressed',String(index===partIndex));
+    button.setAttribute('aria-pressed',String(selected.includes(index)));
     button.title=part.shape+' · '+part.surface;
     const title=document.createElement('span');
-    title.textContent=String(index+1).padStart(2,'0')+'  '+part.name;
+    title.textContent=String(index+1).padStart(2,'0')+'  '+part.name+(part.group?' · G'+part.group:'');
     const color=document.createElement('span');
     color.className='swatch';color.style.setProperty('--swatch',part.color);
     button.append(title,color);
     if(hidden.has(index))button.style.opacity='.48';
-    button.onclick=()=>selectPart(index);
+    button.onclick=event=>selectPart(index,event.shiftKey||event.ctrlKey||event.metaKey);
     const eye=document.createElement('button');eye.type='button';eye.className='part-visibility';
     eye.textContent=hidden.has(index)?'◌':'◉';
     eye.setAttribute('aria-pressed',String(!hidden.has(index)));
@@ -250,7 +261,7 @@ function updateInspector(){
   const model=currentModel(),part=currentPart();
   $('model-details').hidden=!model;
   $('part-inspector').hidden=!part;
-  $('part-empty').hidden=!!part||['settings','collision'].includes($('model-inspector').dataset.tab);
+  $('part-empty').hidden=!!part||['settings','collision','publish'].includes($('model-inspector').dataset.tab);
   if(model){
     if(document.activeElement!==$('model-name'))$('model-name').value=model.name;
     $('model-kind').value=model.kind||'prop';
@@ -370,22 +381,38 @@ try{
   scene.add(helper);
   gizmo.addEventListener('dragging-changed',event=>{
     orbit.enabled=!event.value;
-    if(!event.value&&transformMoved){
+    if(event.value)return;
+    transformStart=null;
+    if(transformMoved){
       transformMoved=false;
       markDirty();
-      // Recreate final geometry only once the mouse has released the axis.
-      // Detaching/rebuilding during a drag cancels the active transform.
       updatePreview();
     }
   });
   gizmo.addEventListener('mouseDown',()=>{
     remember();
     transformMoved=false;
-    pickStart=null; // A gizmo click must not reselect another mesh on pointerup.
+    pickStart=null;
+    const mesh=gizmo.object;
+    if(mesh===hitboxPreview)return;
+    const meshes=mesh===groupPivot?selectedMeshes():[mesh];
+    const bounds=new T.Box3();
+    if(mesh===groupPivot){
+      for(const selected of meshes)bounds.expandByObject(selected);
+      bounds.translate(mesh.position.clone().negate());
+    }else{
+      mesh.geometry.computeBoundingBox();
+      bounds.copy(mesh.geometry.boundingBox);
+    }
+    transformStart={
+      position:mesh.position.clone(),rotation:mesh.quaternion.clone(),scale:mesh.scale.clone(),
+      anchor:($('negative-scale-face').checked?bounds.max:bounds.min).clone(),rawScale:mesh.scale.clone(),
+      parts:meshes.map(m=>({mesh:m,data:structuredClone(currentModel().parts[previews.children.indexOf(m)])})),
+    };
   });
   gizmo.addEventListener('objectChange',()=>{
-    const mesh=gizmo.object,part=currentPart();
-    if(!mesh)return;
+    const mesh=gizmo.object;
+    if(!mesh||!gizmo.dragging)return;
     if(hitboxEditing&&mesh===hitboxPreview&&['box','custom'].includes(currentModel()?.hitbox?.mode)){
       const hitbox=currentModel().hitbox;
       hitbox.center=mesh.position.toArray().map(v=>clamp(v,-6,6));
@@ -397,18 +424,15 @@ try{
       render();
       return;
     }
-    if(!part)return;
-    part.position=mesh.position.toArray().map(v=>clamp(v,-3,3));
-    part.rotation=[mesh.rotation.x,mesh.rotation.y,mesh.rotation.z]
-      .map(rad=>clamp(T.MathUtils.radToDeg(rad),-360,360));
-    part.scale=mesh.scale.toArray().map(v=>clamp(Math.abs(v),.02,4));
-    mesh.position.fromArray(part.position);
-    mesh.scale.fromArray(part.scale);
-    transformMoved=true;
-    updateSelectionOutline(); // Never detach or reattach the gizmo mid-gesture.
-    updateInspector();
-    render();
+    if(!transformStart)return;
+    transformStart.rawScale.copy(mesh.scale);
+    applyPartTransform();
   });
+  canvas.addEventListener('pointerdown',updateScaleModifier,true);
+  canvas.addEventListener('pointermove',event=>{ctrlScale=event.ctrlKey;},true);
+  window.addEventListener('keydown',updateScaleModifier);
+  window.addEventListener('keyup',updateScaleModifier);
+
 
   new ResizeObserver(()=>{
     const width=Math.max(1,canvas.clientWidth),height=Math.max(1,canvas.clientHeight);
@@ -417,6 +441,49 @@ try{
   }).observe(canvas);
 }catch(error){
   status('WebGL indisponible · édition numérique toujours possible.',true);
+}
+
+function updateScaleModifier(event){
+  if(ctrlScale===event.ctrlKey)return;
+  ctrlScale=event.ctrlKey;
+  if(gizmo?.dragging&&viewMode==='scale'&&transformStart)applyPartTransform();
+}
+
+function applyPartTransform(){
+  const mesh=gizmo.object,start=transformStart;
+  const group=mesh===groupPivot;
+  const parts=currentModel().parts;
+  let poses;
+  if(group){
+    const after={position:mesh.position,quaternion:mesh.quaternion,
+      scale:viewMode==='scale'?start.rawScale.clone().clampScalar(.001,200):new T.Vector3(1,1,1)};
+    poses=modelGroupTransform(start.parts.map(entry=>entry.data),start.position,after,start.anchor,ctrlScale);
+    // Reject out-of-range ensemble transforms instead of clamping pieces separately.
+    if(poses.some(p=>p.position.some(v=>Math.abs(v)>3+1e-8)||p.scale.some(v=>v<.02-1e-8||v>4+1e-8)))return;
+  }else{
+    const scale=start.rawScale.clone().clampScalar(.02,4);
+    const position=viewMode==='scale'
+      ?modelFacePosition(start.position,start.rotation,start.anchor,start.scale,scale,ctrlScale)
+      :mesh.position;
+    if(viewMode==='scale'&&position.toArray().some(v=>Math.abs(v)>3+1e-8)){
+      const saved=parts[previews.children.indexOf(mesh)];
+      mesh.position.fromArray(saved.position);mesh.scale.fromArray(saved.scale);
+      render();return;
+    }
+    poses=[{position:position.toArray().map(v=>clamp(v,-3,3)),
+      rotation:[mesh.rotation.x,mesh.rotation.y,mesh.rotation.z].map(T.MathUtils.radToDeg),
+      scale:scale.toArray()}];
+  }
+  start.parts.forEach(({mesh:partMesh},i)=>{
+    const pose=poses[i],part=parts[previews.children.indexOf(partMesh)];
+    Object.assign(part,pose);
+    partMesh.position.fromArray(pose.position);
+    partMesh.rotation.set(...pose.rotation.map(T.MathUtils.degToRad),'ZYX');
+    partMesh.scale.fromArray(pose.scale);
+  });
+  transformMoved=true;
+  updateSelectionOutline();
+  updateInspector();
 }
 
 const vectorInputs={};
@@ -464,7 +531,19 @@ function partMesh(part){
 }
 function attachGizmo(){
   if(!gizmo)return;
-  const selectedMesh=previews.children[partIndex];
+  const meshes=visibleSelectedMeshes();
+  let selectedMesh=meshes[0];
+  if(meshes.length&&selectedIndices().length>1){
+    selectedMesh=groupPivot;
+    if(!gizmo.dragging){
+      const bounds=new T.Box3();
+      for(const mesh of selectedMeshes())bounds.expandByObject(mesh);
+      bounds.getCenter(groupPivot.position);
+      groupPivot.rotation.set(0,0,0);
+      groupPivot.scale.setScalar(1);
+      groupPivot.updateMatrixWorld(true);
+    }
+  }
   const mesh=viewMode==='select'?null:
     hitboxEditing&&hitboxPreview.visible&&['translate','scale','rotate'].includes(viewMode)?hitboxPreview:
     !selectedMesh?.visible?null:selectedMesh;
@@ -477,7 +556,7 @@ function attachGizmo(){
   }
   if(mesh){
     gizmo.setMode(viewMode);
-    gizmo.setSpace(viewMode==='translate'?'world':'local');
+    gizmo.setSpace((viewMode==='translate'||mesh===groupPivot)?'world':'local');
   }
   const snap=Number($('snap-step').value);
   gizmo.setTranslationSnap(snap||null);
@@ -486,9 +565,10 @@ function attachGizmo(){
   render();
 }
 function updateSelectionOutline(){
-  const mesh=previews.children[partIndex];
-  selection.visible=!!mesh?.visible&&!hitboxEditing;
-  if(mesh)selection.box.setFromObject(mesh);
+  const meshes=visibleSelectedMeshes();
+  selection.visible=!!meshes.length&&!hitboxEditing;
+  selection.box.makeEmpty();
+  for(const mesh of meshes)selection.box.expandByObject(mesh);
   render();
 }
 function showSelection(){
@@ -497,10 +577,10 @@ function showSelection(){
 }
 function frameModel(onlySelected=false){
   if(!orbit)return;
-  const modelPart=previews.children[partIndex];
-  const box=onlySelected&&modelPart
-    ?new T.Box3().setFromObject(modelPart)
-    :new T.Box3().setFromObject(previews);
+  const meshes=onlySelected?visibleSelectedMeshes():[];
+  const box=new T.Box3();
+  if(meshes.length)for(const mesh of meshes)box.expandByObject(mesh);
+  else box.setFromObject(previews);
   if(!onlySelected&&referencePreviews.children.length)
     box.union(new T.Box3().setFromObject(referencePreviews));
   const center=new T.Vector3(),size=new T.Vector3();
@@ -561,13 +641,44 @@ function refreshModel(){
   $('new-model').disabled=$('example').disabled=pack.models.length>=modelLimits.models;
   updateParts();updateInspector();updatePreview(true);updateHistoryButtons();
 }
-function selectPart(index){
-  if(!currentModel()?.parts[index])return;
-  partIndex=index;updateParts();updateInspector();showSelection();
+function selectPart(index,extend=false){
+  const parts=currentModel()?.parts,part=parts?.[index];
+  if(!part)return;
+  const indices=part.group?parts.flatMap((entry,i)=>entry.group===part.group?[i]:[]):[index];
+  if(extend){
+    multi=new Set(selectedIndices());
+    const remove=indices.every(i=>multi.has(i));
+    for(const i of indices)if(remove)multi.delete(i);else multi.add(i);
+    partIndex=remove?(multi.values().next().value??-1):index;
+  }else{
+    multi=new Set(indices);
+    partIndex=index;
+  }
+  updateParts();updateInspector();showSelection();
+}
+
+function groupSelection(ungroup=false){
+  const parts=currentModel()?.parts;
+  const indices=selectedIndices();
+  if(!parts||!indices.length)return;
+  const groups=new Set(indices.map(i=>parts[i].group).filter(Boolean));
+  const members=parts.flatMap((part,i)=>indices.includes(i)||groups.has(part.group)?[i]:[]);
+  if(!ungroup&&members.length<2)return;
+  remember();
+  if(ungroup){
+    for(const i of members)delete parts[i].group;
+  }else{
+    const used=new Set(parts.map(part=>part.group));
+    let group=1;
+    while(used.has(group))group++;
+    for(const i of members)parts[i].group=group;
+  }
+  multi=new Set(members);
+  markDirty();updateParts();showSelection();
 }
 function switchModel(id){
   if(!pack.models.some(entry=>entry.id===id)||id===modelId)return;
-  modelId=id;partIndex=0;
+  modelId=id;partIndex=0;multi.clear();
   refreshModel();
   status('Modèle actif : '+currentModel().name);
 }
@@ -588,6 +699,7 @@ function setTool(tool){
   for(const button of document.querySelectorAll('.rail-btn[data-tool]'))
     button.setAttribute('aria-pressed',String(button.dataset.tool===tool));
   canvas.dataset.tool=tool;
+  $('negative-scale-option').hidden=tool!=='scale'||hitboxEditing;
   attachGizmo();
 }
 for(const button of document.querySelectorAll('.rail-btn[data-tool]')){
@@ -615,7 +727,7 @@ canvas.addEventListener('pointerup',event=>{
   if(event.button!==0||from?.id!==event.pointerId
       ||Math.hypot(event.clientX-from.x,event.clientY-from.y)>5)return;
   const index=pick(event);
-  if(index>=0)selectPart(index);
+  if(index>=0)selectPart(index,event.shiftKey||event.ctrlKey||event.metaKey);
 });
 const menu=$('part-context');
 function closeMenu(){menu.hidden=true;}
@@ -624,7 +736,7 @@ canvas.addEventListener('contextmenu',event=>{
   if(!rightStart||Math.hypot(event.clientX-rightStart.x,event.clientY-rightStart.y)>6)return;
   const index=pick(event);
   if(index<0)return closeMenu();
-  selectPart(index);
+  if(!selectedIndices().includes(index))selectPart(index);
   $('context-name').textContent=currentPart().name;
   menu.hidden=false;
   menu.style.left=clamp(event.clientX,5,innerWidth-205)+'px';
@@ -662,7 +774,7 @@ function importBuiltinAsset(assetId,open=false){
   remember();
   const model=structuredClone(source);model.id=newModelId();
   if(pack.models.some(entry=>entry.name===model.name))model.name=(model.name+' · copie').slice(0,48);
-  pack.models.push(model);modelId=model.id;partIndex=0;
+  pack.models.push(model);modelId=model.id;partIndex=0;multi.clear();
   markDirty();refreshModel();
   if(open)setPanel('geometry');
   status('« '+model.name+' » importé · enregistre pour le retrouver dans les cartes.');
@@ -676,7 +788,7 @@ function addModel(example=false){
   pack.models.push({id,name,kind:'structure',inGame:false,
     properties:{...defaultModelProperties},hitbox:{mode:'auto',shape:'convex',precision:48},
     parts:example?exampleParts():[]});
-  modelId=id;partIndex=0;
+  modelId=id;partIndex=0;multi.clear();
   markDirty();refreshModel();
   setPanel('geometry');
   if(!example){
@@ -692,7 +804,7 @@ function duplicateModel(){
   copied.id=newModelId();
   copied.name=(model.name.slice(0,37)+' · variante').slice(0,48);
   pack.models.push(copied);
-  modelId=copied.id;partIndex=0;
+  modelId=copied.id;partIndex=0;multi.clear();
   markDirty();refreshModel();
   $('model-title').focus({preventScroll:true});$('model-title').select();
   status('Variante créée : modifie-la sans toucher au modèle original.');
@@ -704,27 +816,42 @@ function addPart(shape=$('new-shape').value){
   const part=currentPart();
   const pos=part?[clamp(part.position[0]+.22,-3,3),...part.position.slice(1)]:[0,0,0];
   model.parts.push(makePart(shape,modelShapes[shape],pos));
-  partIndex=model.parts.length-1;
+  partIndex=model.parts.length-1;multi.clear();
   markDirty();updateParts();updateInspector();updatePreview(model.parts.length===1);
   setTool('translate');setPanel('geometry');
   if(shape==='custom')editProfile();
 }
 function duplicatePart(){
-  const model=currentModel(),part=currentPart();
-  if(!part||model.parts.length>=modelLimits.parts)return;
+  const model=currentModel(),indices=selectedIndices();
+  if(!model||!indices.length||model.parts.length+indices.length>modelLimits.parts)return;
   remember();
-  const copy=structuredClone(part);
-  copy.name=part.name.slice(0,40)+' copie';
-  copy.position[0]=clamp(copy.position[0]+.12,-3,3);
-  model.parts.splice(partIndex+1,0,copy);
-  partIndex++;
+  const source=indices.map(i=>model.parts[i]);
+  const dx=Math.min(.12,3-Math.max(...source.map(part=>part.position[0])));
+  const groups=new Map(),used=new Set(model.parts.map(part=>part.group));
+  const first=model.parts.length;
+  for(const original of source){
+    const copy=structuredClone(original);
+    copy.name=original.name.slice(0,40)+' copie';
+    copy.position[0]+=dx;
+    if(copy.group){
+      if(!groups.has(copy.group)){
+        let group=1;
+        while(used.has(group))group++;
+        used.add(group);groups.set(copy.group,group);
+      }
+      copy.group=groups.get(copy.group);
+    }
+    model.parts.push(copy);
+  }
+  multi=new Set(source.map((_,i)=>first+i));partIndex=first;
   markDirty();updateParts();updateInspector();updatePreview();
 }
 function deletePart(){
-  const model=currentModel();
-  if(!model?.parts.length)return;
-  remember();model.parts.splice(partIndex,1);
-  resetModelMasks();
+  const model=currentModel(),indices=selectedIndices();
+  if(!model||!indices.length)return;
+  remember();
+  for(const index of indices.sort((a,b)=>b-a))model.parts.splice(index,1);
+  multi.clear();resetModelMasks();
   partIndex=Math.max(0,Math.min(partIndex,model.parts.length-1));
   if(!model.parts.length&&pack.avatarId===model.id)pack.avatarId=null;
   markDirty();updateModelLists();updateParts();updateInspector();updatePreview();
@@ -735,11 +862,12 @@ function mirrorPart(){
   remember();
   const copy=structuredClone(part);
   copy.name=part.name.slice(0,36)+' · miroir';
+  delete copy.group;
   copy.position[0]=-copy.position[0];
   copy.rotation[1]=-copy.rotation[1];
   copy.rotation[2]=-copy.rotation[2];
-  model.parts.splice(partIndex+1,0,copy);
-  partIndex++;
+  model.parts.push(copy);
+  partIndex=model.parts.length-1;multi.clear();
   markDirty();updateParts();updateInspector();updatePreview();
   status('Copie en miroir créée sur l’axe X');
 }
@@ -849,7 +977,7 @@ $('show-all-parts').onclick=()=>{
   setHiddenParts(new Set());
   status('Toutes les pièces sont visibles.');
 };
-$('save').onclick=saveNow;
+$('save').onclick=$('publish-save').onclick=saveNow;
 $('undo-action').onclick=undo;
 $('redo-action').onclick=redo;
 $('export').onclick=doExport;
@@ -868,7 +996,7 @@ $('file').onchange=async event=>{
     remember();
     Object.assign(pack,{version:1,models:[...merged.values()],
       avatarId:incoming.avatarId??pack.avatarId});
-    modelId=incoming.models[0]?.id??modelId;partIndex=0;
+    modelId=incoming.models[0]?.id??modelId;partIndex=0;multi.clear();
     markDirty();refreshModel();status('Importé · enregistrer pour appliquer au jeu');
   }catch(error){status(error instanceof SyntaxError?'JSON illisible.':error.message,true);}
 };
@@ -897,7 +1025,7 @@ $('delete-model').onclick=()=>{
   delete workspace.masks[model.id];
   storeWorkspace();
   if(pack.avatarId===model.id)pack.avatarId=null;
-  modelId=(pack.models[index]??pack.models[index-1])?.id??null;partIndex=0;
+  modelId=(pack.models[index]??pack.models[index-1])?.id??null;partIndex=0;multi.clear();
   markDirty();refreshModel();
 };
 function renameActiveModel(event){
@@ -1019,6 +1147,8 @@ $('part-texture-clear').onclick=()=>{
   remember();part.texture=null;markDirty();updateInspector();updatePreview();
 };
 $('duplicate-part').onclick=duplicatePart;
+$('group-parts').onclick=()=>groupSelection();
+$('ungroup-parts').onclick=()=>groupSelection(true);
 $('delete-part').onclick=deletePart;
 $('mirror').onclick=mirrorPart;
 $('drop-to-grid').onclick=dropToGround;
@@ -1072,7 +1202,8 @@ for(const button of menu.querySelectorAll('button')){
 }
 window.addEventListener('keydown',event=>{
   const editing=event.target.closest?.('input,select,textarea,[contenteditable]');
-  if(event.key==='Escape'){closeMenu();if(!editing)setTool('select');return;}
+  if(event.key==='Escape'){closeMenu();if(!editing&&!gizmo?.dragging)setTool('select');return;}
+  if(gizmo?.dragging)return;
   const modifier=event.ctrlKey||event.metaKey;
   if(modifier&&!editing){
     const key=event.key.toLowerCase();
@@ -1080,6 +1211,7 @@ window.addEventListener('keydown',event=>{
     if(key==='y'){event.preventDefault();redo();return;}
     if(key==='s'){event.preventDefault();saveNow();return;}
     if(key==='d'){event.preventDefault();duplicatePart();return;}
+    if(key==='g'){event.preventDefault();groupSelection(event.shiftKey);return;}
   }
   if(editing||modifier||event.altKey)return;
   const key=event.key.toLowerCase();
@@ -1092,8 +1224,8 @@ window.addEventListener('keydown',event=>{
   else if(key==='m')mirrorPart();
   else if(key==='delete'||key==='backspace')deletePart();
   else if(key==='d'&&event.shiftKey)duplicatePart();
-  else if('12345678'.includes(key)&&key.length===1){
-    const shape=['box','sphere','cylinder','cone','torus','capsule','diamond','custom'][Number(key)-1];
+  else if('123456789'.includes(key)&&key.length===1){
+    const shape=['box','sphere','cylinder','cone','torus','capsule','diamond','custom','tetrahedron'][Number(key)-1];
     if(shape)addPart(shape);
   }else return;
   event.preventDefault();

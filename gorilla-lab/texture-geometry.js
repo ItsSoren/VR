@@ -38,3 +38,32 @@ export function decorPrimitiveGeometry(kind){
     default:return new T.BoxGeometry(1,1,1);
   }
 }
+
+
+// Solid triangular prism. Each face has its own metre-based UV projection.
+export function rampGeometry(w=1,h=1,d=1){
+  const vertices=[
+    [-w/2,-h/2,-d/2],[w/2,-h/2,-d/2],[-w/2,-h/2,d/2],
+    [w/2,-h/2,d/2],[-w/2,h/2,-d/2],[w/2,h/2,-d/2],
+  ].map(point=>new T.Vector3(...point));
+  const positions=[],uvs=[];
+  for(const face of [[0,1,3,2],[0,4,5,1],[2,3,5,4],[0,2,4],[1,5,3]]){
+    const points=face.map(i=>vertices[i]);
+    const origin=points[0];
+    const u=points[1].clone().sub(origin).normalize();
+    const v=points.at(-1).clone().sub(origin);
+    v.addScaledVector(u,-v.dot(u)).normalize();
+    for(let i=1;i<points.length-1;i++){
+      for(const point of [origin,points[i],points[i+1]]){
+        positions.push(...point);
+        const delta=point.clone().sub(origin);
+        uvs.push(delta.dot(u)/2.6,delta.dot(v)/2.6);
+      }
+    }
+  }
+  const geometry=new T.BufferGeometry();
+  geometry.setAttribute('position',new T.Float32BufferAttribute(positions,3));
+  geometry.setAttribute('uv',new T.Float32BufferAttribute(uvs,2));
+  geometry.computeVertexNormals();
+  return geometry;
+}

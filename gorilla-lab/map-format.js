@@ -44,7 +44,7 @@ export function parseMap(input){
         pitch:terrain?0:number(p.pitch,-180,180,0),yaw:terrain?0:number(p.yaw,-360,360,0),roll:terrain?0:number(p.roll,-180,180,0),
         ...(terrain?{terrain}:{}),
         ...(model?{model}:{}),
-        primitive:['sphere','cylinder','cone','torus','capsule'].includes(p.primitive)?p.primitive:'box',
+        primitive:['sphere','cylinder','cone','torus','capsule','ramp'].includes(p.primitive)?p.primitive:'box',
         uvScale:number(p.uvScale,.05,100,1),uvOffsetX:number(p.uvOffsetX,-100,100,0),
         uvOffsetY:number(p.uvOffsetY,-100,100,0),uvRotation:number(p.uvRotation,-360,360,0),
         material:Math.round(number(p.material,0,16,0)),

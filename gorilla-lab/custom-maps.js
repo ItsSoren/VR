@@ -1,8 +1,8 @@
 
 import * as T from 'three';
 import {shouldKeepArenaAsset} from './arena-map-pieces.js';
-import {tiledBox,transformUVs,decorPrimitiveGeometry} from './texture-geometry.js';
-import {terrainGeometry,terrainCollider,terrainVegetation,disposeVegetation,sculptTerrain,normalizeTerrain,resizeTerrain} from './terrain-edit.js';
+import {tiledBox,transformUVs,decorPrimitiveGeometry,rampGeometry} from './texture-geometry.js';
+import {terrainGeometry,terrainCollider,terrainVegetation,terrainInstanceBoxes,terrainCollisionBudget,disposeVegetation,sculptTerrain,normalizeTerrain,resizeTerrain} from './terrain-edit.js';
 import {boxCollider,colliderFor} from './physics.js';
 import {createModelUnitGeometry,createModelMaterial,modelCollisionGeometry,disposeModelMaterial} from './model-pack.js';
 import {mapCode} from './cloud-link.js';
@@ -16,7 +16,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   const loader=new T.TextureLoader(), textures=new Map();
   let loadRequest=0;
   let map=null, signature='', selection=-1,moving=-1,status='', lastGhostKey='';
-  const slab=new T.BoxGeometry(1,1,1);
+  const slab=new T.BoxGeometry(1,1,1),ramp=rampGeometry();
   const ghost=new T.Mesh(slab,new T.MeshBasicMaterial({color:'#8be4b9',wireframe:true,transparent:true,opacity:.8,depthWrite:false}));
   ghost.visible=false;scene.add(ghost);
   const trace=new T.Raycaster(), rotatedNormal=new T.Vector3(), facing=new T.Vector3();
@@ -68,7 +68,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     if(row.vegetation)disposeVegetation(row.vegetation);
     if(row.custom){row.ownTexture?.materials.delete(row.mesh.material);if(row.model)disposeModelMaterial(row.mesh.material);else row.mesh.material.dispose();}
   }
-  function makeRow(piece,index){
+  function makeRow(piece,index,collisionBudget){
     if(piece.model){
       const geometry=createModelUnitGeometry(piece.model);
       geometry.scale(piece.w,piece.h,piece.d);
@@ -91,7 +91,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
       return {mesh,collider,custom:true,model:true};
     }
     const {material,custom,ownTexture}=card(piece);
-    const geometry=piece.terrain?terrainGeometry(piece):piece.primitive&&piece.primitive!=='box'
+    const geometry=piece.terrain?terrainGeometry(piece):piece.primitive==='ramp'?rampGeometry(piece.w,piece.h,piece.d):piece.primitive&&piece.primitive!=='box'
       ?decorPrimitiveGeometry(piece.primitive).scale(piece.w,piece.h,piece.d)
       :tiledBox(piece.w,piece.h,piece.d);
     const mesh=new T.Mesh(transformUVs(geometry,piece),material);
@@ -103,9 +103,9 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     group.add(mesh);
     const half=new T.Vector3(piece.w/2,piece.h/2,piece.d/2);
     const collider={mesh,position:mesh.position,quaternion:mesh.quaternion,half,min:half.clone().negate(),
-      shape:boxCollider(half),friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:true,type:piece.material};
+      shape:piece.primitive==='ramp'?colliderFor(geometry):boxCollider(half),friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:true,type:piece.material};
     if(!piece.terrain)return {mesh,collider,custom,ownTexture};
-    const vegetation=terrainVegetation(piece);
+    const vegetation=terrainVegetation(piece,collisionBudget);
     if(vegetation)mesh.add(vegetation);
     return {mesh,collider:terrainCollider(piece,mesh),custom,ownTexture,vegetation};
   }
@@ -133,14 +133,24 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
       const assetId=mesh.userData?.editorAssetId;
       mesh.visible=!map||!replaceableMeshes.has(mesh)&&shouldKeepArenaAsset(map,assetId,mappedAssets,mappedScenery);
     });
-    for(let i=0;i<nodes.length;i++)meshRows.push(makeRow(nodes[i],i));
+    let remainingCollisions=terrainCollisionBudget;
+    const instanceColliders=[];
+    for(const [index,piece] of nodes.entries()){
+      const row=makeRow(piece,index,remainingCollisions);
+      meshRows.push(row);
+      for(const box of terrainInstanceBoxes(piece,row.vegetation)){
+        instanceColliders.push({...box,min:box.half.clone().negate(),shape:boxCollider(box.half),
+          friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:false,type:piece.material});
+        remainingCollisions--;
+      }
+    }
     for(const row of meshRows)if(row.mesh.userData.mirrorSize)mirrorRows.push(row);
     pruneTextures();
     if(map){
       const retained=builtBoxes.filter(box=>!replaceableMeshes.has(box.mesh)&&shouldKeepArenaAsset(map,box.editorAssetId,mappedAssets,mappedScenery));
       const colliders=meshRows.filter((row,i)=>nodes[i].solid&&nodes[i].model?.kind!=='prop'&&nodes[i].model?.properties?.collidable!==false)
         .map(row=>row.collider);
-      arena.boxes.splice(0,arena.boxes.length,...retained,...colliders);
+      arena.boxes.splice(0,arena.boxes.length,...retained,...colliders,...instanceColliders);
     }
     else arena.boxes.splice(0,arena.boxes.length,...builtBoxes);
     group.updateMatrixWorld(true);
@@ -224,7 +234,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
         rebuild();inform('Surface modifiée.');
       }
       if(hit){
-        ghost.position.copy(hit.object.position);ghost.rotation.copy(hit.object.rotation);ghost.scale.set(selectedPiece.w,selectedPiece.h,selectedPiece.d).multiplyScalar(1.006);ghost.visible=true;
+        ghost.geometry=selectedPiece.primitive==="ramp"?ramp:slab;ghost.position.copy(hit.object.position);ghost.rotation.copy(hit.object.rotation);ghost.scale.set(selectedPiece.w,selectedPiece.h,selectedPiece.d).multiplyScalar(1.006);ghost.visible=true;
         ghost.material.color.set(mode===3?'#ff8271':'#ffe2a2');
       }
       return;
@@ -235,6 +245,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     rotatedNormal.copy(hit.face.normal).transformDirection(hit.object.matrixWorld);
     const next=shape.terrain?{...shape,x:Math.round(hit.point.x*2)/2,y:hit.point.y,z:Math.round(hit.point.z*2)/2,pitch:0,yaw:0}:snapPlacement(hit.point,rotatedNormal,shape);
     if(!next)return;
+    ghost.geometry=next.primitive==="ramp"?ramp:slab;
     ghost.position.set(next.x,next.y,next.z);
     ghost.rotation.set(T.MathUtils.degToRad(next.pitch),T.MathUtils.degToRad(next.yaw),T.MathUtils.degToRad(next.roll??0),'YXZ');
     ghost.scale.set(next.w,next.h,next.d);ghost.updateMatrixWorld(true);ghost.visible=true;

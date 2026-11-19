@@ -1,6 +1,6 @@
 # Gorilla Lab
 
-[Guide de reprise et exercices](./gorilla-lab/docs/README.md) · [Jouer en ligne](https://itssoren.github.io/VR/)
+[Guide de reprise et exercices](./gorilla-lab/docs/README.md) · [Feuille de route V2](./gorilla-lab/docs/roadmap.md) · [Jouer en ligne](https://itssoren.github.io/VR/)
 
 `npm install`, puis `npm run build` et `npm test` à la racine du dépôt.
 

@@ -3,6 +3,7 @@ import * as T from 'three';
 // A Gorilla profile is a small editable 2D sketch. It generates watertight
 // extrusions or revolution solids, and is carried inside the model JSON.
 export const maxProfilePoints=48;
+export const minLatheSegments=3,maxLatheSegments=128;
 export const sketchPresets=Object.freeze({
   shield:{mode:'extrude',symmetric:true,points:[[0,-.52],[-.35,-.35],[-.49,.13],[-.37,.45],[0,.55]],depth:.3,bevel:.025,segments:32},
   panel:{mode:'extrude',symmetric:false,points:[[-.5,-.5],[.5,-.5],[.5,.5],[-.5,.5]],depth:.22,bevel:.012,segments:32},
@@ -27,7 +28,7 @@ export function normalizeSketch(input){
   const result={
     mode,symmetric,points,depth:num(input?.depth,base.depth,.025,1.5),
     bevel:num(input?.bevel,base.bevel,0,.15),
-    segments:Math.round(num(input?.segments,32,8,64))
+    segments:Math.round(num(input?.segments,32,minLatheSegments,maxLatheSegments))
   };
   return result;
 }
@@ -75,7 +76,19 @@ export function createSketchGeometry(value){
   let geometry;
   if(sketch.mode==='lathe'){
     const points=sketch.points.map(([r,y])=>new T.Vector2(Math.max(0,r),y));
+    if(points[0].y>points.at(-1).y)points.reverse();
+    // Close both open ends at the axis, then discard zero-area pole triangles.
+    if(points[0].x>0)points.unshift(new T.Vector2(0,points[0].y));
+    if(points.at(-1).x>0)points.push(new T.Vector2(0,points.at(-1).y));
     geometry=new T.LatheGeometry(points,sketch.segments);
+    const indices=[],pos=geometry.attributes.position;
+    const a=new T.Vector3(),b=new T.Vector3(),c=new T.Vector3(),cross=new T.Vector3();
+    const source=geometry.index.array;
+    for(let i=0;i<source.length;i+=3){
+      a.fromBufferAttribute(pos,source[i]);b.fromBufferAttribute(pos,source[i+1]);c.fromBufferAttribute(pos,source[i+2]);
+      if(cross.crossVectors(b.sub(a),c.sub(a)).lengthSq()>1e-16)indices.push(source[i],source[i+1],source[i+2]);
+    }
+    geometry.setIndex(indices);
   }else{
     const points=sketchOutline(sketch),shape=new T.Shape();
     shape.moveTo(...points[0]);
@@ -102,3 +115,4 @@ export function startingSketch(shape='box'){
     sketchPresets.panel;
   return normalizeSketch(base);
 }
+

@@ -4,10 +4,10 @@ import {addLabFixtures} from './fixtures.js';
 import {createArenaObjectSpecs,forEachStartupObject} from './arena-objects.js';
 import {labMirror,labProbe} from './lab-layout.js';
 import {defaultMirrorPiece,shouldKeepArenaAsset} from './arena-map-pieces.js';
-import {tiledBox,transformUVs,decorPrimitiveGeometry} from './texture-geometry.js';
+import {tiledBox,transformUVs,decorPrimitiveGeometry,rampGeometry} from './texture-geometry.js';
 import {readModelPack,modelStorageKey,normalizeModelPack,createModelUnitGeometry,createModelMaterial,modelCollisionGeometry,disposeModelMaterial,modelDimensions,modelBounds} from './model-pack.js';
 import {createBuiltinModelTemplates,spawnAssetIds} from './model-assets.js';
-import {normalizeTerrain,resizeTerrain,sculptTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from './terrain-edit.js';
+import {normalizeTerrain,normalizeTerrainRule,maxTerrainRules,terrainCollisionBudget,terrainSeam,stitchTerrain,resizeTerrain,sculptTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from './terrain-edit.js';
 import {texturePresets,seamlessTexture} from './seamless-texture.js';
 import {openTextureStudio} from './texture-studio.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
@@ -35,14 +35,7 @@ function refreshModelSelectors(preferredModel){
   if(modelLibrary.some(model=>model.id===selected))$('model-library').value=selected;
   else if(modelLibrary.length===1)$('model-library').value=modelLibrary[0].id;
   $('place-model').disabled=!modelLibrary.length;
-  for(const id of ['terrain-grassModel','terrain-shrubModel']){
-    const input=$(id),previous=input.value;
-    input.replaceChildren(
-      new Option('Géométrie simple (défaut)',''),
-      ...modelLibrary.map(model=>new Option(model.name,model.id))
-    );
-    if(modelLibrary.some(model=>model.id===previous))input.value=previous;
-  }
+
 }
 const editorParams=new URLSearchParams(location.search);
 const requestedModel=editorParams.get('model');
@@ -64,8 +57,8 @@ $('model-library').addEventListener('change',()=>{
   updateToolHelp();
 });
 const shapes = {
-  block: makePiece(),
-  ramp: makePiece({ name: 'Rampe', w: 3, h: .30, d: 4, pitch: 16, material: 5 }),
+  block: makePiece({w:1,h:1,d:1}),
+  ramp: makePiece({ name: 'Rampe', w: 3, h: 1.15, d: 4, primitive:'ramp', material: 5 }),
   terrain: makePiece({name:'Terrain',w:18,h:.12,d:18,y:0,material:3,terrain:normalizeTerrain({amplitude:.7,grassDensity:1.7})}),
   wall: makePiece({ name: 'Mur', w: .45, h: 2.5, d: 3.5, material: 2 }),
 };
@@ -283,7 +276,8 @@ function buildWorkspaceShell(){
   const detailsPane=make('section','property-pane');
   const tabs=make('nav','inspector-tabs');
   tabs.setAttribute('aria-label','Propriétés');
-  const specs=[['object','Objet'],['terrain','Terrain'],['material','Matériaux'],['scene','Scène']];
+  const specs=[['object','Modéliser'],['terrain','Terrain'],['material','Texturer'],['props','Props'],['collision','Collisions'],
+    ['behavior','Comportements'],['scene','Scène'],['publish','Jouer / Exporter']];
   for(const [key,label] of specs){
     const button=make('button','inspector-tab',label);
     button.type='button';
@@ -298,6 +292,24 @@ function buildWorkspaceShell(){
   const surfaceControls=$('surface').closest('details');
   surfaceControls.id='surface-controls';
   content.append(objectSection);
+  const collision=make('section');collision.id='collision-options';
+  collision.append(make('h3','','Collisions de la pièce'));
+  collision.append($('p-solid').closest('label'),$('debug-controls'));
+  const behavior=make('section');behavior.id='behavior-options';
+  const fieldset=make('div','fields');
+  for(const id of ['surface','p-grip','p-gravity','p-bounce'])fieldset.append($(id).closest('label'));
+  behavior.append(make('h3','','Propriétés physiques'));
+  behavior.append(fieldset,$('model-object-controls'));
+  const publish=make('section');publish.id='publish-options';
+  const buttons=make('div','piece-actions');
+  for(const [id,label] of [['test-map','Jouer cette map'],['export-map','Exporter JSON']]){
+    const button=make('button','',label);
+    button.type='button';
+    button.addEventListener('click',()=>$(id).click());
+    buttons.append(button);
+  }
+  publish.append(buttons);
+  content.append(collision,behavior,publish);
   const sceneOptions=make('section','scene-options');
   sceneOptions.id='scene-options';
   sceneOptions.append(make('h2','','Paramètres de carte'));
@@ -312,12 +324,12 @@ function buildWorkspaceShell(){
   aside.replaceChildren(outline,detailsPane);
   const setTab=(tab)=>{
     const piece=map?.pieces?.[selected];
-    if(tab==='terrain'&&!piece?.terrain)tab='object';
-    if(tab==='material'&&!piece)tab='object';
+    if(['terrain','props'].includes(tab)&&!piece?.terrain)tab='object';
+    if(['material','behavior'].includes(tab)&&!piece)tab='object';
     aside.dataset.tab=tab;
     for(const button of tabs.querySelectorAll('button')){
       button.setAttribute('aria-pressed',String(button.dataset.tab===tab));
-      button.disabled=button.dataset.tab==='terrain'&&!piece?.terrain;
+      button.disabled=['terrain','props'].includes(button.dataset.tab)&&!piece?.terrain;
     }
     if(tab==='terrain')$('terrain-controls').open=true;
     if(tab==='material')surfaceControls.open=true;
@@ -492,6 +504,7 @@ function alignTranslation(piece,raw,axes,free){
   return aligned;
 }
 const sharedBox = new T.BoxGeometry(1, 1, 1);
+const sharedRamp = rampGeometry();
 const loader = new T.TextureLoader();
 const spawnOffset=.025;
 const spawnGeometry=new T.RingGeometry(.24,.36,40).rotateX(-Math.PI/2);
@@ -818,6 +831,7 @@ function rebuildScene() {
   sun.visible=ambient.visible=!map.arenaBase;
   scene.fog=map.arenaBase?referenceScene.fog:null;
   scene.environment=map.arenaBase?referenceScene.environment:null;
+  let remainingCollisions=terrainCollisionBudget;
   for (const piece of map.pieces) {
     if(piece.model) {
       const mesh=new T.Mesh(createModelUnitGeometry(piece.model),createModelMaterial(piece.model));
@@ -855,13 +869,15 @@ function rebuildScene() {
       material.color.set(piece.color);
     }
     const geometry=piece.terrain?terrainGeometry(piece):
+      piece.primitive==='ramp'?rampGeometry(piece.w,piece.h,piece.d).scale(1/piece.w,1/piece.h,1/piece.d):
       piece.primitive&&piece.primitive!=='box'?decorPrimitiveGeometry(piece.primitive):
       (piece.texture||map.arenaBase)?tiledBox(piece.w,piece.h,piece.d).scale(1/piece.w,1/piece.h,1/piece.d):sharedBox;
     if(geometry!==sharedBox)transformUVs(geometry,piece);
     const mesh = new T.Mesh(geometry, material);
     mesh.userData.ownsTexture=Boolean(piece.texture);
     if(piece.terrain){
-      const vegetation=terrainVegetation(piece);
+      const vegetation=terrainVegetation(piece,remainingCollisions);
+      for(const plants of vegetation.children)if(plants.userData.collidable)remainingCollisions-=plants.count;
       if(vegetation){mesh.add(vegetation);mesh.userData.vegetation=vegetation;}
     }
     group.add(mesh);
@@ -1009,25 +1025,20 @@ function updateInspector() {
   $('terrain-grassTexture-paint').disabled = !terrain;
   for(const key of uvFields){const input=$('p-'+key);input.disabled=!piece||Boolean(piece?.model);input.value=piece?.[key]??(key==='uvScale'?1:0);}
   $('uv-reset').disabled=!piece||Boolean(piece?.model);
-  $('terrain-controls').hidden=!terrain;
+  $('terrain-controls').hidden=$('terrain-props').hidden=$('terrain-texture-density-fields').hidden=!terrain;
   if(terrain){
     for(const key of terrainFields)$('terrain-'+key).value=terrain[key];
-    for(const name of ['grass','shrub']){
-      const select=$('terrain-'+name+'Model'),id=terrain[name+'Model']?.id??'';
-      if(id&&![...select.options].some(option=>option.value===id))select.add(new Option(terrain[name+'Model'].name+' (carte)',id));
-      select.value=id;
-    }
     const area=piece.w*piece.d,triangles=2*terrain.detail**2;
     const format=new Intl.NumberFormat('fr-FR',{maximumFractionDigits:2});
     $('terrain-cell-size').textContent=format.format(piece.w/terrain.detail)+' × '+format.format(piece.d/terrain.detail)+
       ' m par case · '+format.format(triangles)+' triangles · '+format.format(triangles/area)+' triangles/m²';
     $('terrain-texture-effective').textContent=format.format(terrain.textureDensity/(piece.uvScale??1)**2)+' motifs/m²';
-    const plants=group.children[selected]?.userData.vegetation?.children??[];
-    $('terrain-vegetation-count').textContent=['grass','shrub'].map((kind,i)=>{
-      const requested=Math.round(area*terrain[kind+'Density']);
-      const count=plants.find(plant=>plant.name===kind)?.count??0;
-      return (i===0?'Herbe ':'Autres modèles ')+format.format(count)+' / '+format.format(requested);
-    }).join(' · ');
+    renderTerrainRules(piece);
+    const neighbor=$('terrain-neighbor'),previous=neighbor.value;
+    const options=map.pieces.flatMap((other,index)=>terrainSeam(piece,other)?[new Option(other.name,String(index))]:[]);
+    neighbor.replaceChildren(...(options.length?options:[new Option('Aucun bord à moins de 25 cm','')]));
+    if(options.some(option=>option.value===previous))neighbor.value=previous;
+    neighbor.disabled=$('terrain-stitch').disabled=!options.length;
     $('p-pitch').disabled=$('p-yaw').disabled=$('p-roll').disabled=true;
   }
   $('rotate').disabled=!piece||Boolean(terrain);
@@ -1035,8 +1046,10 @@ function updateInspector() {
   $('surface').value = '';
   $('undo').disabled = undoStack.length === 0;
   $('active-selection').textContent=piece?piece.name:'Aucune sélection';
-  if(document.querySelector('#scene-sidebar').dataset.tab==='terrain'&&!terrain)window.setInspectorTab('object');
-  document.querySelector('.inspector-tab[data-tab="terrain"]').disabled=!terrain;
+  const tab=document.querySelector('#scene-sidebar').dataset.tab;
+  if(['terrain','props'].includes(tab)&&!terrain||['behavior','material'].includes(tab)&&!piece)window.setInspectorTab('object');
+  document.querySelector('.inspector-tab[data-tab="behavior"]').disabled=!piece;
+  for(const name of ['terrain','props'])document.querySelector('.inspector-tab[data-tab="'+name+'"]').disabled=!terrain;
 }
 
 // Réconcilie le modèle, la 3D, le plan, le formulaire et le brouillon.
@@ -1309,7 +1322,10 @@ function showGhost(preview) {
   ghostMarker.visible = Boolean(ghost && tool === 'spawn');
   ghostBox.visible = Boolean(ghost && tool !== 'spawn');
   if(ghostMarker.visible)ghostMarker.position.set(ghost.x,ghost.y+spawnOffset,ghost.z);
-  if (ghostBox.visible) placeMesh(ghostBox, ghost);
+  if (ghostBox.visible) {
+    ghostBox.geometry=ghost.primitive==='ramp'?sharedRamp:sharedBox;
+    placeMesh(ghostBox,ghost);
+  }
   paintPlan();
   queueRender();
 }
@@ -1751,15 +1767,84 @@ $('test-map').onclick = () => {
   }
 };
 
-const terrainFields=['detail','seed','amplitude','frequency','octaves','roughness','ridge','edgeFade','grassDensity','shrubDensity','textureDensity','grassSize','shrubSize'];
-for(const name of ['grass','shrub']){
-  $('terrain-'+name+'Model').addEventListener('change',event=>{
-    const piece=current();if(!piece?.terrain)return;
-    const model=modelLibrary.find(m=>m.id===event.target.value)??(piece.terrain[name+'Model']?.id===event.target.value?piece.terrain[name+'Model']:null);
-    remember();piece.terrain[name+'Model']=model?structuredClone(model):null;
-    map=parseMap(map);sync();notice('Végétation personnalisée mise à jour.');
-  });
+const terrainFields=['detail','seed','amplitude','frequency','octaves','roughness','ridge','edgeFade','textureDensity'];
+
+function renderTerrainRules(piece){
+  const rules=piece.terrain.rules;
+  const plants=group.children[selected]?.userData.vegetation?.children??[];
+  $('terrain-add-rule').disabled=rules.length>=maxTerrainRules;
+  $('terrain-grass-texture').hidden=!rules.some(rule=>rule.kind==='grass');
+  $('terrain-rules').replaceChildren(...rules.map((rule,index)=>{
+    const row=document.createElement('tr');
+    const add=(name,control,wide=false)=>{
+      const cell=document.createElement('td');
+      if(wide)cell.dataset.wide='';
+      const title=document.createElement('span');title.textContent=name;cell.append(title,control);row.append(cell);
+      if(control.matches('input,select'))control.setAttribute('aria-label',name+' · règle '+(index+1));
+      return cell;
+    };
+    const update=patch=>{
+      remember();
+      rules[index]=normalizeTerrainRule({...rule,...patch});
+      sync();
+    };
+    const select=(options,value,change)=>{
+      const input=document.createElement('select');
+      input.replaceChildren(...options.map(([text,id])=>new Option(text,id)));
+      input.value=value;input.onchange=()=>change(input.value);
+      return input;
+    };
+    const numeric=(key,min,max,step)=>{
+      const input=document.createElement('input');input.type='number';input.value=rule[key];
+      input.min=min;input.max=max;input.step=step;
+      input.onchange=()=>{if(Number.isFinite(input.valueAsNumber))update({[key]:input.valueAsNumber});else input.value=rule[key];};
+      return input;
+    };
+    const models=modelLibrary.some(model=>model.id===rule.model?.id)||!rule.model?modelLibrary:[...modelLibrary,rule.model];
+    add('Genre',select([['Herbe','grass'],['Buisson','shrub'],...(models.length?[['Modèle','model']]:[])],rule.kind,kind=>{
+      const color=kind==='grass'?'#527a34':kind==='shrub'?'#36583c':'#ffffff';
+      update({kind,model:kind==='model'?models[0]:null,colorA:color,colorB:color,fit:'keep',size:1});
+    }));
+    if(rule.kind==='model')add('Modèle',select(models.map(model=>[model.name,model.id]),rule.model.id,id=>update({model:models.find(model=>model.id===id)})));
+    const colors=document.createElement('span');colors.dataset.pair='';
+    for(const [i,key] of ['colorA','colorB'].entries()){
+      const input=document.createElement('input');input.type='color';input.value=rule[key];
+      input.setAttribute('aria-label','Teinte '+(i+1)+' · règle '+(index+1));
+      input.onchange=()=>update({[key]:input.value});colors.append(input);
+    }
+    add('Deux teintes',colors);
+    add('Instances / m²',numeric('density',0,100,'any'));
+    add('Graine',numeric('seed',0,2147483647,1));
+    if(rule.model)add('Dimensions du modèle',select([['Conserver les proportions','keep'],['Réduire pour tenir dans un cube','fit'],['Déformer en cube','stretch']],rule.fit,fit=>update({fit})),true);
+    add(rule.fit==='keep'?'Échelle ×':'Côté du cube (m)',numeric('size',.05,10,.05));
+    if(rule.variation)add('Variation de taille',numeric('variation',0,1,.05));
+    const collision=document.createElement('input');collision.type='checkbox';collision.checked=rule.collidable;
+    collision.onchange=()=>update({collidable:collision.checked});add('Collision · boîte',collision);
+    const count=document.createElement('output');
+    count.textContent=(plants.find(plant=>plant.userData.ruleIndex===index)?.count??0)+' / '+Math.round(piece.w*piece.d*rule.density);
+    const cell=add('Affichées / demandées',count,true);
+    const remove=document.createElement('button');remove.type='button';remove.textContent='Retirer la ligne';
+    remove.onclick=()=>{remember();rules.splice(index,1);sync();};
+    cell.append(remove);
+    return row;
+  }));
 }
+$('terrain-add-rule').onclick=()=>{
+  const piece=current();
+  if(!piece?.terrain||piece.terrain.rules.length>=maxTerrainRules)return;
+  remember();
+  piece.terrain.rules.push(normalizeTerrainRule({seed:piece.terrain.seed+piece.terrain.rules.length}));
+  sync();
+  $('terrain-rules').lastElementChild?.scrollIntoView({block:'nearest'});
+};
+$('terrain-stitch').onclick=()=>{
+  const piece=current(),neighbor=map.pieces[Number($('terrain-neighbor').value)];
+  const width=T.MathUtils.clamp(Number($('terrain-seam-width').value)||1.5,.1,25);
+  const result=stitchTerrain(piece,neighbor,width);
+  if(!result)return notice('Rapproche les bords à moins de 25 cm.');
+  remember();map.pieces[selected]=result.piece;sync();
+  notice(result.clipped?'Raccord appliqué. La limite de sculpture a été atteinte.':'Bords raccordés. Ctrl Z pour annuler.');
+};
 $('terrain-grassTexture-file').onchange=async event=>{
   const file=event.target.files?.[0],piece=current();
   event.target.value='';if(!file||!piece?.terrain)return;
@@ -1873,6 +1958,12 @@ function refreshDiagnostics(){
         const geometry=modelCollisionGeometry(piece.model,new T.Vector3(piece.w,piece.h,piece.d));
         const wire=new T.Mesh(geometry,new T.MeshBasicMaterial({color:'#fa9945',wireframe:true,transparent:true,opacity:.95}));
         wire.position.copy(mesh.position);wire.rotation.copy(mesh.rotation);diagnosticBoxes.add(wire);
+      }else if(piece?.primitive==='ramp'){
+        const wire=new T.LineSegments(new T.WireframeGeometry(mesh.geometry),new T.LineBasicMaterial({color:'#fa9945'}));
+        wire.position.copy(mesh.position);
+        wire.quaternion.copy(mesh.quaternion);
+        wire.scale.copy(mesh.scale);
+        diagnosticBoxes.add(wire);
       }else diagnosticBoxes.add(new T.BoxHelper(mesh,'#fa9945'));
     }
   }

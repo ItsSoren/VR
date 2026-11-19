@@ -1,8 +1,10 @@
 import * as T from 'three';
-import {normalizeModelPack,createModelUnitGeometry,createModelMaterial,disposeModelMaterial} from './model-pack.js';
+import {normalizeModelPack,createModelUnitGeometry,createModelMaterial,disposeModelMaterial,modelDimensions} from './model-pack.js';
 
 export const maxTerrainDetail=256;
 export const defaultTerrainTextureDensity=1/2.6**2;
+export const maxTerrainRules=16;
+export const terrainCollisionBudget=256;
 const maxVegetationDensity=100;
 const maxTextureDensity=256;
 const defaultDetail = 16;
@@ -34,6 +36,40 @@ function readVegetationDensity(value,name,area,legacyRate,legacyMax){
   return bounded(count/area,0,maxVegetationDensity,0);
 }
 
+const distributionKinds=['grass','shrub','model'];
+const fitModes=['keep','fit','stretch'];
+const colorPattern=/^#[a-f\d]{6}$/i;
+
+export function normalizeTerrainRule(rule={}){
+  const model=validVegetationModel(rule.model);
+  const kind=model?'model':rule.kind==='shrub'?'shrub':'grass';
+  const color=kind==='grass'?'#527a34':kind==='shrub'?'#36583c':'#ffffff';
+  return {
+    kind,model,density:bounded(rule.density,0,maxVegetationDensity,1),
+    colorA:colorPattern.test(rule.colorA)?rule.colorA:color,
+    colorB:colorPattern.test(rule.colorB)?rule.colorB:color,
+    seed:Math.round(bounded(rule.seed,0,2147483647,1)),
+    size:bounded(rule.size,.05,10,1),
+    fit:fitModes.includes(rule.fit)?rule.fit:'keep',
+    collidable:rule.collidable===true,
+    variation:bounded(rule.variation,0,1,0),
+  };
+}
+
+function readTerrainRules(value,area){
+  if(Array.isArray(value.rules))return value.rules.slice(0,maxTerrainRules)
+    .filter(rule=>rule&&typeof rule==='object'&&distributionKinds.includes(rule.kind))
+    .filter(rule=>rule.kind!=='model'||validVegetationModel(rule.model))
+    .map(normalizeTerrainRule);
+  return [['grass',5,3200,.42],['shrub',.17,48,.85]].flatMap(([kind,rate,limit,cube])=>{
+    const density=readVegetationDensity(value,kind,area,rate,limit);
+    const model=value[kind+'Model'];
+    if(!density&&!model&&!(kind==='grass'&&value.grassTexture))return [];
+    return [normalizeTerrainRule({kind,model,density,seed:value.seed,
+      size:bounded(value[kind+'Size'],.1,5,1)*(model?cube:1),fit:model?'stretch':'keep',variation:.38,...(kind==='grass'&&value.grassTexture&&!model?{colorA:'#ffffff',colorB:'#ffffff'}:{})})];
+  });
+}
+
 export function normalizeTerrain(value = {},area=1) {
   const detail=terrainDetail(value?.detail);
   const heights = value?.heights;
@@ -46,11 +82,8 @@ export function normalizeTerrain(value = {},area=1) {
     roughness:bounded(value?.roughness,.15,.95,.42),
     ridge:bounded(value?.ridge,0,1,0),
     edgeFade:bounded(value?.edgeFade,0,1,0),
-    grassDensity:readVegetationDensity(value??{},'grass',area,5,3200),
-    shrubDensity:readVegetationDensity(value??{},'shrub',area,.17,48),
+    rules:readTerrainRules(value??{},area),
     textureDensity:bounded(value?.textureDensity,.0001,maxTextureDensity,defaultTerrainTextureDensity),
-    grassSize:bounded(value?.grassSize,.1,5,1),shrubSize:bounded(value?.shrubSize,.1,5,1),
-    grassModel:validVegetationModel(value?.grassModel),shrubModel:validVegetationModel(value?.shrubModel),
     grassTexture:typeof value?.grassTexture==='string'&&value.grassTexture.length<500000&&texturePattern.test(value.grassTexture)?value.grassTexture:null,
     heights: Array.isArray(heights) && heights.length === (detail + 1) ** 2
       ? Array.from(heights, height => bounded(height, -maxSculptHeight, maxSculptHeight, 0))
@@ -139,6 +172,54 @@ function localHeight(grid, x, z) {
 
 export function terrainHeight(piece, x, z) {
   return piece.y + localHeight(gridFor(piece), x - piece.x, z - piece.z);
+}
+
+const seamTolerance=.25;
+export function terrainSeam(piece,neighbor){
+  if(!piece?.terrain||!neighbor?.terrain||piece===neighbor)return null;
+  let best=null;
+  for(const [axis,along,length,span] of [['x','z','w','d'],['z','x','d','w']]){
+    const lo=Math.max(piece[along]-piece[span]/2,neighbor[along]-neighbor[span]/2);
+    const hi=Math.min(piece[along]+piece[span]/2,neighbor[along]+neighbor[span]/2);
+    if(hi-lo<.05)continue;
+    for(const side of [-1,1]){
+      const edge=neighbor[axis]-side*neighbor[length]/2;
+      const delta=edge-(piece[axis]+side*piece[length]/2);
+      if(Math.abs(delta)<=seamTolerance&&(!best||Math.abs(delta)<Math.abs(best.delta)))
+        best={axis,along,length,span,lo,hi,side,edge,delta};
+    }
+  }
+  return best;
+}
+
+export function stitchTerrain(piece,neighbor,width=1.5){
+  const seam=terrainSeam(piece,neighbor);
+  if(!seam)return null;
+  const {axis,along,length,span,lo,hi,side,edge,delta}=seam;
+  let terrain=piece.terrain;
+  if(Math.abs(piece[span]-neighbor[span])<1e-6&&Math.abs(piece[along]-neighbor[along])<1e-6){
+    const source=neighbor.terrain.detail;
+    const aligned=Math.ceil(terrain.detail/source)*source;
+    if(aligned<=maxTerrainDetail)terrain=resizeTerrain(terrain,aligned);
+  }
+  const placed={...piece,[axis]:piece[axis]+delta,terrain};
+  const {detail,procedural,heights,surface}=gridFor(placed);
+  const offsets=heights?.slice()??Array((detail+1)**2).fill(0);
+  const band=Math.max(width,placed[length]/detail);
+  let clipped=false;
+  for(let row=0;row<=detail;row++)for(let col=0;col<=detail;col++){
+    const x=placed.x+(col/detail-.5)*placed.w,z=placed.z+(row/detail-.5)*placed.d;
+    const alongValue=along==='x'?x:z;
+    if(alongValue<lo-1e-6||alongValue>hi+1e-6)continue;
+    const distance=Math.max(0,side*(edge-(axis==='x'?x:z)));
+    if(distance>band)continue;
+    const i=row*(detail+1)+col;
+    const reference=axis==='x'?terrainHeight(neighbor,edge,z):terrainHeight(neighbor,x,edge);
+    const target=lerp(surface[i],reference-placed.y,smooth(1-distance/band))-procedural[i];
+    offsets[i]=clamp(target,-maxSculptHeight,maxSculptHeight);
+    clipped||=offsets[i]!==target;
+  }
+  return {piece:{...placed,terrain:{...terrain,heights:offsets}},clipped};
 }
 
 function neighborHeight(grid, col, row) {
@@ -307,76 +388,84 @@ function shrubGeometry() {
   return new T.IcosahedronGeometry(.34, 0).scale(1.25, 1, 1.15).translate(0, .28, 0);
 }
 
-const vegetationKinds = [
-  { name: 'grass', geometry: grassGeometry, max: 3200, salt: 21, color: '#527a34' },
-  { name: 'shrub', geometry: shrubGeometry, max: 1024, salt: 47, color: '#36583c' },
-];
+export function terrainRuleDimensions(dimensions,fit,size){
+  if(fit==='stretch')return new T.Vector3().setScalar(size);
+  const factor=fit==='fit'?Math.min(1,size/Math.max(dimensions.x,dimensions.y,dimensions.z,1e-5)):size;
+  return dimensions.clone().multiplyScalar(factor);
+}
 
-export function terrainVegetation(piece) {
-  const group = new T.Group();
-  for (const { name, geometry, max, salt, color } of vegetationKinds) {
-    const density=piece.terrain[name+'Density']??0;
-    const requested=Math.round(piece.w*piece.d*density);
-    if(!requested)continue;
-    const imported=piece.terrain[name+'Model'];
-    const size=piece.terrain[name+'Size']??1;
-    let plantGeometry, material;
-    if(imported){
-      const base=name==='grass'?.42:.85;
-      plantGeometry=createModelUnitGeometry(imported);
-      plantGeometry.scale(base*size,base*size,base*size);
-      plantGeometry.translate(0,base*size/2,0);
-      material=createModelMaterial(imported);
-    }else{
-      plantGeometry=geometry();
-      plantGeometry.scale(size,size,size);
-      material=new T.MeshLambertMaterial({color,side:name==='grass'?T.DoubleSide:T.FrontSide,flatShading:true});
-      if(name==='grass'&&piece.terrain.grassTexture){
-        const map=new T.TextureLoader().load(piece.terrain.grassTexture);
-        map.colorSpace=T.SRGBColorSpace;
-        material.map=map;
-        material.color.set('#ffffff');
-        material.userData.ownTexture=true;
-      }
+export function terrainVegetation(piece,collisionBudget=terrainCollisionBudget) {
+  const group=new T.Group();
+  let trianglesLeft=240000,instancesLeft=4800,collidersLeft=Math.min(128,collisionBudget);
+  for(const [index,rule] of (piece.terrain.rules??[]).entries()){
+    const requested=Math.round(piece.w*piece.d*rule.density);
+    if(!requested||!trianglesLeft||!instancesLeft||(rule.collidable&&!collidersLeft))continue;
+    const grass=rule.kind==='grass';
+    const geometry=rule.model?createModelUnitGeometry(rule.model):grass?grassGeometry():shrubGeometry();
+    if(rule.model)geometry.scale(...terrainRuleDimensions(modelDimensions(rule.model),rule.fit,rule.size));
+    else geometry.scale(rule.size,rule.size,rule.size);
+    geometry.computeBoundingBox();
+    geometry.translate(0,-geometry.boundingBox.min.y,0);
+    geometry.computeBoundingBox();
+    const triangles=(geometry.index?.count??geometry.attributes.position.count)/3;
+    const count=Math.min(requested,rule.kind==='shrub'?1024:3200,Math.floor(trianglesLeft/Math.max(1,triangles)),
+      instancesLeft,rule.collidable?collidersLeft:Infinity);
+    if(!count){geometry.dispose();continue;}
+    const material=rule.model?createModelMaterial(rule.model):
+      new T.MeshLambertMaterial({color:'#ffffff',side:grass?T.DoubleSide:T.FrontSide,flatShading:true});
+    if(grass&&piece.terrain.grassTexture){
+      const map=new T.TextureLoader().load(piece.terrain.grassTexture);
+      map.colorSpace=T.SRGBColorSpace;material.map=map;material.userData.ownTexture=true;
     }
-    const triangles=(plantGeometry.index?.count??plantGeometry.attributes.position.count)/3;
-    const triangleLimit=Math.max(1,Math.floor(120000/Math.max(1,triangles)));
-    const count=Math.min(requested,max,triangleLimit);
-    const plants = new T.InstancedMesh(plantGeometry, material, count);
-    plants.userData.requestedCount=requested;
-    plants.name = name;
+    const plants=new T.InstancedMesh(geometry,material,count);
+    plants.name=rule.kind;
+    plants.userData={ruleIndex:index,seed:rule.seed,variation:rule.variation,collidable:rule.collidable,requestedCount:requested};
     plants.instanceMatrix.setUsage(T.DynamicDrawUsage);
-    plants.userData.salt = salt;
-    plants.receiveShadow = true;
-    const tint = new T.Color();
-    for (let i = 0; i < count; i++) {
-      const variation = lerp(.68, 1.2, hash(i, salt, piece.terrain.seed + 4));
-      plants.setColorAt(i, tint.setRGB(variation, variation, variation));
-    }
+    plants.receiveShadow=true;
+    const a=new T.Color(rule.colorA),b=new T.Color(rule.colorB),tint=new T.Color();
+    for(let i=0;i<count;i++)plants.setColorAt(i,tint.copy(a).lerp(b,hash(i,41,rule.seed)));
     group.add(plants);
+    trianglesLeft-=count*triangles;instancesLeft-=count;
+    if(rule.collidable)collidersLeft-=count;
   }
-  updateTerrainVegetation(group, piece);
+  updateTerrainVegetation(group,piece);
   return group;
 }
 
-export function updateTerrainVegetation(group, piece) {
-  const grid = gridFor(piece);
-  const plant = new T.Object3D();
-  for (const plants of group.children) {
-    const { salt } = plants.userData;
-    const { seed } = piece.terrain;
-    for (let i = 0; i < plants.count; i++) {
-      const x = (hash(i, salt, seed) - .5) * .96 * piece.w;
-      const z = (hash(i, salt, seed + 1) - .5) * .96 * piece.d;
-      plant.position.set(x, localHeight(grid, x, z), z);
-      plant.rotation.y = hash(i, salt, seed + 2) * 2 * Math.PI;
-      plant.scale.setScalar(lerp(.58, 1.34, hash(i, salt, seed + 3)));
+export function updateTerrainVegetation(group,piece){
+  const grid=gridFor(piece),plant=new T.Object3D();
+  for(const plants of group.children){
+    const {seed,variation}=plants.userData;
+    for(let i=0;i<plants.count;i++){
+      const x=(hash(i,27,seed)-.5)*.96*piece.w,z=(hash(i,27,seed+1)-.5)*.96*piece.d;
+      plant.position.set(x,localHeight(grid,x,z),z);
+      plant.rotation.y=hash(i,27,seed+2)*Math.PI*2;
+      plant.scale.setScalar(1+variation*(2*hash(i,27,seed+3)-1));
       plant.updateMatrix();
-      plants.setMatrixAt(i, plant.matrix);
+      plants.setMatrixAt(i,plant.matrix);
     }
-    plants.instanceMatrix.needsUpdate = true;
+    plants.instanceMatrix.needsUpdate=true;
     plants.computeBoundingSphere();
   }
+}
+
+export function terrainInstanceBoxes(piece,group){
+  const result=[],matrix=new T.Matrix4(),scale=new T.Vector3();
+  for(const mesh of group?.children??[]){
+    if(!mesh.userData.collidable)continue;
+    const bounds=mesh.geometry.boundingBox;
+    const center=bounds.getCenter(new T.Vector3());
+    const half=bounds.getSize(new T.Vector3()).multiplyScalar(.5);
+    for(let i=0;i<mesh.count;i++){
+      mesh.getMatrixAt(i,matrix);
+      const position=new T.Vector3(),quaternion=new T.Quaternion();
+      matrix.decompose(position,quaternion,scale);
+      position.add(center.clone().multiply(scale).applyQuaternion(quaternion));
+      position.add(new T.Vector3(piece.x,piece.y,piece.z));
+      result.push({position,quaternion,half:half.clone().multiply(scale).max(new T.Vector3(.005,.005,.005))});
+    }
+  }
+  return result;
 }
 
 export function disposeVegetation(group) {

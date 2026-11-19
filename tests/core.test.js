@@ -10,14 +10,15 @@ import {createToolVisual} from '../gorilla-lab/tool-visual.js';
 import {createArcadeBlaster,createBlasterModel} from '../gorilla-lab/arcade-blaster.js';
 import {updateGroundHaptics} from '../gorilla-lab/ground-haptics.js';
 import {parseMap,exampleMap} from '../gorilla-lab/map-format.js';
-import {normalizeModelPack,createModelUnitGeometry,modelDimensions,modelHitbox,modelHitboxGeometry,modelCollisionGeometry,createModelPropDefinitions,disposeModelMaterial} from '../gorilla-lab/model-pack.js';
+import {normalizeModelPack,createModelPartGeometry,createModelUnitGeometry,modelDimensions,modelHitbox,modelHitboxGeometry,modelCollisionGeometry,createModelPropDefinitions,disposeModelMaterial} from '../gorilla-lab/model-pack.js';
 import {createKeyboardState} from '../gorilla-lab/flat-controls.js';
 import {screenPixelRatio} from '../gorilla-lab/screen-render.js';
-import {terrainHeight,sculptTerrain,normalizeTerrain,resizeTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from '../gorilla-lab/terrain-edit.js';
+import {terrainHeight,sculptTerrain,normalizeTerrain,resizeTerrain,terrainGeometry,terrainVegetation,terrainRuleDimensions,terrainInstanceBoxes,stitchTerrain,disposeVegetation} from '../gorilla-lab/terrain-edit.js';
 import {transformUVs,tiledBox,decorPrimitiveGeometry} from '../gorilla-lab/texture-geometry.js';
 import {clonePropMaterial} from '../gorilla-lab/animated-props.js';
 import {sketchPresets,normalizeSketch,validateSketch,sketchOutline,createSketchGeometry} from '../gorilla-lab/custom-shape.js';
-import {resizedCenter} from '../gorilla-lab/editor-scale.js';
+import {rampGeometry} from '../gorilla-lab/texture-geometry.js';
+import {modelFacePosition,modelGroupTransform,resizedCenter} from '../gorilla-lab/editor-scale.js';
 
 test('held trigger emits ten shots each second and stops on release',()=>{
   const scene=new T.Scene(),gun=createArcadeBlaster(scene,{});
@@ -434,7 +435,7 @@ test('decorative vegetation can use custom composite models',()=>{
   piece.terrain=normalizeTerrain({detail:16,grass:.4,shrub:.2,grassModel:model,shrubModel:model});
   const map=exampleMap();map.pieces[0]=piece;
   const saved=parseMap(JSON.stringify(map)).pieces[0];
-  assert.equal(saved.terrain.grassModel.parts.length,1);
+  assert.equal(saved.terrain.rules[0].model.parts.length,1);
   const vegetation=terrainVegetation(saved);
   assert.equal(vegetation.children.length,2);
   assert.ok(vegetation.children[0].count>0);
@@ -661,9 +662,124 @@ test('legacy vegetation percentages convert using the saved terrain area',()=>{
  const map=exampleMap();
  Object.assign(map.pieces[0],{w:50,d:50,terrain:{detail:16,grass:.5,shrub:.25}});
  const piece=parseMap(map).pieces[0];
- assert.equal(piece.terrain.grassDensity,1600/2500);
- assert.equal(piece.terrain.shrubDensity,12/2500);
+ assert.equal(piece.terrain.rules[0].density,1600/2500);
+ assert.equal(piece.terrain.rules[1].density,12/2500);
  const roundTrip=parseMap(parseMap(map)).pieces[0].terrain;
- assert.equal(roundTrip.grassDensity,piece.terrain.grassDensity);
- assert.equal(roundTrip.shrubDensity,piece.terrain.shrubDensity);
+ assert.equal(roundTrip.rules[0].density,piece.terrain.rules[0].density);
+ assert.equal(roundTrip.rules[1].density,piece.terrain.rules[1].density);
+});
+
+test('solid ramp has the slope, sides and bottom of its collision hull and keeps metre-based UVs',()=>{
+ const geometry=rampGeometry(3,1,4);
+ const mesh=new T.Mesh(geometry);
+ const cast=(origin,direction)=>new T.Raycaster(new T.Vector3(...origin),new T.Vector3(...direction)).intersectObject(mesh)[0];
+ assert.equal(geometry.attributes.position.count/3,8);
+ assert.ok(Math.abs(cast([0,2,0],[0,-1,0]).point.y)<1e-6);
+ assert.ok(Math.abs(cast([2,-.25,0],[-1,0,0]).point.x-1.5)<1e-6);
+ assert.ok(Math.abs(cast([0,-2,0],[0,1,0]).point.y+.5)<1e-6);
+ const hull=colliderFor(geometry);
+ assert.equal(hull.vertices.length,6);
+ assert.ok(hull.normals.some(n=>Math.abs(n.y)>.9&&Math.abs(n.z)>.1));
+ const map=exampleMap();
+ map.pieces[0].primitive='ramp';
+ assert.equal(parseMap(JSON.stringify(map)).pieces[0].primitive,'ramp');
+ delete map.pieces[0].primitive;
+ map.pieces[0].pitch=16;
+ const saved=parseMap(map).pieces[0];
+ assert.equal(saved.primitive,'box');
+ assert.equal(saved.pitch,16);
+ const wider=rampGeometry(6,1,4);
+ const areaUV=(g,i)=>g.attributes.uv.getX(i);
+ assert.ok(Math.abs(areaUV(wider,1)-2*areaUV(geometry,1))<1e-6);
+ transformUVs(wider,{uvScale:2});
+ assert.ok(Math.abs(areaUV(wider,1)-areaUV(geometry,1))<1e-6);
+ geometry.dispose();wider.dispose();
+});
+
+test('rotated models can keep either face or their centre during a scale',()=>{
+ const start=new T.Vector3(1,0,0),rotation=new T.Quaternion().setFromAxisAngle(new T.Vector3(0,0,1),Math.PI/2);
+ const old=new T.Vector3(1,1,1),next=new T.Vector3(2,1,1);
+ for(const bound of [-.5,.5]){
+  const face=new T.Vector3(bound,0,0);
+  const moved=modelFacePosition(start,rotation,face,old,next,false);
+  const oldFace=face.clone().multiply(old).applyQuaternion(rotation).add(start);
+  const newFace=face.clone().multiply(next).applyQuaternion(rotation).add(moved);
+  assert.ok(oldFace.distanceTo(newFace)<1e-8);
+ }
+ assert.deepEqual(modelFacePosition(start,rotation,new T.Vector3(-.5,0,0),old,next,true),start);
+});
+
+test('three grouped pieces rotate and translate rigidly and retain group membership in JSON',()=>{
+ const parts=[0,1,2].map(x=>({name:'Part '+x,group:2,shape:'box',position:[x,0,0],rotation:[0,0,0],scale:[.3,.3,.3]}));
+ const q=new T.Quaternion().setFromAxisAngle(new T.Vector3(0,0,1),Math.PI/2);
+ const poses=modelGroupTransform(parts,new T.Vector3(1,0,0),{
+  position:new T.Vector3(2,1,0),quaternion:q,scale:new T.Vector3(1,1,1),
+ },new T.Vector3(-1.15,-.15,-.15),true);
+ poses.forEach(({position},i)=>assert.ok(new T.Vector3(...position).distanceTo(new T.Vector3(2,i,0))<1e-8));
+ const pack=normalizeModelPack({version:1,models:[{id:'custom-model-group-2026',parts:parts.map((part,i)=>({...part,...poses[i]}))}]});
+ assert.deepEqual(JSON.parse(JSON.stringify(pack)).models[0].parts.map(part=>part.group),[2,2,2]);
+ const scaled=modelGroupTransform(parts,new T.Vector3(1,0,0),{
+  position:new T.Vector3(1,0,0),quaternion:new T.Quaternion(),scale:new T.Vector3(2,1,1),
+ },new T.Vector3(-1.15,-.15,-.15),false);
+ assert.ok(Math.abs(scaled[0].position[0]-.15)<1e-8);
+ assert.equal(scaled[0].scale[0],.6);
+});
+
+test('lathe supports three and 128 segments and the regular tetrahedron has four equal-sided faces',()=>{
+ const profile={mode:'lathe',points:[[.2,-.5],[.3,0],[.2,.5]]};
+ const low=createSketchGeometry({...profile,segments:3});
+ const high=createSketchGeometry({...profile,segments:128});
+ assert.equal(low.index.count/3,18);
+ assert.equal(high.index.count/3,768);
+ const mesh=createModelPartGeometry({shape:'tetrahedron',position:[0,0,0],rotation:[0,0,0],scale:[1,1,1]});
+ const position=mesh.attributes.position;
+ assert.equal(position.count,12);
+ const edges=[];
+ for(let i=0;i<position.count;i+=3){
+  const a=new T.Vector3().fromBufferAttribute(position,i),b=new T.Vector3().fromBufferAttribute(position,i+1),c=new T.Vector3().fromBufferAttribute(position,i+2);
+  edges.push(a.distanceTo(b),b.distanceTo(c),c.distanceTo(a));
+ }
+ assert.ok(Math.max(...edges)-Math.min(...edges)<1e-7);
+ low.dispose();high.dispose();mesh.dispose();
+});
+
+test('terrain rules preserve dimensions, two colours, and deterministic placement per seed',()=>{
+ const dimensions=new T.Vector3(4,2,1);
+ assert.deepEqual(terrainRuleDimensions(dimensions,'keep',1).toArray(),[4,2,1]);
+ assert.deepEqual(terrainRuleDimensions(dimensions,'fit',1).toArray(),[1,.5,.25]);
+ assert.deepEqual(terrainRuleDimensions(dimensions,'fit',10).toArray(),[4,2,1]);
+ assert.deepEqual(terrainRuleDimensions(dimensions,'stretch',1).toArray(),[1,1,1]);
+ const map=exampleMap();
+ Object.assign(map.pieces[0],{x:3,y:4,z:-2,w:4,d:4,terrain:{rules:[
+  {kind:'grass',density:1,seed:7,colorA:'#001100',colorB:'#00ff00',collidable:true},
+  {kind:'shrub',density:.5,seed:19},
+  {kind:'grass',density:0,seed:20},
+ ]}});
+ const first=parseMap(map).pieces[0],second=parseMap(JSON.stringify(parseMap(map))).pieces[0];
+ assert.deepEqual(first.terrain.rules,second.terrain.rules);
+ const a=terrainVegetation(first,5),b=terrainVegetation(second,5);
+ assert.deepEqual(a.children.map(plant=>plant.count),[5,8]);
+ assert.deepEqual(a.children[0].instanceMatrix.array,b.children[0].instanceMatrix.array);
+ assert.deepEqual(a.children[0].instanceColor.array,b.children[0].instanceColor.array);
+ assert.ok(a.children[0].instanceColor.array[1]!==a.children[0].instanceColor.array[4]);
+ const boxes=terrainInstanceBoxes(first,a);
+ assert.equal(boxes.length,5);
+ assert.ok(boxes.every(box=>box.position.y>4&&box.half.length()>0));
+ disposeVegetation(a);disposeVegetation(b);
+});
+
+test('terrain stitch snaps small gaps and matches a different neighbour grid along the edge',()=>{
+ const piece={x:0,y:0,z:0,w:10,d:10,terrain:normalizeTerrain({detail:16})};
+ const neighbor={x:10.2,y:1,z:0,w:10,d:10,
+  terrain:normalizeTerrain({detail:13,amplitude:.65,seed:9})};
+ const result=stitchTerrain(piece,neighbor,1.5);
+ assert.ok(result&&!result.clipped);
+ assert.equal(result.piece.terrain.detail,26);
+ const edge=neighbor.x-neighbor.w/2;
+ assert.ok(Math.abs(result.piece.x+5-edge)<1e-9);
+ for(let z=-5;z<=5;z+=.05)
+  assert.ok(Math.abs(terrainHeight(result.piece,edge,z)-terrainHeight(neighbor,edge,z))<1e-8);
+ assert.equal(terrainHeight(result.piece,result.piece.x,0),0);
+ assert.equal(piece.terrain.heights,null);
+ assert.equal(stitchTerrain(piece,{...neighbor,x:11}),null);
 });
