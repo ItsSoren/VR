@@ -3,7 +3,7 @@ import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {TransformControls} from 'three/addons/controls/TransformControls.js';
 import {GLTFExporter} from 'three/addons/exporters/GLTFExporter.js';
 import {
-  createModelMaterial,createModelPartMaterial,disposeModelMaterial,createModelPartGeometry,createModelUnitGeometry,modelHitbox,modelHitboxGeometry,defaultModelProperties,
+  createModelMaterial,createModelPartMaterial,disposeModelMaterial,createModelPartGeometry,createModelUnitGeometry,modelHitbox,modelHitboxGeometry,modelCollisionZones,modelPartOwnMaterial,modelPartUv,modelPhysics,modelPartZones,modelFinishes,defaultModelProperties,
   modelLimits,modelShapes,modelStorageKey,modelSurfaces,normalizeModelPack,readModelPack,
 } from './model-pack.js';
 import {createBuiltinModelTemplates} from './model-assets.js';
@@ -57,6 +57,8 @@ const hitboxPreview=new T.Mesh(
 hitboxPreview.name='Hitbox de collision';
 hitboxPreview.renderOrder=8;
 hitboxPreview.visible=false;
+const zonePreview=new T.Group();
+scene.add(zonePreview);
 
 const material=createModelMaterial();
 scene.add(groupPivot,previews,referencePreviews,guide,selection,hitboxPreview,new T.HemisphereLight('#ecf7ff','#4c5960',2.4));
@@ -265,6 +267,8 @@ function updateInspector(){
   if(model){
     if(document.activeElement!==$('model-name'))$('model-name').value=model.name;
     $('model-kind').value=model.kind||'prop';
+    const physics=modelPhysics(model);
+    for(const key of ['gravity','bounce'])if(document.activeElement!==$('model-'+key))$('model-'+key).value=physics[key];
     $('in-game').checked=model.inGame;
     const destination='./editor.html?model='+encodeURIComponent(model.id);
     for(const id of ['send-to-map','quick-send-to-map'])$(id).href=destination;
@@ -276,6 +280,13 @@ function updateInspector(){
   if($('model-inspector').dataset.tab==='collision')updateHitboxControls();
   if(part){
     for(const key of ['name','shape','color','surface'])$('part-'+key).value=part[key];
+    const uv=modelPartUv(part),finish=modelFinishes[part.finish]??modelFinishes.original;
+    $('part-finish').value=part.finish??'original';
+    $('part-finish-info').textContent='Rugosité '+finish.roughness+' · métallicité '+finish.metalness;
+    for(const [field,value] of [['projection',uv.projection],['repeat',uv.repeat],['angle',uv.angle],['u',uv.offset[0]],['v',uv.offset[1]]]){
+      const input=$('part-'+field);
+      if(document.activeElement!==input)input.value=value;
+    }
     $('part-shape').disabled=part.shape==='asset';
     for(const key of Object.keys(limits))vectorInputs[key].forEach((input,index)=>{
       if(document.activeElement!==input)input.value=Number(part[key][index].toFixed(3));
@@ -305,6 +316,13 @@ function updateInspector(){
 // When exported, physics recentres the geometry and applies the same offset.
 function updateHitboxControls(){
   const model=currentModel(),manual=model?.hitbox?.mode==='box'||model?.hitbox?.mode==='custom';
+  const compound=model?.kind==='structure'&&model.partCollisions===true;
+  $('part-collisions').disabled=model?.kind!=='structure';
+  $('part-collisions').checked=compound;
+  $('whole-hitbox-controls').hidden=compound;
+  $('part-zone-controls').hidden=!compound;
+  $('part-zone').disabled=!currentPart();
+  $('part-zone').value=currentPart()?.zone??'solid';
   $('hitbox-auto').setAttribute('aria-pressed',String(!manual));
   $('hitbox-manual').setAttribute('aria-pressed',String(!!manual));
   $('hitbox-geometry').hidden=!manual;$('hitbox-auto').disabled=$('hitbox-manual').disabled=!model?.parts.length;
@@ -320,6 +338,13 @@ function updateHitboxControls(){
   $('hitbox-info').textContent=manual?'Hitbox personnalisée : déplace, tourne et redimensionne la forme orange.'
     :shape==='convex'?'Auto : enveloppe convexe calculée depuis la géométrie du modèle.'
     :'Auto : collision simple ajustée aux dimensions du modèle.';
+  const hb=modelHitbox(model);
+  const lengths=hb.size.toArray(),longest=Math.max(...lengths),axis=lengths.indexOf(longest);
+  const radius=(shape==='sphere'?longest:Math.max(...lengths.filter((_,i)=>i!==axis)))/2;
+  const dimensions=lengths.map(value=>value.toFixed(2)).join(' × ')+' m';
+  if(shape==='sphere')$('hitbox-info').textContent+=' Diamètre '+(2*radius).toFixed(2)+' m.';
+  else if(shape==='capsule')$('hitbox-info').textContent+=' Axe '+['X','Y','Z'][axis]+' · rayon '+radius.toFixed(2)+' m · cylindre '+Math.max(0,longest-2*radius).toFixed(2)+' m.';
+  else $('hitbox-info').textContent+=' '+dimensions+(shape==='convex'?' L’enveloppe remplit les creux.':'');
   if(!manual)return;
   for(const key of ['center','size'])for(let i=0;i<3;i++){
     const input=$('hitbox-'+key+'-'+['x','y','z'][i]);
@@ -328,8 +353,17 @@ function updateHitboxControls(){
 }
 function updateHitboxPreview(){
   const model=currentModel(),show=!!model?.parts.length&&$('model-inspector').dataset.tab==='collision'&&$('hitbox-preview-toggle').checked;
-  hitboxPreview.visible=show;
-  if(show){
+  for(const mesh of [...zonePreview.children]){mesh.geometry.dispose();mesh.material.dispose();zonePreview.remove(mesh);}
+  const zones=show?modelCollisionZones(model):null;
+  hitboxPreview.visible=Boolean(show&&!zones);
+  if(zones){
+    const center=modelHitbox(model).boundsCenter;
+    for(const zone of zones){
+      const mesh=new T.Mesh(new T.BoxGeometry(...zone.size),new T.MeshBasicMaterial({
+        color:zone.mode==='trigger'?'#64dbf0':'#ffb55e',wireframe:true,depthTest:false}));
+      mesh.position.copy(zone.center).add(center);mesh.renderOrder=8;zonePreview.add(mesh);
+    }
+  }else if(show){
     const hitbox=modelHitbox(model),geometry=modelHitboxGeometry(model);
     hitboxPreview.geometry.dispose();hitboxPreview.geometry=geometry;
     hitboxPreview.position.copy(hitbox.center);
@@ -524,9 +558,10 @@ for(const [key,settings] of Object.entries(limits)){
 
 function partMesh(part){
   const source={...part,position:[0,0,0],rotation:[0,0,0],scale:[1,1,1]};
-  const partMaterial=part.texture||part.shape==='asset'?createModelPartMaterial(source):material;
-  const mesh=new T.Mesh(createModelPartGeometry(source),partMaterial);
-  mesh.userData.ownMaterial=Boolean(part.texture||part.shape==='asset');
+  const ownMaterial=modelPartOwnMaterial(part);
+  const partMaterial=ownMaterial?createModelPartMaterial(source):material;
+  const mesh=new T.Mesh(createModelPartGeometry(source,new T.Vector3(...part.scale)),partMaterial);
+  mesh.userData.ownMaterial=ownMaterial;
   const image=partMaterial?.map?.image;
   if(image?.addEventListener&&!image.complete)image.addEventListener('load',render,{once:true});
   mesh.position.fromArray(part.position);
@@ -1092,7 +1127,7 @@ for(const key of ['center','size'])for(let i=0;i<3;i++){
 }
 $('model-kind').onchange=event=>{
   if(!currentModel())return;beforeChange(event.target);
-  currentModel().kind=event.target.value;markDirty();updatePreview();
+  currentModel().kind=event.target.value;markDirty();updateInspector();updatePreview();
 };
 $('in-game').onchange=event=>{
   beforeChange(event.target);currentModel().inGame=event.target.checked;markDirty();
@@ -1112,6 +1147,35 @@ setOptions($('part-shape'),Object.entries(modelShapes),'box');
 setOptions($('game-asset'),builtinModels.map(model=>[model.assetId,model.name]),builtinModels[0]?.assetId);
 $('add-game-asset').onclick=()=>importBuiltinAsset($('game-asset').value);
 setOptions($('part-surface'),Object.entries(modelSurfaces),'plain');
+setOptions($('part-finish'),Object.entries(modelFinishes).map(([id,finish])=>[id,finish.label]),'original');
+setOptions($('part-zone'),Object.entries(modelPartZones),'solid');
+$('part-collisions').onchange=event=>{
+  const model=currentModel();if(!model||model.kind!=='structure')return;
+  remember();model.partCollisions=event.target.checked;hitboxEditing=false;
+  markDirty();updateInspector();updateHitboxPreview();
+};
+$('part-zone').onchange=event=>{
+  const part=currentPart();if(!part)return;
+  remember();part.zone=event.target.value;markDirty();updateHitboxPreview();
+};
+$('part-finish').onchange=event=>{
+  const part=currentPart();if(!part)return;
+  remember();part.finish=event.target.value;markDirty();updateInspector();updatePreview();
+};
+for(const field of ['projection','repeat','angle','u','v'])$('part-'+field).onchange=event=>{
+  const part=currentPart();if(!part)return;
+  const input=event.target,value=field==='projection'?input.value:input.valueAsNumber;
+  if(field!=='projection'&&!Number.isFinite(value)){updateInspector();return;}
+  const uv=modelPartUv(part);
+  if(field==='u'||field==='v')uv.offset[field==='u'?0:1]=value;
+  else uv[field]=value;
+  remember();part.uv=modelPartUv({uv});markDirty();updateInspector();updatePreview();
+};
+for(const key of ['gravity','bounce'])$('model-'+key).onchange=event=>{
+  const model=currentModel();if(!model||!Number.isFinite(event.target.valueAsNumber))return;
+  remember();model.physics=modelPhysics({physics:{...modelPhysics(model),[key]:event.target.valueAsNumber}});markDirty();
+};
+
 function editProfile(){
   const part=currentPart();if(!part||part.shape!=='custom')return;
   openShapeStudio({

@@ -14,6 +14,22 @@ export const modelShapes = Object.freeze({
 export const modelSurfaces = Object.freeze({
   plain: 'Uni', grid: 'Grille', stripes: 'Rayures', wood: 'Bois', speckle: 'Minéral',
 });
+export const modelFinishes=Object.freeze({
+  original:{label:'Standard',roughness:.68,metalness:0},
+  matte:{label:'Mat',roughness:.95,metalness:0},
+  satin:{label:'Satiné',roughness:.46,metalness:0},
+  gloss:{label:'Brillant',roughness:.15,metalness:.05},
+  metal:{label:'Métal',roughness:.28,metalness:.85},
+});
+export const modelPartZones=Object.freeze({solid:'Solide',pass:'Traversable',trigger:'Déclencheur'});
+const number=(value,min,max,fallback)=>Number.isFinite(value)?T.MathUtils.clamp(value,min,max):fallback;
+export function modelPhysics(model){
+  return {gravity:number(model?.physics?.gravity,0,2.5,1),bounce:number(model?.physics?.bounce,0,1.65,1)};
+}
+export function modelPartUv(part){
+  return {projection:part?.uv?.projection==='metric'?'metric':'native',repeat:number(part?.uv?.repeat,.01,100,1),
+    angle:number(part?.uv?.angle,-360,360,0),offset:Array.from({length:2},(_,i)=>number(part?.uv?.offset?.[i],-100,100,0))};
+}
 export const defaultModelProperties = Object.freeze({ grabbable: true, frozen: false, collidable: true, supportWhileHeld: false });
 
 const identifier = /^custom-model-[a-z0-9][a-z0-9-]{0,47}$/;
@@ -56,6 +72,8 @@ export function normalizeModelPack(input) {
         key, typeof raw.properties?.[key] === 'boolean' ? raw.properties[key] : fallback,
       ])),
       hitbox:normalizeHitbox(raw?.hitbox),
+      ...(raw.physics?{physics:modelPhysics(raw)}:{}),
+      ...(raw.partCollisions===true?{partCollisions:true}:{}),
       parts: raw.parts.filter(part=>!isRetiredArenaAsset(part?.assetId)).map((part, index) => ({
         name: label(part?.name, `Pièce ${index + 1}`),
         ...(Number.isInteger(part?.group)&&part.group>0&&part.group<=modelLimits.parts?{group:part.group}:{}),
@@ -66,6 +84,9 @@ export function normalizeModelPack(input) {
         rotation: vector(part?.rotation, 0, -360, 360),
         scale: vector(part?.scale, .35, .02, 4),
         color: typeof part?.color === 'string' && colorPattern.test(part.color) ? part.color : '#51bdd2',
+        ...(Object.hasOwn(modelPartZones,part?.zone)?{zone:part.zone}:{}),
+        ...(Object.hasOwn(modelFinishes,part?.finish)?{finish:part.finish}:{}),
+        ...(part?.uv?{uv:modelPartUv(part)}:{}),
         surface: Object.hasOwn(modelSurfaces, part?.surface) ? part.surface : 'plain',
         texture:typeof part?.texture==='string'&&part.texture.length<=modelLimits.textureBytes&&texturePattern.test(part.texture)
           ?part.texture:null,
@@ -139,12 +160,53 @@ function surfaceAtlas() {
   return atlas;
 }
 
-export function createModelPartGeometry(part) {
+const repeatTextures=new Map();
+function repeatedSurface(surface){
+  if(repeatTextures.has(surface))return repeatTextures.get(surface);
+  const data=new Uint8Array(tileSize*tileSize*4);
+  for(let y=0;y<tileSize;y++)for(let x=0;x<tileSize;x++){
+    const tone=textureTone(surface,x,y),offset=(y*tileSize+x)*4;
+    data.set([tone,tone,tone,255],offset);
+  }
+  const texture=new T.DataTexture(data,tileSize,tileSize);
+  texture.colorSpace=T.SRGBColorSpace;
+  texture.wrapS=texture.wrapT=T.RepeatWrapping;
+  texture.magFilter=T.LinearFilter;texture.minFilter=T.LinearMipmapLinearFilter;
+  texture.generateMipmaps=true;texture.needsUpdate=true;
+  texture.userData.sharedModelSurface=true;
+  repeatTextures.set(surface,texture);
+  return texture;
+}
+export function modelPartOwnMaterial(part){
+  return Boolean(part?.texture||part?.uv||part?.shape==='asset'||part?.finish&&part.finish!=='original');
+}
+
+function projectModelUv(geometry,part,metricScale){
+  const {projection,repeat,angle,offset}=modelPartUv(part);
+  const radians=T.MathUtils.degToRad(angle),cos=Math.cos(radians),sin=Math.sin(radians);
+  const {position,normal,uv}=geometry.attributes;
+  const local=new T.Vector3(),direction=new T.Vector3();
+  for(let i=0;i<position.count;i++){
+    let u=uv.getX(i),v=uv.getY(i);
+    if(projection==='metric'){
+      local.fromBufferAttribute(position,i).multiply(metricScale);
+      direction.fromBufferAttribute(normal,i);
+      const ax=Math.abs(direction.x),ay=Math.abs(direction.y),az=Math.abs(direction.z);
+      if(ax>=ay&&ax>=az){u=local.z;v=local.y;}
+      else if(ay>=az){u=local.x;v=local.z;}
+      else{u=local.x;v=local.y;}
+    }
+    uv.setXY(i,(u*cos-v*sin)*repeat+offset[0],(u*sin+v*cos)*repeat+offset[1]);
+  }
+}
+
+export function createModelPartGeometry(part,metricScale=new T.Vector3(...part.scale)) {
   const asset=part.shape==='asset'?getBuiltinAsset(part.assetId):null;
   const primitiveGeometry = part.shape==='custom'?createSketchGeometry(part.profile):asset?.geometry?.clone()??primitive(part.shape);
   const geometry = primitiveGeometry.index ? primitiveGeometry.toNonIndexed() : primitiveGeometry;
   if (geometry !== primitiveGeometry) primitiveGeometry.dispose();
   if(!geometry.attributes.uv)geometry.setAttribute('uv',new T.Float32BufferAttribute(new Float32Array(geometry.attributes.position.count*2),2));
+  if(part.uv)projectModelUv(geometry,part,metricScale);
   const angles = part.rotation.map(T.MathUtils.degToRad);
   geometry.scale(...part.scale);
   geometry.rotateX(angles[0]);
@@ -165,7 +227,7 @@ export function createModelPartGeometry(part) {
       colors[index*3+1]=sourceColors.getY(index)*tint.g;
       colors[index*3+2]=sourceColors.getZ(index)*tint.b;
     }else tint.toArray(colors,index*3);
-    if(part.shape!=='asset'&&!part.texture)uv.setXY(index, (column + .05 + uv.getX(index) * .90) / atlasColumns,
+    if(part.shape!=='asset'&&!part.texture&&!part.uv)uv.setXY(index, (column + .05 + uv.getX(index) * .90) / atlasColumns,
       (row + .05 + uv.getY(index) * .90) / atlasRows);
   }
   geometry.setAttribute('color', new T.BufferAttribute(colors, 3));
@@ -174,8 +236,10 @@ export function createModelPartGeometry(part) {
 
 export function createModelPartMaterial(part){
   const asset=part?.shape==='asset'?getBuiltinAsset(part.assetId):null;
+  const finish=modelFinishes[part?.finish];
   if(asset?.material){
     const material=asset.material.clone();
+    if(finish&&part.finish!=='original'){material.roughness=finish.roughness;material.metalness=finish.metalness;}
     if(material.map){material.map=material.map.clone();material.map.needsUpdate=true;}
     if(part.texture){
       material.map?.dispose();
@@ -183,31 +247,40 @@ export function createModelPartMaterial(part){
       texture.colorSpace=T.SRGBColorSpace;texture.wrapS=texture.wrapT=T.RepeatWrapping;
       material.map=texture;
     }
+    if(part.uv&&material.map){material.map.wrapS=material.map.wrapT=T.RepeatWrapping;}
     if(part.color&&part.color!=='#ffffff')material.color?.multiply(new T.Color(part.color));
     material.needsUpdate=true;
     return material;
   }
-  if(!part?.texture)return new T.MeshStandardMaterial({vertexColors:true,map:surfaceAtlas(),roughness:.68});
+  const {roughness,metalness}=finish??modelFinishes.original;
+  if(!part?.texture)return new T.MeshStandardMaterial({vertexColors:true,map:part?.uv?repeatedSurface(part.surface):surfaceAtlas(),roughness,metalness});
   const texture=new T.TextureLoader().load(part.texture);
   texture.colorSpace=T.SRGBColorSpace;
   texture.wrapS=texture.wrapT=T.RepeatWrapping;
-  return new T.MeshStandardMaterial({vertexColors:true,map:texture,roughness:.68});
+  return new T.MeshStandardMaterial({vertexColors:true,map:texture,roughness,metalness});
 }
 export function createModelMaterial(model){
-  if(model?.parts?.some(part=>part.texture||part.shape==='asset'))
+  if(model?.parts?.some(modelPartOwnMaterial))
     return model.parts.map(createModelPartMaterial);
   return new T.MeshStandardMaterial({vertexColors:true,map:surfaceAtlas(),roughness:.68});
 }
 export function disposeModelMaterial(material){
   for(const mat of Array.isArray(material)?material:[material]){
     if(!mat)return;
-    if(mat.map&&mat.map!==atlas)mat.map.dispose();
+    if(mat.map&&mat.map!==atlas&&!mat.map.userData.sharedModelSurface)mat.map.dispose();
     mat.dispose();
   }
 }
-function centeredGeometry(parts) {
-  const pieces = parts.map(createModelPartGeometry);
-  const geometry = mergeGeometries(pieces,parts.some(part=>part.texture||part.shape==='asset'));
+function centeredGeometry(parts,scale=null) {
+  const pieces=parts.map(part=>{
+    if(!scale||part.uv?.projection!=='metric')return createModelPartGeometry(part);
+    const order=new T.Euler(...part.rotation.map(T.MathUtils.degToRad),'ZYX');
+    const metricScale=new T.Vector3(...part.scale).multiply(new T.Vector3(...[0,1,2].map(axis=>
+      new T.Vector3().setComponent(axis,1).applyEuler(order).multiply(scale).length()
+    )));
+    return createModelPartGeometry(part,metricScale);
+  });
+  const geometry = mergeGeometries(pieces,parts.some(modelPartOwnMaterial));
   pieces.forEach(piece => piece.dispose());
   geometry.center();
   geometry.computeBoundingBox();
@@ -215,10 +288,14 @@ function centeredGeometry(parts) {
 }
 
 // Unit-sized, centred mesh for model placement. A map piece supplies its world dimensions.
-export function createModelUnitGeometry(model) {
-  const geometry = centeredGeometry(model.parts);
-  const size = geometry.boundingBox.getSize(new T.Vector3());
-  geometry.scale(1 / Math.max(size.x, 1e-5), 1 / Math.max(size.y, 1e-5), 1 / Math.max(size.z, 1e-5));
+export function createModelUnitGeometry(model,mapDimensions=null) {
+  let geometry=centeredGeometry(model.parts);
+  const size=geometry.boundingBox.getSize(new T.Vector3()).max(new T.Vector3(1e-5,1e-5,1e-5));
+  if(mapDimensions&&model.parts.some(part=>part.uv?.projection==='metric')){
+    geometry.dispose();
+    geometry=centeredGeometry(model.parts,mapDimensions.clone().divide(size));
+  }
+  geometry.scale(1/size.x,1/size.y,1/size.z);
   geometry.computeBoundingBox();
   return geometry;
 }
@@ -264,10 +341,23 @@ function sampleHullPoints(geometry,budget){
   }
   return selected;
 }
-export function modelHitboxGeometry(model){
+export function modelHitboxGeometry(model,dimensions=null){
   const hitbox=modelHitbox(model),radial=Math.max(8,Math.min(24,Math.round(Math.sqrt(hitbox.precision)*2)));
-  if(hitbox.shape==='sphere')return new T.SphereGeometry(.5,radial,Math.max(6,Math.floor(radial/2)));
-  if(hitbox.shape==='capsule')return new T.CapsuleGeometry(.5,0,Math.max(2,Math.round(radial/8)),radial);
+  if(hitbox.shape==='sphere'||hitbox.shape==='capsule'){
+    const size=(dimensions??hitbox.size).clone().max(new T.Vector3(.00001,.00001,.00001));
+    const lengths=size.toArray(),longest=Math.max(...lengths),axis=lengths.indexOf(longest);
+    const radius=(hitbox.shape==='sphere'?longest:Math.max(...lengths.filter((_,i)=>i!==axis)))/2;
+    const barrel=Math.max(0,longest-2*radius);
+    const geometry=hitbox.shape==='capsule'&&barrel>1e-5
+      ?new T.CapsuleGeometry(radius,barrel,Math.max(2,Math.round(radial/8)),radial)
+      :new T.SphereGeometry(radius,radial,Math.max(6,Math.floor(radial/2)));
+    if(hitbox.shape==='capsule'&&barrel>1e-5){
+      if(axis===0)geometry.rotateZ(-Math.PI/2);
+      if(axis===2)geometry.rotateX(Math.PI/2);
+    }
+    geometry.scale(1/size.x,1/size.y,1/size.z);
+    return geometry;
+  }
   if(hitbox.shape==='convex'&&model.parts?.length){
     const source=centeredGeometry(model.parts),points=sampleHullPoints(source,hitbox.precision);source.dispose();
     if(points.length>=4)try{
@@ -278,11 +368,12 @@ export function modelHitboxGeometry(model){
   return new T.BoxGeometry(1,1,1);
 }
 export function modelCollisionGeometry(model,mapDimensions=null){
-  const hitbox=modelHitbox(model),geometry=modelHitboxGeometry(model);
+  const hitbox=modelHitbox(model);
   const dimensions=hitbox.boundsSize.clone().max(new T.Vector3(.00001,.00001,.00001));
   const worldDimensions=mapDimensions?new T.Vector3(mapDimensions.x,mapDimensions.y,mapDimensions.z):dimensions.clone();
   const scale=hitbox.size.clone().multiply(worldDimensions).divide(dimensions);
   const offset=hitbox.center.clone().sub(hitbox.boundsCenter).multiply(worldDimensions).divide(dimensions);
+  const geometry=modelHitboxGeometry(model,scale);
   geometry.scale(scale.x,scale.y,scale.z);
   geometry.rotateX(T.MathUtils.degToRad(hitbox.rotation.x));
   geometry.rotateY(T.MathUtils.degToRad(hitbox.rotation.y));
@@ -290,12 +381,31 @@ export function modelCollisionGeometry(model,mapDimensions=null){
   geometry.translate(offset.x,offset.y,offset.z);geometry.computeBoundingBox();return geometry;
 }
 
+export function modelCollisionZones(model,mapDimensions=null){
+  if(!model.partCollisions||model.kind!=='structure')return null;
+  if(model.properties?.collidable===false)return [];
+  const bounds=modelBounds(model),center=bounds.getCenter(new T.Vector3());
+  const size=bounds.getSize(new T.Vector3()).max(new T.Vector3(1e-5,1e-5,1e-5));
+  const ratio=mapDimensions?mapDimensions.clone().divide(size):new T.Vector3(1,1,1);
+  return model.parts.flatMap(part=>{
+    if(part.zone==='pass')return [];
+    const geometry=createModelPartGeometry(part);
+    geometry.computeBoundingBox();
+    const box=geometry.boundingBox;
+    const zone={mode:part.zone==='trigger'?'trigger':'solid',name:part.name,
+      center:box.getCenter(new T.Vector3()).sub(center).multiply(ratio),
+      size:box.getSize(new T.Vector3()).multiply(ratio).max(new T.Vector3(.01,.01,.01))};
+    geometry.dispose();
+    return [zone];
+  });
+}
+
 export function createModelPropDefinitions(pack) {
   return pack.models.filter(model => model.inGame && model.parts.length).map(model => {
     const geo = centeredGeometry(model.parts);
     const size = geo.boundingBox.getSize(new T.Vector3());
     return {
-      id: model.id, name: model.name, properties: model.properties, geo,
+      id: model.id, name: model.name, properties: model.properties, physics:modelPhysics(model), geo,
       material: createModelMaterial(model),
       collisionGeo:modelCollisionGeometry(model),
       mass: T.MathUtils.clamp(size.x * size.y * size.z * 9, .18, 12),

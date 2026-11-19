@@ -1,5 +1,9 @@
 # Feuille de route Gorilla Lab V2
 
+## Ordre de validation
+
+Terminer les points PC et éditeurs et valider leurs parcours de test. Signaler explicitement la clôture de ce périmètre à Sören. Reprendre ensuite les essais et corrections sur casque, y compris la qualité visuelle VR.
+
 ## Lot 7 — Collisions, propriétés et matériaux des modèles
 
 | Point | Préparation et contrôle PC |

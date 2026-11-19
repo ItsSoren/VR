@@ -10,10 +10,11 @@ import {createToolVisual} from '../gorilla-lab/tool-visual.js';
 import {createArcadeBlaster,createBlasterModel} from '../gorilla-lab/arcade-blaster.js';
 import {updateGroundHaptics} from '../gorilla-lab/ground-haptics.js';
 import {parseMap,exampleMap} from '../gorilla-lab/map-format.js';
-import {normalizeModelPack,createModelPartGeometry,createModelUnitGeometry,modelDimensions,modelHitbox,modelHitboxGeometry,modelCollisionGeometry,createModelPropDefinitions,disposeModelMaterial} from '../gorilla-lab/model-pack.js';
+import {normalizeModelPack,createModelPartGeometry,createModelUnitGeometry,modelDimensions,modelHitbox,modelHitboxGeometry,modelCollisionGeometry,createModelPropDefinitions,disposeModelMaterial,createModelPartMaterial} from '../gorilla-lab/model-pack.js';
 import {createKeyboardState} from '../gorilla-lab/flat-controls.js';
 import {screenPixelRatio} from '../gorilla-lab/screen-render.js';
 import {terrainHeight,sculptTerrain,normalizeTerrain,resizeTerrain,terrainGeometry,terrainCollider,normalizeTerrainRule,terrainVegetation,terrainRuleDimensions,terrainInstanceBoxes,stitchTerrain,disposeVegetation} from '../gorilla-lab/terrain-edit.js';
+import {connectMaps} from '../gorilla-lab/custom-maps.js';
 import {transformUVs,tiledBox,decorPrimitiveGeometry} from '../gorilla-lab/texture-geometry.js';
 import {clonePropMaterial} from '../gorilla-lab/animated-props.js';
 import {sketchPresets,normalizeSketch,validateSketch,sketchOutline,createSketchGeometry} from '../gorilla-lab/custom-shape.js';
@@ -842,4 +843,67 @@ test('props retain up to ten palette stops and render ten thousand models per ru
  assert.deepEqual(props.children.map(row=>row.count),[10000,10000]);
  assert.equal(terrainInstanceBoxes(piece,props).length,10000);
  disposeVegetation(props);
+});
+
+test('a long capsule keeps a cylindrical section while a sphere keeps a uniform diameter',()=>{
+ const pack={version:1,models:[{id:'custom-model-capsule-check',parts:[{shape:'box',scale:[3,.6,.6]}]}]};
+ const [model]=normalizeModelPack(pack).models;
+ model.hitbox={mode:'auto',shape:'capsule',precision:64};
+ const capsule=modelCollisionGeometry(model);
+ const positions=capsule.attributes.position;
+ assert.ok(capsule.boundingBox.getSize(new T.Vector3()).distanceTo(new T.Vector3(3,.6,.6))<.02);
+ const mid=Array.from({length:positions.count},(_,i)=>new T.Vector3().fromBufferAttribute(positions,i))
+   .filter(p=>Math.abs(Math.abs(p.x)-1.2)<.005);
+ assert.ok(mid.some(p=>Math.abs(Math.hypot(p.y,p.z)-.3)<.005));
+ model.hitbox.shape='sphere';
+ const sphere=modelCollisionGeometry(model);
+ assert.ok(sphere.boundingBox.getSize(new T.Vector3()).distanceTo(new T.Vector3(3,3,3))<.04);
+ capsule.dispose();sphere.dispose();
+});
+
+test('map decor has independent solid volumes and non-blocking enter and exit triggers',()=>{
+ const original=globalThis.document;
+ globalThis.document={querySelector:()=>({})};
+ try{
+  const arena={boxes:[],bakeLightmap(){}};
+  const maps=connectMaps({scene:new T.Scene(),arena,boot:new T.Vector3(),onReset(){},onVisual(){},getLevel:()=>0,defaultObjects:[]});
+  const model={id:'custom-model-zones-check',name:'Porte',kind:'structure',partCollisions:true,parts:[
+   {name:'Montant',shape:'box',zone:'solid',position:[-1,0,0],scale:[1,1,1]},
+   {name:'Passage',shape:'box',zone:'pass',position:[1,0,0],scale:[1,1,1]},
+   {name:'Capteur',shape:'box',zone:'trigger',position:[0,0,0],scale:[1,1,1]},
+  ]};
+  const map=exampleMap();
+  Object.assign(map.pieces[0],{x:0,y:.5,z:0,w:3,h:1,d:1,solid:true,model});
+  map.pieces=map.pieces.slice(0,1);
+  maps.load(JSON.stringify(map));
+  assert.equal(arena.boxes.length,1);
+  assert.equal(arena.boxes[0].position.x,-1);
+  assert.deepEqual(maps.checkTriggers(new T.Vector3(0,1.6,0)).map(({phase,part})=>[phase,part]),[['enter','Capteur']]);
+  assert.deepEqual(maps.checkTriggers(new T.Vector3(0,1.6,0)),[]);
+  assert.deepEqual(maps.checkTriggers(new T.Vector3(2,1.6,0)).map(({phase})=>phase),['exit']);
+  maps.reset();
+  assert.deepEqual(maps.checkTriggers(new T.Vector3(0,1.6,0)),[]);
+ }finally{globalThis.document=original;}
+});
+
+test('metric UVs repeat with placed dimensions and finish settings survive normalization',()=>{
+ const model={id:'custom-model-finish-test',physics:{gravity:.5,bounce:1.2},inGame:true,
+   parts:[{shape:'box',scale:[1,1,1],surface:'grid',finish:'metal',uv:{projection:'metric',repeat:2,angle:90,offset:[.2,-.3]}}]};
+ const [saved]=normalizeModelPack({version:1,models:[model]}).models;
+ assert.deepEqual(saved.physics,model.physics);
+ assert.deepEqual(saved.parts[0].uv,model.parts[0].uv);
+ const base=createModelUnitGeometry(saved,new T.Vector3(1,1,1));
+ const stretched=createModelUnitGeometry(saved,new T.Vector3(3,3,3));
+ const span=geometry=>{
+  const uv=geometry.attributes.uv;
+  const values=Array.from({length:uv.count},(_,i)=>uv.getX(i));
+  return Math.max(...values)-Math.min(...values);
+ };
+ assert.ok(Math.abs(span(stretched)/span(base)-3)<1e-6);
+ const metal=createModelPartMaterial(saved.parts[0]);
+ const matte=createModelPartMaterial({...saved.parts[0],finish:'matte'});
+ assert.equal(metal.metalness,.85);
+ assert.ok(matte.roughness>metal.roughness);
+ assert.equal(metal.map.wrapS,T.RepeatWrapping);
+ base.dispose();stretched.dispose();disposeModelMaterial(metal);disposeModelMaterial(matte);
 });

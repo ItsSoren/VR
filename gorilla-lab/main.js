@@ -19,7 +19,7 @@ import { avatarPalettes,createAvatarStyle } from './avatar-style.js';
 import {createArenaObjectSpecs,forEachStartupObject} from './arena-objects.js';
 import {spawnAssetIds} from './model-assets.js';
 import { makeAnimatedProps,clonePropMaterial } from './animated-props.js';
-import {readModelPack,createModelPropDefinitions,createModelAvatarHead,createModelUnitGeometry,createModelMaterial,modelCollisionGeometry,modelBounds,normalizeModelPack,modelLimits,modelStorageKey} from './model-pack.js';
+import {readModelPack,createModelPropDefinitions,createModelAvatarHead,createModelUnitGeometry,createModelMaterial,modelPhysics,modelCollisionGeometry,modelBounds,normalizeModelPack,modelLimits,modelStorageKey} from './model-pack.js';
 import {mapCode,publicRooms} from './cloud-link.js';
 import { createHandSkin,palmCenter } from './hand-skin.js';
 import {placeTrackedPalm} from './xr-palm.js';
@@ -716,12 +716,13 @@ const mapSurfaceNames=['Normale','Glace','Caoutchouc','Lune'];
 const placedModelTypes=new Map();
 function spawnPlacedModels(){
   for(const piece of maps.placedModels()){
-    const key=JSON.stringify([piece.model,piece.w,piece.h,piece.d]);
+    const key=JSON.stringify([piece.model,piece.w,piece.h,piece.d,piece.gravity,piece.bounce]);
     let type=placedModelTypes.get(key);
     if(type===undefined){
-      const geo=createModelUnitGeometry(piece.model);
+      const dimensions=new T.Vector3(piece.w,piece.h,piece.d);
+      const geo=createModelUnitGeometry(piece.model,dimensions);
       geo.scale(piece.w,piece.h,piece.d);
-      const collisionGeo=modelCollisionGeometry(piece.model,new T.Vector3(piece.w,piece.h,piece.d));
+      const collisionGeo=modelCollisionGeometry(piece.model,dimensions);
       const shape=colliderFor(collisionGeo);
       collisionGeo.dispose();
       type=objectSpecs.length;
@@ -729,6 +730,7 @@ function spawnPlacedModels(){
         id:piece.model.id,name:piece.model.name,geo,material:createModelMaterial(piece.model),
         shape,lowShape:shape,
         assetId:piece.model.assetId??null,
+        physics:modelPhysics({physics:{gravity:piece.gravity,bounce:piece.bounce}}),
         properties:{...piece.model.properties,grabbable:piece.model.properties.grabbable!==false},
         mass:T.MathUtils.clamp(piece.w*piece.h*piece.d*9,.18,12)
       });
@@ -1645,6 +1647,11 @@ renderer.setAnimationLoop((time,frame)=>{
     for(const h of hands)h.mesh.visible=false;
   }else character(frame,space,pose,dt,inputDt);
   const spectating=!inVR&&spectator.role==='pc';
+  if(!inVR&&!spectating)for(const event of maps.checkTriggers(worldHead)){
+    diagnostics.record('map-trigger',event);
+    window.dispatchEvent(new CustomEvent('gorilla-model-trigger',{detail:event}));
+    if(event.phase==='enter')showGameHint('Déclencheur · '+event.part);
+  }
   // En spectateur ou joueur invité, les objets reçus sont dessinés comme répliques du monde VR.
   const remoteWorld=spectating||spectator.role==='player';
   if(spectator.role!=='player'){remoteHeld=0;for(const h of hands)h.remoteHeld=0;}

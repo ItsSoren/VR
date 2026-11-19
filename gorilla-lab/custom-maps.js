@@ -4,7 +4,7 @@ import {shouldKeepArenaAsset} from './arena-map-pieces.js';
 import {tiledBox,transformUVs,decorPrimitiveGeometry,rampGeometry} from './texture-geometry.js';
 import {terrainGeometry,terrainCollider,terrainVegetation,terrainInstanceBoxes,disposeVegetation,sculptTerrain,normalizeTerrain,resizeTerrain} from './terrain-edit.js';
 import {boxCollider,colliderFor} from './physics.js';
-import {createModelUnitGeometry,createModelMaterial,modelCollisionGeometry,disposeModelMaterial} from './model-pack.js';
+import {createModelUnitGeometry,createModelMaterial,modelCollisionZones,modelCollisionGeometry,disposeModelMaterial} from './model-pack.js';
 import {mapCode} from './cloud-link.js';
 import {parseMap,makePiece,snapPlacement,maxPieces,maxMapBytes,storageKey,downloadMap} from './map-format.js';
 
@@ -12,7 +12,8 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   const builtBoxes=arena.boxes.slice();
   const replaceableMeshes=new Set(builtBoxes.filter(box=>box.half&&box.mesh?.isObject3D).map(box=>box.mesh));
   const group=new T.Group();scene.add(group);
-  const meshRows=[], mirrorRows=[], history=[];
+  const meshRows=[],mirrorRows=[],history=[],triggerRows=[];
+  let insideTriggers=new Set();
   const loader=new T.TextureLoader(), textures=new Map();
   let loadRequest=0;
   let map=null, signature='', selection=-1,moving=-1,status='', lastGhostKey='';
@@ -70,7 +71,8 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   }
   function makeRow(piece,index){
     if(piece.model){
-      const geometry=createModelUnitGeometry(piece.model);
+      const dimensions=new T.Vector3(piece.w,piece.h,piece.d);
+      const geometry=createModelUnitGeometry(piece.model,dimensions);
       geometry.scale(piece.w,piece.h,piece.d);
       const material=createModelMaterial(piece.model);
       const mesh=new T.Mesh(geometry,material);
@@ -80,7 +82,21 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
       mesh.userData.mapIndex=index;
       if(piece.model.kind==='prop')mesh.visible=false; // Dynamic prop is spawned by the object physics system.
       group.add(mesh);
-      const dimensions=new T.Vector3(piece.w,piece.h,piece.d);
+      const zones=modelCollisionZones(piece.model,dimensions);
+      if(zones){
+        const colliders=[];
+        for(const zone of zones){
+          const half=zone.size.clone().multiplyScalar(.5);
+          const position=zone.center.clone().applyQuaternion(mesh.quaternion).add(mesh.position);
+          const quaternion=mesh.quaternion.clone();
+          if(zone.mode==='trigger'){
+            triggerRows.push({name:zone.name,model:piece.name,position,
+              inverse:quaternion.invert(),bounds:new T.Box3(half.clone().negate(),half)});
+          }else colliders.push({position,quaternion,half,min:half.clone().negate(),shape:boxCollider(half),
+            friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:true,type:piece.material});
+        }
+        return {mesh,colliders,custom:true,model:true};
+      }
       const collisionGeometry=modelCollisionGeometry(piece.model,dimensions);
       collisionGeometry.computeBoundingBox();const bounds=collisionGeometry.boundingBox;
       const half=new T.Vector3(Math.max(Math.abs(bounds.min.x),Math.abs(bounds.max.x)),
@@ -123,7 +139,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   function rebuild(){
     for(const row of meshRows)removeRow(row);
     meshRows.length=0;
-    mirrorRows.length=0;
+    mirrorRows.length=0;triggerRows.length=0;insideTriggers.clear();
     const nodes=map?.pieces??[];
     signature=map?'custom-'+mapCode(JSON.stringify(map)):'';
     // Asset-backed map pieces replace their matching built-in fixture instead of stacking on it.
@@ -147,7 +163,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     if(map){
       const retained=builtBoxes.filter(box=>!replaceableMeshes.has(box.mesh)&&shouldKeepArenaAsset(map,box.editorAssetId,mappedAssets,mappedScenery));
       const colliders=meshRows.filter((row,i)=>nodes[i].solid&&nodes[i].model?.kind!=='prop'&&nodes[i].model?.properties?.collidable!==false)
-        .map(row=>row.collider);
+        .flatMap(row=>row.colliders??[row.collider]);
       arena.boxes.splice(0,arena.boxes.length,...retained,...colliders,...instanceColliders);
     }
     else arena.boxes.splice(0,arena.boxes.length,...builtBoxes);
@@ -285,10 +301,28 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
       if(request===loadRequest)load(contents);
     }catch(e){if(request===loadRequest)inform(e.message);}
   }
+  const triggerRay=new T.Ray(),triggerEnd=new T.Vector3(),triggerHit=new T.Vector3();
+  function checkTriggers(head){
+    if(!triggerRows.length)return [];
+    const events=[],inside=new Set();
+    for(const row of triggerRows){
+      triggerRay.origin.copy(head).sub(row.position).applyQuaternion(row.inverse);
+      triggerRay.direction.set(0,-1,0).applyQuaternion(row.inverse);
+      triggerEnd.copy(triggerRay.origin).addScaledVector(triggerRay.direction,1.45);
+      const hit=triggerRay.intersectBox(row.bounds,triggerHit);
+      if(row.bounds.containsPoint(triggerRay.origin)||row.bounds.containsPoint(triggerEnd)||
+        hit&&triggerHit.distanceToSquared(triggerRay.origin)<=1.45**2){
+        inside.add(row);
+        if(!insideTriggers.has(row))events.push({phase:'enter',part:row.name,model:row.model});
+      }else if(insideTriggers.has(row))events.push({phase:'exit',part:row.name,model:row.model});
+    }
+    insideTriggers=inside;
+    return events;
+  }
   document.querySelector('#map-load-url').onclick=()=>loadURL(url.value);
   document.querySelector('#map-export').onclick=save;
   document.querySelector('#map-reset').onclick=reset;
-  return {placedModels:()=>map?.pieces.filter(p=>p.model?.kind==='prop')??[],modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,reset,blank,undo,save,edit,recenter,inform,
+  return {checkTriggers,placedModels:()=>map?.pieces.filter(p=>p.model?.kind==='prop')??[],modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,reset,blank,undo,save,edit,recenter,inform,
     mirrors:()=>mirrorRows,
     get usesBuiltInMirror(){return !map||map.arenaBase&&!map.editableArena&&!map.pieces.some(piece=>piece.sceneryId==='lab-mirror');},
     clearGhost(){ghost.visible=false;},get active(){return Boolean(map);},get builtIn(){return !map||map.arenaBase===true;},get assetLayer(){return map?.assetLayer===true;},

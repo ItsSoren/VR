@@ -463,7 +463,7 @@ function resolveContact(a,b,box,depth,rebound){
   const inwardSpeed=relativeVelocity.dot(normal);
   let changed=false;
   if(inwardSpeed<-1e-5){
-    const bounce=inwardSpeed<-.8?T.MathUtils.clamp(rebound*(box?.bounce??1),0,.98):0;
+    const bounce=inwardSpeed<-.8?T.MathUtils.clamp(rebound*(box?.bounce??1)*(body.spec?.physics?.bounce??1)*(other?.spec?.physics?.bounce??1),0,.98):0;
     const impulse=-inwardSpeed*(1+bounce)/(impulseResponse(a,leverA,normal)+impulseResponse(b,leverB,normal));
     applyImpulse(a,leverA,normal,impulse);
     applyImpulse(b,leverB,normal,-impulse);
@@ -536,7 +536,7 @@ function travelLimit(shape){
 export const objectPhysicsStats={substeps:0,active:0,free:0,sleeping:0};
 
 function advanceBody(body,dt,gravity,surfaceAt){
-  body.velocity.y-=gravity*dt*(surfaceAt?.(body.mesh.position)?.gravity??1);
+  body.velocity.y-=gravity*dt*(body.spec?.physics?.gravity??1)*(surfaceAt?.(body.mesh.position)?.gravity??1);
   body.mesh.position.addScaledVector(body.velocity,dt);
   const speed=body.angular.length();
   if(speed>1e-5)body.mesh.rotateOnWorldAxis(spinAxis.copy(body.angular).divideScalar(speed),Math.min(speed,30)*dt);

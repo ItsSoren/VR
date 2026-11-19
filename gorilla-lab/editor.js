@@ -5,7 +5,7 @@ import {createArenaObjectSpecs,forEachStartupObject} from './arena-objects.js';
 import {labMirror,labProbe} from './lab-layout.js';
 import {defaultMirrorPiece,shouldKeepArenaAsset} from './arena-map-pieces.js';
 import {tiledBox,transformUVs,decorPrimitiveGeometry,rampGeometry} from './texture-geometry.js';
-import {readModelPack,modelStorageKey,normalizeModelPack,createModelUnitGeometry,createModelMaterial,modelCollisionGeometry,disposeModelMaterial,modelDimensions,modelBounds} from './model-pack.js';
+import {readModelPack,modelStorageKey,normalizeModelPack,createModelUnitGeometry,createModelMaterial,modelCollisionZones,modelCollisionGeometry,disposeModelMaterial,modelPhysics,modelDimensions,modelBounds} from './model-pack.js';
 import {createBuiltinModelTemplates,spawnAssetIds} from './model-assets.js';
 import {normalizeTerrain,normalizeTerrainRule,maxTerrainRules,maxTerrainRuleInstances,maxTerrainRuleColors,maxTerrainSizeVariation,terrainQuarterYaw,terrainSeam,stitchTerrain,resizeTerrain,sculptTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from './terrain-edit.js';
 import {texturePresets,seamlessTexture} from './seamless-texture.js';
@@ -49,7 +49,7 @@ function modelPiece() {
   return makePiece({
     name:model.name.slice(0,36),model:structuredClone(model),x:0,y:Math.max(.15,size.y/2),z:0,
     w:T.MathUtils.clamp(size.x,.2,64),h:T.MathUtils.clamp(size.y,.12,36),d:T.MathUtils.clamp(size.z,.2,64),
-    color:'#ffffff',solid:model.properties.collidable!==false
+    ...modelPhysics(model),color:'#ffffff',solid:model.properties.collidable!==false
   });
 }
 $('model-library').addEventListener('change',()=>{
@@ -869,7 +869,7 @@ function rebuildScene() {
   scene.environment=map.arenaBase?referenceScene.environment:null;
   for (const piece of map.pieces) {
     if(piece.model) {
-      const mesh=new T.Mesh(createModelUnitGeometry(piece.model),createModelMaterial(piece.model));
+      const mesh=new T.Mesh(createModelUnitGeometry(piece.model,new T.Vector3(piece.w,piece.h,piece.d)),createModelMaterial(piece.model));
       mesh.castShadow=mesh.receiveShadow=true;
       // Complex models can contain gaps or thin/back-facing faces. This invisible
       // unit box makes the whole model's bounds reliably clickable in the editor.
@@ -986,7 +986,7 @@ function applyEditedModel(){
   const dimensions={w:resize(piece.w,oldSize.x,newSize.x,maxObjectSize),
     h:resize(piece.h,oldSize.y,newSize.y,256),d:resize(piece.d,oldSize.z,newSize.z,maxObjectSize)};
   const replacement=makePiece({...piece,...dimensions,
-    model:{...piece.model,id:model.id,parts:model.parts,hitbox:model.hitbox}});
+    model:{...piece.model,id:model.id,parts:model.parts,hitbox:model.hitbox,partCollisions:model.partCollisions===true}});
   if(JSON.stringify(replacement)!==JSON.stringify(piece)){
     remember();
     map.pieces[selected]=replacement;
@@ -2007,9 +2007,19 @@ function refreshDiagnostics(){
     if($('debug-hitboxes').checked){
       const index=group.children.indexOf(mesh),piece=map.pieces[index];
       if(piece?.model){
-        const geometry=modelCollisionGeometry(piece.model,new T.Vector3(piece.w,piece.h,piece.d));
-        const wire=new T.Mesh(geometry,new T.MeshBasicMaterial({color:'#fa9945',wireframe:true,transparent:true,opacity:.95}));
-        wire.position.copy(mesh.position);wire.rotation.copy(mesh.rotation);diagnosticBoxes.add(wire);
+        const dimensions=new T.Vector3(piece.w,piece.h,piece.d),zones=modelCollisionZones(piece.model,dimensions);
+        if(zones){
+          for(const zone of zones){
+            const geometry=new T.BoxGeometry(...zone.size);
+            const wire=new T.Mesh(geometry,new T.MeshBasicMaterial({color:zone.mode==='trigger'?'#64dbf0':'#fa9945',wireframe:true}));
+            wire.position.copy(zone.center).applyQuaternion(mesh.quaternion).add(mesh.position);
+            wire.quaternion.copy(mesh.quaternion);diagnosticBoxes.add(wire);
+          }
+        }else{
+          const geometry=modelCollisionGeometry(piece.model,dimensions);
+          const wire=new T.Mesh(geometry,new T.MeshBasicMaterial({color:'#fa9945',wireframe:true,transparent:true,opacity:.95}));
+          wire.position.copy(mesh.position);wire.rotation.copy(mesh.rotation);diagnosticBoxes.add(wire);
+        }
       }else if(piece?.primitive==='ramp'){
         const wire=new T.LineSegments(new T.WireframeGeometry(mesh.geometry),new T.LineBasicMaterial({color:'#fa9945'}));
         wire.position.copy(mesh.position);
