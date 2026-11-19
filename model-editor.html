@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#191d23">
-<title>GORILLA / FOUNDRY · Atelier de modèles R38.9</title>
+<title>GORILLA / FOUNDRY · Atelier de modèles R38.10</title>
 <style>
 :root{color-scheme:dark;--ink:#e4e8eb;--soft:#a4adb5;--muted:#798790;--line:#39424a;
 --panel:#232a30;--panel-2:#1d252c;--bg:#151b20;--accent:#edac67;--blue:#77c7cc;
@@ -117,7 +117,7 @@ gap:8px;width:100%;text-align:left;white-space:normal;padding:5px 8px;border-col
 .outline-tools{display:flex;gap:5px;align-items:center}
 .outline-tools select{min-width:0;flex:1;font-size:11px;min-height:27px}
 .outline-tools button{min-height:27px;flex-shrink:0;font-size:11px}
-.tabs{display:grid;grid-template-columns:repeat(4,1fr);flex:0 0 35px;border-bottom:1px solid var(--line);
+.tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));flex:0 0 auto;border-bottom:1px solid var(--line);
 background:#2a323a}
 .tab{min-height:35px;border:0;border-right:1px solid #3a454e;border-radius:0;background:transparent;font-size:11px;
 color:#aabcc4}
@@ -129,6 +129,7 @@ color:#aabcc4}
 .inspector[data-tab=appearance] #appearance-panel,
 .inspector[data-tab=collision] #collision-panel,
 .inspector[data-tab=settings] #settings-panel,
+.inspector[data-tab=avatar] #avatar-panel,
 .inspector[data-tab=publish] #publish-panel{display:block}
 .tabs{flex-wrap:wrap}
 #negative-scale-option{display:flex;align-items:center;gap:4px}
@@ -148,7 +149,12 @@ color:#aabcc4}
 .hint{font-size:11px;color:var(--muted);margin:8px 0}
 #part-empty{font-size:11px;color:var(--muted)}
 #send-to-map{display:flex;justify-content:center;align-items:center;background:#3f4e46;border-color:#6b987d;margin:10px 0}
-#delete-model{color:#e9ac9c}
+#delete-model{color:#e9ac9c;display:grid;place-items:center;flex:0 0 29px;padding:0;width:29px}
+#delete-model svg{width:15px;height:15px}
+.avatar-actions{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0}
+.panel-body h3{margin:13px 0 6px;padding:5px 7px;border-left:2px solid var(--accent);
+  background:#26323a;color:#e6edf1;font-size:11px;line-height:1.4}
+.panel-body h3:first-child{margin-top:0}
 .hitbox-type{display:flex;gap:6px;margin:4px 0 10px}
 .hitbox-type button{flex:1;text-align:center;min-height:32px;font-size:11px}
 .hitbox-type button[aria-pressed=true]{background:#5c4b35;border-color:#e6a961;color:#ffdfa9}
@@ -180,7 +186,14 @@ body.preview-fullscreen .side{display:none}
 .brand{min-width:auto}.brand strong{font-size:11px}.brand small{font-size:8px}
 .top-actions nav a{display:none}.rail-btn{width:46px}
 .top-select{max-width:210px}}
+@media(min-width:761px) and (max-width:1530px){
+header.topbar{height:91px;display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-rows:auto auto;gap:4px 13px}
+.top-select{max-width:none}
+.top-actions{grid-column:1/-1;margin-left:0}
+.layout{height:calc(100dvh - 91px)}
+}
 @media(max-width:760px){
+.top-select{max-width:none;flex:1 1 100%;flex-wrap:wrap}
 body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
 .top-actions{flex-wrap:wrap;margin-left:0}
 .layout{height:auto;display:grid;grid-template-columns:52px minmax(0,1fr);min-height:100dvh}
@@ -201,6 +214,9 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
     <div><strong>GORILLA / FOUNDRY</strong><small>ATELIER DE MODÈLES</small></div></div>
   <div class="top-select"><label for="models">MODÈLE</label><select id="models" aria-label="Modèle actif"></select>
     <input id="model-title" maxlength="48" aria-label="Renommer le modèle" placeholder="Nom du modèle" title="Clique ici pour renommer ton modèle">
+    <button id="delete-model" type="button" title="Supprimer le modèle actif" aria-label="Supprimer le modèle actif" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5m4-5v5"/></svg>
+    </button>
     <button id="new-model" title="Créer un nouveau modèle">＋ Nouveau modèle</button>
     <button id="duplicate-model" class="mini" title="Dupliquer le modèle actif">⧉</button>
     <button id="example" class="mini" title="Créer un exemple">Ex.</button></div>
@@ -299,13 +315,57 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
       <button class="tab" data-panel="appearance" aria-pressed="false">Texturer</button>
       <button class="tab" data-panel="collision" aria-pressed="false">Collisions</button>
       <button class="tab" data-panel="settings" aria-pressed="false">Comportements</button>
+      <button class="tab" data-panel="avatar" aria-pressed="false">Avatar</button>
       <button class="tab" data-panel="publish" aria-pressed="false">Publier / Placer</button></nav>
       <div class="side-body">
         <p id="part-empty">Sélectionne ou ajoute une pièce dans la scène.</p>
+          <div class="panel-body" id="avatar-panel">
+            <h3>Créer ou importer un corps</h3>
+            <div class="avatar-actions">
+              <button id="avatar-new" type="button">Créer un avatar exemple</button>
+              <button id="avatar-copy" type="button" disabled>Articuler une copie du modèle</button>
+            </div>
+            <div id="avatar-rig-controls" hidden>
+              <h3>Vue du squelette</h3>
+              <label>Affichage<select id="avatar-display">
+                <option value="overlay">Corps et squelette</option><option value="bones">Squelette seul</option><option value="model">Corps seul</option>
+              </select></label>
+              <h3>Relier les pièces</h3>
+              <label>Attache des pièces sélectionnées<select id="avatar-assignment"></select></label>
+              <label>Articulation à régler<select id="avatar-joint"></select></label>
+              <div class="avatar-actions">
+                <button id="avatar-attach" type="button">Attacher la sélection</button>
+              </div>
+              <p class="hint">Clique une pièce puis une articulation bleue. Clique sur Attacher la sélection pour les relier.</p>
+              <h3>Régler le pivot et la flexion</h3>
+              <div class="avatar-actions">
+                <button id="avatar-move" type="button" aria-pressed="false">Déplacer le pivot</button>
+                <button id="avatar-focus" type="button">Cadrer l’articulation</button>
+              </div>
+              <fieldset class="vectors"><legend>POSITION DU PIVOT</legend><div class="axes">
+                <label>X<input type="number" id="avatar-x" min="-3" max="3" step=".01"></label>
+                <label>Y<input type="number" id="avatar-y" min="-3" max="3" step=".01"></label>
+                <label>Z<input type="number" id="avatar-z" min="-3" max="3" step=".01"></label>
+              </div></fieldset>
+              <div class="axes">
+                <label>Axe<select id="avatar-axis"><option value="x">X</option><option value="y">Y</option><option value="z">Z</option></select></label>
+                <label>Flexion max (°)<input id="avatar-limit" type="number" min="0" max="150" step="1"></label>
+              </div>
+              <h3>Pose d’essai</h3>
+              <label>Aperçu de la flexion<input id="avatar-bend" type="range" min="-100" max="100" value="0"></label>
+              <button id="avatar-reset-pose" type="button">Revenir à la pose de repos</button>
+              <output id="avatar-cost" class="hint"></output>
+            </div>
+            <h3>Équiper et essayer</h3>
+            <label>Avatar équipé<select id="avatar"></select></label>
+            <a href="./index.html" id="avatar-play">Tester dans le jeu PC</a>
+            <p class="hint">Une tête et un torse sont nécessaires pour équiper un avatar complet. Les anciens modèles de tête restent disponibles.</p>
+          </div>
         <div id="model-details" hidden>
           <div id="part-inspector" hidden>
             <div class="panel-body" id="geometry-panel">
               <div id="part-fields">
+              <h3>Pièce et transformations</h3>
                 <label>Nom de la pièce<input id="part-name" maxlength="48" autocomplete="off"></label>
                 <label>Géométrie<select id="part-shape"></select></label>
                 <div id="custom-shape-controls" hidden style="margin:6px 0 10px">
@@ -315,11 +375,13 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
                   <p class="hint">Dessine les points d'un contour, extrude-le ou fais-le tourner sur 360°.</p>
                 </div>
               </div>
+              <h3>Actions sur la pièce</h3>
               <div class="inline-actions"><button id="duplicate-part">Dupliquer</button><button id="delete-part">Supprimer</button></div>
               <div class="inline-actions"><button id="reset-part" title="Remettre la pièce à l’origine">Réinitialiser</button>
                 <button id="center-part" title="Déplacer au centre de la scène">Centrer</button></div>
             </div>
             <div class="panel-body" id="appearance-panel">
+              <h3>Couleur</h3>
               <label>Teinte<input id="part-color" type="color"></label>
               <p class="hint">Palette rapide</p>
               <div class="quick-colors">
@@ -347,6 +409,7 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
                 <label>Décalage U <input id="part-u" type="number" min="-100" max="100" step=".1" value="0"></label>
                 <label>Décalage V <input id="part-v" type="number" min="-100" max="100" step=".1" value="0"></label>
               </div>
+              <h3>Texture personnalisée</h3>
               <div class="inline-actions"><button id="part-paint">🎨 Peindre la texture</button><button id="part-texture-clear">Retirer la texture</button></div>
               <p class="hint" id="part-texture-status">Applique une texture personnelle à cette pièce, indépendamment des autres pièces.</p>
               <p class="hint">La finition est conservée dans Gorilla Lab. L’export GLB préserve les formes et les couleurs.</p>
@@ -362,6 +425,7 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
             <label class="check"><input id="hitbox-preview-toggle" type="checkbox" checked> Afficher les volumes de collision</label>
             <label class="check"><input id="collidable" type="checkbox"> Activer les collisions dans le jeu</label>
             <div id="whole-hitbox-controls">
+              <h3>Volume global</h3>
             <p class="hint" id="hitbox-info">La hitbox définit la zone physique du modèle.</p>
             <div class="hitbox-type">
               <button id="hitbox-auto" aria-pressed="true">Auto convexe</button>
@@ -406,12 +470,12 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
             </div>
           </div>
           <div class="panel-body" id="settings-panel">
-            <h3>IDENTITÉ</h3>
+            <h3>Identité du modèle</h3>
             <label>Nom du modèle<input id="model-name" maxlength="48" autocomplete="off"></label>
             <label>Utilisation<select id="model-kind"><option value="structure">Décor fixe / terrain</option>
               <option value="prop">Objet manipulable</option></select></label>
             <label class="check"><input id="in-game" type="checkbox"> Disponible dans le menu Spawn</label>
-            <h3>PROPRIÉTÉS DE JEU</h3>
+            <h3>Propriétés de jeu</h3>
             <label class="check"><input id="grabbable" type="checkbox"> Saisissable</label>
             <label class="check"><input id="frozen" type="checkbox"> Figé à l’apparition</label>
             <p class="hint">La hitbox se règle dans l’onglet « Hitbox ».</p>
@@ -420,12 +484,9 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
               <label>Échelle de gravité<input id="model-gravity" type="number" min="0" max="2.5" step=".1"></label>
               <label>Rebond<input id="model-bounce" type="number" min="0" max="1.65" step=".05"></label>
             </div>
-            <h3>AVATAR</h3>
-            <label>Tête du joueur<select id="avatar"></select></label>
-            <p class="hint">L’avant du modèle regarde vers −Z.</p>
-            <button id="delete-model">Supprimer ce modèle</button>
           </div>
           <div class="panel-body" id="publish-panel">
+              <h3>Enregistrer et placer</h3>
             <div class="inline-actions"><button id="publish-save" type="button">Enregistrer le modèle</button></div>
             <a id="send-to-map" href="./editor.html">↗ Placer ce modèle sur une carte</a>
           </div>
@@ -441,6 +502,6 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
   <button data-action="mirror">⥊ Miroir X</button><button data-action="ground">⤓ Poser sur la grille</button>
   <button data-action="focus">⊡ Cadrer</button><button data-action="delete">✕ Supprimer</button>
 </div>
-<script defer src="./gorilla-model-editor-r38.js?v=R38.9"></script>
+<script defer src="./gorilla-model-editor-r38.js?v=R38.10"></script>
 </body>
 </html>
