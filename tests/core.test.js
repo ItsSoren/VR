@@ -959,11 +959,12 @@ test('map environment normalizes imported values and survives a map JSON round t
  const old=exampleMap();
  assert.equal(parseMap(old).environment,undefined);
  const map=parseMap({...old,environment:{
-  preset:2,sky:'image',skyImage:'data:image/webp;base64,UklGRg==',rotation:45,
+  preset:2,sky:'image',skyImage:'data:image/webp;base64,UklGRg==',rotation:45,skyTint:'#00ff00',
   fog:false,fogNear:100,fogFar:60,sunColor:'invalid',sunPower:0,
  }});
  assert.equal(map.environment.sky,'image');
  assert.equal(map.environment.rotation,45);
+ assert.equal(map.environment.skyTint,'#00ff00');
  assert.equal(map.environment.fog,false);
  assert.equal(map.environment.fogFar,101);
  assert.equal(map.environment.sunColor,'#879eff');

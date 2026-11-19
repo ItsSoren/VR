@@ -43,6 +43,27 @@ export function buildArena(scene,renderer) {
   let mood=0,environment=null,skyQuality=true,source=null,importedSky=null,hasBloom=true;
   let baseReflection=0,skyRequest=0;
   const direction=new T.Vector3();
+  let tinted=null,tintSource=null,tintColor=null;
+  function tintPanorama(panorama,color){
+    if(color==='#ffffff')return panorama;
+    if(panorama===tintSource&&color===tintColor)return tinted;
+    const image=panorama.image;
+    const canvas=document.createElement('canvas');
+    canvas.width=image.width;canvas.height=image.height;
+    const context=canvas.getContext('2d');
+    if(panorama.isDataTexture)context.putImageData(new ImageData(new Uint8ClampedArray(image.data),image.width,image.height),0,0);
+    else context.drawImage(image,0,0);
+    context.globalCompositeOperation='multiply';
+    context.fillStyle=color;
+    context.fillRect(0,0,canvas.width,canvas.height);
+    tinted?.dispose();
+    tinted=new T.CanvasTexture(canvas);
+    tinted.mapping=T.EquirectangularReflectionMapping;
+    tinted.colorSpace=T.SRGBColorSpace;
+    tinted.flipY=panorama.flipY;
+    tintSource=panorama;tintColor=color;
+    return tinted;
+  }
   function setTimeOfDay(index){
     mood=[0,1,2].includes(index)?index:0;
     const light=environment??environmentPreset(mood);
@@ -58,8 +79,8 @@ export function buildArena(scene,renderer) {
     halo.material.color.set(light.sunColor);
     halo.material.opacity=[1,.93,.22][light.preset]*Math.min(1,light.sunPower);
     halo.visible=hasBloom&&light.sunPower>0;
-    scene.background=light.sky==='color'||!skyQuality?backgroundColor.set(light.skyColor):
-      (light.sky==='image'&&importedSky?importedSky:panoramas[light.preset]);
+    const panorama=light.sky==='image'&&importedSky?importedSky:panoramas[light.preset];
+    scene.background=light.sky==='color'||!skyQuality?backgroundColor.set(light.skyColor):tintPanorama(panorama,light.skyTint);
     scene.backgroundRotation.y=T.MathUtils.degToRad(light.rotation);
     fog.color.set(light.fogColor);
     fog.near=light.fogNear;
@@ -350,7 +371,7 @@ export function buildArena(scene,renderer) {
     skyQuality=level>=2;
     setTimeOfDay(mood);
   }
-  return {boxes,floors,probe,display,visual,shadow,setTimeOfDay,setEnvironment,centerSky,centerShadows,lighting:[ambient,sun,sun.target,halo],get hillSeed(){return hillSeed;},setHillSeed,bakeLightmap,mapMaterial:(i,level)=>level>=4?tiles[i]:alt[i],builtObjects:[...boxes.map(b=>b.mesh).filter(m=>m?.isObject3D),probe,...props],materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
+  return {boxes,floors,probe,display,visual,shadow,setTimeOfDay,setEnvironment,centerSky,sunDirection:()=>direction.clone(),centerShadows,lighting:[ambient,sun,sun.target,halo],get hillSeed(){return hillSeed;},setHillSeed,bakeLightmap,mapMaterial:(i,level)=>level>=4?tiles[i]:alt[i],builtObjects:[...boxes.map(b=>b.mesh).filter(m=>m?.isObject3D),probe,...props],materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
 }
 
 

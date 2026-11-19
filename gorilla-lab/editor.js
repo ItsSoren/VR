@@ -376,7 +376,7 @@ controls.mouseButtons.LEFT = null;
 controls.mouseButtons.RIGHT = T.MOUSE.ROTATE;
 controls.mouseButtons.MIDDLE = T.MOUSE.PAN;
 controls.maxDistance = 580;
-controls.maxPolarAngle = Math.PI / 2 - .035;
+controls.maxPolarAngle = Math.PI - .035;
 
 const scene = new T.Scene();
 const neutralBackground=new T.Color('#8fb6c6');
@@ -1123,6 +1123,8 @@ function refreshEnvironment(){
   const values=config??environmentPreset(0);
   for(const field of environmentFields){
     const value=values[field.dataset.env];
+    if(field.dataset.env==='skyTint')field.disabled=values.sky==='color';
+    if(field.dataset.env==='skyColor')field.disabled=values.sky!=='color';
     if(field.type==='checkbox')field.checked=value;
     else field.value=value;
   }
@@ -1151,6 +1153,13 @@ for(const field of environmentFields)field.onchange=()=>{
   changeEnvironment({...current,[key]:value});
 };
 $('environment-reset').onclick=()=>changeEnvironment(null);
+$('environment-aim-sun').onclick=()=>{
+  const light=map.environment??environmentPreset(0);
+  if(!light.sunPower){environmentStatus.textContent='Augmente l’intensité du soleil pour le voir.';return;}
+  const direction=previewArena.sunDirection();
+  controls.target.copy(camera.position).addScaledVector(direction,8);
+  controls.update();queueRender();
+};
 $('environment-fog-preview').onchange=applyEnvironmentPreview;
 $('environment-image').onchange=event=>{
   const field=event.currentTarget,file=field.files[0],editingMap=map;
