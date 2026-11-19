@@ -1,3 +1,4 @@
+import {environmentPreset,environmentPresets,maxSkyImageBytes,normalizeEnvironment} from './map-environment.js';
 import * as T from 'three';
 import {buildArena} from './arena.js';
 import {addLabFixtures} from './fixtures.js';
@@ -378,7 +379,8 @@ controls.maxDistance = 580;
 controls.maxPolarAngle = Math.PI / 2 - .035;
 
 const scene = new T.Scene();
-scene.background = new T.Color('#8fb6c6');
+const neutralBackground=new T.Color('#8fb6c6');
+scene.background = neutralBackground;
 const ambient=new T.HemisphereLight('#f0f5ff', '#8e775c', 2.6);
 scene.add(ambient);
 const sun = new T.DirectionalLight('#fff1d2', 1.8);
@@ -434,10 +436,12 @@ const editableArenaBoxes=previewArena.boxes.filter(box=>box.half&&box.mesh?.isOb
 editableArenaBoxes.forEach(box=>box.mesh.removeFromParent());
 const arenaBackdrop=new T.Group();
 arenaBackdrop.add(...[...referenceScene.children]);
-scene.add(arenaBackdrop);
+scene.add(arenaBackdrop,...previewArena.lighting);
 const previewHill=previewArena.boxes.find(box=>box.heightfield).mesh;
 previewHill.userData.editorAssetId='lab-hill';
 previewArena.visual(7,0,7,true,true,true,512,false);
+const environmentFields=[...document.querySelectorAll("[data-env]")];
+const environmentStatus=$('environment-status');
 
 const grid = new T.GridHelper(60, 60, '#d7e2e5', '#5e7b8a');
 grid.material.transparent = true;
@@ -559,6 +563,7 @@ function queueRender() {
   renderRequested = true;
   requestAnimationFrame(() => {
     renderRequested = false;
+    previewArena.centerSky(camera.position);
     renderer.render(scene, camera);
     updateDebugStats();
   });
@@ -865,9 +870,7 @@ function rebuildScene() {
     const assetId=node.userData.editorAssetId;
     if(assetId)node.visible=shouldKeepArenaAsset(map,assetId,mappedAssets,mappedScenery);
   });
-  sun.visible=ambient.visible=!map.arenaBase;
-  scene.fog=map.arenaBase?referenceScene.fog:null;
-  scene.environment=map.arenaBase?referenceScene.environment:null;
+  refreshEnvironment();
   for (const piece of map.pieces) {
     if(piece.model) {
       const mesh=new T.Mesh(createModelUnitGeometry(piece.model,new T.Vector3(piece.w,piece.h,piece.d)),createModelMaterial(piece.model));
@@ -1102,10 +1105,83 @@ function updateInspector() {
   for(const name of ['terrain','props'])document.querySelector('.inspector-tab[data-tab="'+name+'"]').disabled=!terrain;
 }
 
+function applyEnvironmentPreview(){
+  const show=Boolean(map.arenaBase||map.environment);
+  sun.visible=ambient.visible=!show;
+  for(const light of previewArena.lighting)light.visible=show;
+  const halo=previewArena.lighting.at(-1);
+  halo.visible=show&&(map.environment?.sunPower??3)>0;
+  scene.background=show?referenceScene.background:neutralBackground;
+  scene.backgroundRotation.copy(referenceScene.backgroundRotation);
+  scene.fog=show&&$('environment-fog-preview').checked?referenceScene.fog:null;
+  scene.environment=show?referenceScene.environment:null;
+  scene.environmentIntensity=referenceScene.environmentIntensity;
+  queueRender();
+}
+function refreshEnvironment(){
+  const config=map.environment??null;
+  const values=config??environmentPreset(0);
+  for(const field of environmentFields){
+    const value=values[field.dataset.env];
+    if(field.type==='checkbox')field.checked=value;
+    else field.value=value;
+  }
+  environmentStatus.textContent=config?(config.skyImage?'Panorama intégré au JSON de la carte.':'Ambiance enregistrée dans la carte.'):'La carte utilise les réglages d’ambiance du jeu.';
+  previewArena.setEnvironment(config,applyEnvironmentPreview);
+  applyEnvironmentPreview();
+}
+function changeEnvironment(values){
+  const environment=normalizeEnvironment(values);
+  remember();
+  if(environment)map.environment=environment;
+  else delete map.environment;
+  refreshEnvironment();
+  pendingSave();
+}
+const presetsField=environmentFields.find(field=>field.dataset.env==='preset');
+presetsField.replaceChildren(...environmentPresets.map((name,index)=>new Option(name,index)));
+for(const field of environmentFields)field.onchange=()=>{
+  const key=field.dataset.env;
+  if(key==='preset'){changeEnvironment(environmentPreset(Number(field.value)));return;}
+  const current=map.environment??environmentPreset(0);
+  if(key==='sky'&&field.value==='image'&&!current.skyImage){
+    field.value=current.sky;environmentStatus.textContent='Importe d’abord une image panoramique 360°.';return;
+  }
+  const value=field.type==='checkbox'?field.checked:field.type==='number'?field.valueAsNumber:field.value;
+  changeEnvironment({...current,[key]:value});
+};
+$('environment-reset').onclick=()=>changeEnvironment(null);
+$('environment-fog-preview').onchange=applyEnvironmentPreview;
+$('environment-image').onchange=event=>{
+  const field=event.currentTarget,file=field.files[0],editingMap=map;
+  field.value='';
+  if(!file)return;
+  if(file.size>Math.floor((maxSkyImageBytes-32)*.75)){
+    environmentStatus.textContent='Image trop lourde. Choisis un panorama WebP, JPG ou PNG de moins de 900 ko.';return;
+  }
+  const reader=new FileReader();
+  reader.onload=()=>{
+    if(map!==editingMap)return;
+    const image=new Image();
+    image.onload=()=>{
+      if(map!==editingMap)return;
+      if(image.width!==image.height*2){
+        environmentStatus.textContent='Choisis une image 360° au format 2:1, par exemple 2048 × 1024.';return;
+      }
+      changeEnvironment({...map.environment??environmentPreset(0),sky:'image',skyImage:reader.result});
+    };
+    image.onerror=()=>{if(map===editingMap)environmentStatus.textContent='L’image ne peut pas être lue.';};
+    image.src=reader.result;
+  };
+  reader.readAsDataURL(file);
+};
+
 // Réconcilie le modèle, la 3D, le plan, le formulaire et le brouillon.
 function sync() {
   $('map-name').value = map.name;
   $('map-world-size').value=map.worldSize??240;
+  camera.far=Math.max(640,map.worldSize*2);camera.updateProjectionMatrix();
+  controls.maxDistance=Math.max(580,map.worldSize*1.6);
   for (const key of ['x', 'y', 'z', 'yaw']) $('spawn-' + key).value = map.spawn[key];
   rebuildScene();
   updateInspector();

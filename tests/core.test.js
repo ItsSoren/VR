@@ -865,7 +865,7 @@ test('map decor has independent solid volumes and non-blocking enter and exit tr
  const original=globalThis.document;
  globalThis.document={querySelector:()=>({})};
  try{
-  const arena={boxes:[],bakeLightmap(){}};
+  const arena={boxes:[],bakeLightmap(){},setEnvironment(value){this.environment=value;}};
   const maps=connectMaps({scene:new T.Scene(),arena,boot:new T.Vector3(),onReset(){},onVisual(){},getLevel:()=>0,defaultObjects:[]});
   const model={id:'custom-model-zones-check',name:'Porte',kind:'structure',partCollisions:true,parts:[
    {name:'Montant',shape:'box',zone:'solid',position:[-1,0,0],scale:[1,1,1]},
@@ -875,13 +875,17 @@ test('map decor has independent solid volumes and non-blocking enter and exit tr
   const map=exampleMap();
   Object.assign(map.pieces[0],{x:0,y:.5,z:0,w:3,h:1,d:1,solid:true,model});
   map.pieces=map.pieces.slice(0,1);
+  map.environment={preset:1,fogNear:45};
   maps.load(JSON.stringify(map));
+  assert.equal(arena.environment.preset,1);
+  assert.equal(arena.environment.fogNear,45);
   assert.equal(arena.boxes.length,1);
   assert.equal(arena.boxes[0].position.x,-1);
   assert.deepEqual(maps.checkTriggers(new T.Vector3(0,1.6,0)).map(({phase,part})=>[phase,part]),[['enter','Capteur']]);
   assert.deepEqual(maps.checkTriggers(new T.Vector3(0,1.6,0)),[]);
   assert.deepEqual(maps.checkTriggers(new T.Vector3(2,1.6,0)).map(({phase})=>phase),['exit']);
   maps.reset();
+  assert.equal(arena.environment,null);
   assert.deepEqual(maps.checkTriggers(new T.Vector3(0,1.6,0)),[]);
  }finally{globalThis.document=original;}
 });
@@ -949,4 +953,23 @@ test('terrain prop filters honor area, slope, altitude, and orientation across J
  const inclined=terrainVegetation(slope);
  assert.deepEqual(inclined.userData.distribution.map(rule=>rule.count),[0,4]);
  disposeVegetation(first);disposeVegetation(second);disposeVegetation(inclined);
+});
+
+test('map environment normalizes imported values and survives a map JSON round trip',()=>{
+ const old=exampleMap();
+ assert.equal(parseMap(old).environment,undefined);
+ const map=parseMap({...old,environment:{
+  preset:2,sky:'image',skyImage:'data:image/webp;base64,UklGRg==',rotation:45,
+  fog:false,fogNear:100,fogFar:60,sunColor:'invalid',sunPower:0,
+ }});
+ assert.equal(map.environment.sky,'image');
+ assert.equal(map.environment.rotation,45);
+ assert.equal(map.environment.fog,false);
+ assert.equal(map.environment.fogFar,101);
+ assert.equal(map.environment.sunColor,'#879eff');
+ assert.equal(map.environment.sunPower,0);
+ assert.deepEqual(parseMap(JSON.stringify(map)).environment,map.environment);
+ const invalid=parseMap({...old,environment:{sky:'image',skyImage:'https://example.test/sky.jpg'}});
+ assert.equal(invalid.environment.sky,'preset');
+ assert.equal(invalid.environment.skyImage,null);
 });

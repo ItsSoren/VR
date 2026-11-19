@@ -61,7 +61,6 @@ let lastShadowRender=-Infinity;
 renderer.toneMapping=T.ACESFilmicToneMapping;
 renderer.toneMappingExposure=1.15;
 const scene=new T.Scene();
-scene.fog=new T.Fog('#a6d4ea',55,135);
 const rig=new T.Group(), eye=new T.Group();
 const camera=new T.PerspectiveCamera(70,1,.035,210);
 rig.add(eye);eye.add(camera);scene.add(rig);
@@ -1738,6 +1737,9 @@ renderer.setAnimationLoop((time,frame)=>{
       }):[]};
   }
   updatePropLights(remoteWorld);
+  const far=renderer.xr.isPresenting?210:Math.max(210,maps.worldSize*1.5,maps.fogDistance+10);
+  if(camera.far!==far){camera.far=far;camera.updateProjectionMatrix();}
+  arena.centerSky(lightView);
   arena.centerShadows(lightView);
   const interval=25+(10-shadowLevel())*(inVR?7:4);
   if(renderer.shadowMap.enabled&&time-lastShadowRender>=interval){

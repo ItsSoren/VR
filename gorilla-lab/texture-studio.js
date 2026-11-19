@@ -3,7 +3,7 @@
 const SIZE=512;
 const patterns=[
   ['solid','Uni'],['grain','Grain fin'],['rock','Pierre'],['soil','Terre'],
-  ['grass','Fibres végétales'],['wood','Bois'],['tiles','Carreaux'],['brick','Briques'],
+  ['sand','Sable'],['grass','Herbe'],['wood','Bois'],['tiles','Carreaux'],['brick','Briques'],
   ['grid','Grille'],['woven','Tissu'],['stripes','Rayures'],['dots','Points'],
 ];
 const makeCanvas=()=>{
@@ -29,20 +29,55 @@ function seededRandom(seed){
   let state=seed>>>0;
   return ()=>((state=(Math.imul(state,1664525)+1013904223)>>>0)/2**32);
 }
+const textureShelfKey='gorilla-lab-texture-shelf-v1';
+function readTextureShelf(){
+  try{
+    const shelf=JSON.parse(localStorage.getItem(textureShelfKey)??'[]');
+    return Array.isArray(shelf)?shelf:[];
+  }catch{return [];}
+}
 export function paintPattern(target,{pattern='grain',base='#667985',scale=1,seed=23}={}){
   const c=target.getContext('2d'),sz=SIZE;
   c.clearRect(0,0,sz,sz);c.fillStyle=validColor(base);c.fillRect(0,0,sz,sz);
   const random=seededRandom(seed);
-  const step=limit(64/scale,12,192);
+  const step=sz/Math.max(4,2*Math.round(4*scale));
   const color=alpha=>{c.fillStyle=alpha>0?'#f6f4dc':'#18232b';c.globalAlpha=Math.abs(alpha);};
-  if(['grain','soil','rock','grass','wood'].includes(pattern)){
-    const density=pattern==='wood'?1400:pattern==='grass'?3700:pattern==='rock'?1900:4300;
+  if(['grain','soil','rock','sand','grass','wood'].includes(pattern)){
+    const brushScale=1/Math.sqrt(scale);
+    const density={grain:4200,soil:1000,rock:200,sand:9800,grass:2900,wood:2450}[pattern];
     for(let i=0;i<density;i++){
-      const x=random()*sz,y=random()*sz;
-      const w=pattern==='wood'?random()*45+5:pattern==='grass'?random()*2+1:pattern==='rock'?random()*20+2:random()*7+1;
-      const h=pattern==='grass'?random()*29+7:pattern==='wood'?random()*2+1:pattern==='rock'?random()*9+1:random()*5+1;
-      color((random()>.47?1:-1)*(pattern==='soil'?.07+random()*.22:.05+random()*.19));
-      clipDraw(c,ctx=>ctx.fillRect(x,y,w,h));
+      const x=random()*sz,y=random()*sz,a=random(),b=random(),n=random();
+      clipDraw(c,ctx=>{
+        if(pattern==='rock'){
+          const radius=(4+a*22)*brushScale;
+          color(n>.45?.09+a*.4:-.08-a*.27);
+          ctx.beginPath();
+          for(let point=0;point<6;point++){
+            const angle=point*Math.PI/3+b,dist=radius*(.63+.3*Math.cos(angle*2+b)+.25);
+            ctx.lineTo(x+Math.cos(angle)*dist,y+Math.sin(angle)*dist*.72);
+          }
+          ctx.closePath();ctx.fill();
+          ctx.globalAlpha=.3;ctx.strokeStyle='#232633';ctx.lineWidth=1.4;ctx.stroke();
+        }else if(pattern==='soil'){
+          const radius=(1+a*a*12)*brushScale;
+          const crumb=ctx.createRadialGradient(x,y,0,x,y,radius);
+          crumb.addColorStop(0,n>.58?'#b9906d9c':'#392219af');
+          crumb.addColorStop(1,'#39221900');ctx.globalAlpha=.6;
+          ctx.fillStyle=crumb;ctx.fillRect(x-radius,y-radius,radius*2,radius*2);
+        }else if(pattern==='grass'||pattern==='wood'){
+          const grass=pattern==='grass',length=(grass?5+a*25:7+a*110)*brushScale;
+          ctx.strokeStyle=grass?(n>.51?'#c4d981':'#233514'):(n>.5?'#e9b583':'#34180c');
+          ctx.globalAlpha=.08+b*.28;ctx.lineWidth=(.75+a*1.7)*brushScale;
+          ctx.beginPath();ctx.moveTo(x,y);
+          if(grass)ctx.quadraticCurveTo(x+length*(b-.5)*.55,y-length*.58,x+length*(b-.6),y-length);
+          else ctx.quadraticCurveTo(x+length*.5,y+10*(b-.5),x+length,y+4*(n-.5));
+          ctx.stroke();
+        }else{
+          color((n>.44?1:-1)*(.07+a*.29));
+          const size=(pattern==='sand'?.6+a*1.6:1+a*5)*brushScale;
+          ctx.fillRect(x,y,size,size*(.7+b*.6));
+        }
+      });
     }
   }
   if(['tiles','brick','grid','woven','stripes','dots'].includes(pattern)){
@@ -169,7 +204,11 @@ export function openTextureStudio({initial=null,tint='#687a86',name='Texture',pa
             <label>Couleur de fond<input type="color" data-field="base" value="#687a86"></label>
             <label>Répétition<input type="range" min=".5" max="5" value="1" step=".25" data-field="scale"></label>
           </div>
-          <button data-cmd="generate">Régénérer le motif</button>
+          <div class="texture-setting-row">
+            <label>Graine<input type="number" min="0" max="2147483647" step="1" data-field="seed" value="23"></label>
+            <label>Résolution à l’application<select data-field="resolution"><option value="128">128 × 128</option><option value="256">256 × 256</option><option value="512" selected>512 × 512</option></select></label>
+          </div>
+          <button data-cmd="generate">Générer l’aperçu</button>
         </div>
         <div class="texture-section">
           <strong>PEINDRE LE MOTIF</strong>
@@ -192,6 +231,15 @@ export function openTextureStudio({initial=null,tint='#687a86',name='Texture',pa
           <small style="color:#a3b3bc">Les traits qui dépassent un bord continuent sur le bord opposé.</small>
         </div>
         <div class="texture-section">
+          <strong>BIBLIOTHÈQUE DE TEXTURES</strong>
+          <label>Textures enregistrées<select data-field="shelf"></select></label>
+          <div class="texture-setting-row">
+            <button data-cmd="shelf-load">Charger</button>
+            <button data-cmd="shelf-save">Enregistrer l’aperçu</button>
+            <button data-cmd="shelf-remove">Retirer</button>
+          </div>
+        </div>
+        <div class="texture-section">
           <strong>IMPORTER UNE IMAGE</strong>
           <button data-cmd="import">Choisir PNG / JPG / WebP</button>
           <input data-field="file" type="file" accept="image/png,image/jpeg,image/webp" hidden>
@@ -207,17 +255,19 @@ export function openTextureStudio({initial=null,tint='#687a86',name='Texture',pa
   const find=selector=>backdrop.querySelector(selector);
   const display=find('.texture-canvas'),tile=find('.texture-tile');
   const base=makeCanvas(),overlay=makeCanvas();
-  const settings={pattern:patterns.some(([id])=>id===pattern)?pattern:'grain',base:validColor(tint),scale:1,ink:'#e1ad78',size:22,opacity:.85,hardness:.7};
+  const settings={pattern:patterns.some(([id])=>id===pattern)?pattern:'grain',base:validColor(tint),scale:1,seed:23,resolution:512,ink:'#e1ad78',size:22,opacity:.85,hardness:.7};
   const ctx=display.getContext('2d',{willReadFrequently:true}),background=base.getContext('2d',{willReadFrequently:true}),top=overlay.getContext('2d',{willReadFrequently:true});
   const undo=[],redo=[];
-  let changed=false,painting=false,dragPointer=null,tool='paint',last=null;
+  let changed=false,painting=false,dragPointer=null,tool='paint',last=null,savedTexture=null;
   find('#studio-title').textContent=name+' / SURFACE LAB';
   find('[data-field=pattern]').replaceChildren(...patterns.map(([key,value])=>new Option(value,key)));
   find('[data-field=base]').value=settings.base;
   find('[data-field=pattern]').value=settings.pattern;
-  for(const field of ['pattern','base','scale','ink','size','opacity','hardness']){
+  for(const field of ['pattern','base','scale','seed','resolution','ink','size','opacity','hardness']){
     find('[data-field='+field+']').addEventListener('input',event=>{
-      settings[field]=['scale','size','opacity','hardness'].includes(field)?Number(event.target.value):event.target.value;
+      const value=event.target.value;
+      settings[field]=field==='seed'?Math.trunc(limit(Number(value)||0,0,2147483647)):
+        ['scale','resolution','size','opacity','hardness'].includes(field)?Number(value):value;
     });
   }
   const setStatus=message=>{find('[data-status]').textContent=message;};
@@ -235,6 +285,7 @@ export function openTextureStudio({initial=null,tint='#687a86',name='Texture',pa
     top.putImageData(state.top,0,0);composite();
   };
   const remember=()=>{
+    savedTexture=null;
     undo.push(capture());if(undo.length>16)undo.shift();
     redo.length=0;changed=true;
     find('[data-cmd=undo]').disabled=false;
@@ -242,6 +293,7 @@ export function openTextureStudio({initial=null,tint='#687a86',name='Texture',pa
   };
   const history=(back,forward)=>{
     if(!back.length)return;
+    savedTexture=null;
     forward.push(capture());restore(back.pop());
     find('[data-cmd=undo]').disabled=!undo.length;
     find('[data-cmd=redo]').disabled=!redo.length;
@@ -363,7 +415,8 @@ export function openTextureStudio({initial=null,tint='#687a86',name='Texture',pa
   find('[data-cmd=close]').onclick=()=>close(false);
   find('[data-cmd=cancel]').onclick=()=>close(false);
   const saveData=()=>{
-    for(const side of [SIZE,384,256,192]){
+    if(savedTexture?.recipe.resolution===settings.resolution&&savedTexture.data.length<=maxDataBytes)return savedTexture.data;
+    for(const side of [settings.resolution,256,128].filter((size,i,list)=>size<=settings.resolution&&list.indexOf(size)===i)){
       const out=document.createElement('canvas');out.width=out.height=side;
       out.getContext('2d').drawImage(display,0,0,side,side);
       for(const quality of [.85,.72,.58]){
@@ -373,6 +426,52 @@ export function openTextureStudio({initial=null,tint='#687a86',name='Texture',pa
     }
     throw Error('Texture trop complexe. Réduis les détails ou utilise une image plus simple.');
   };
+  const shelf=readTextureShelf(),shelfField=find('[data-field=shelf]');
+  function refreshShelf(selected=''){
+    shelfField.replaceChildren(new Option('Choisir une texture',''),...shelf.map(item=>new Option(item.name,item.id)));
+    shelfField.value=selected;
+    const selectedItem=Boolean(shelfField.value);
+    find('[data-cmd=shelf-load]').disabled=!selectedItem;
+    find('[data-cmd=shelf-remove]').disabled=!selectedItem;
+  }
+  function writeShelf(next,selected){
+    try{localStorage.setItem(textureShelfKey,JSON.stringify(next));}
+    catch{setStatus('La bibliothèque est pleine. Retire une texture ou réduis la résolution.');return false;}
+    shelf.splice(0,shelf.length,...next);
+    refreshShelf(selected);
+    return true;
+  }
+  shelfField.onchange=()=>refreshShelf(shelfField.value);
+  find('[data-cmd=shelf-save]').onclick=()=>{
+    const label=patterns.find(([id])=>id===settings.pattern)?.[1]??'Texture';
+    const name=prompt('Nom de la texture',label)?.trim().slice(0,50);
+    if(!name)return;
+    try{
+      const entry={id:crypto.randomUUID(),name,data:saveData()};
+      const {pattern,base,scale,seed,resolution}=settings;
+      entry.recipe={pattern,base,scale,seed,resolution};
+      if(writeShelf([...shelf,entry],entry.id))setStatus('Texture disponible dans les deux ateliers.');
+    }catch(error){setStatus(error.message);}
+  };
+  find('[data-cmd=shelf-load]').onclick=async()=>{
+    const entry=shelf.find(item=>item.id===shelfField.value);
+    if(!entry||changed&&!confirm('Remplacer l’aperçu et les retouches actuelles ?'))return;
+    try{
+      const canvas=makeCanvas();
+      await loadImage(entry.data,canvas);
+      remember();
+      background.clearRect(0,0,SIZE,SIZE);background.drawImage(canvas,0,0);
+      top.clearRect(0,0,SIZE,SIZE);
+      Object.assign(settings,entry.recipe);
+      savedTexture=entry;
+      for(const key of ['pattern','base','scale','seed','resolution'])find('[data-field='+key+']').value=settings[key];
+      composite();setStatus('Texture chargée. Applique-la à l’objet sélectionné.');
+    }catch(error){setStatus(error.message);}
+  };
+  find('[data-cmd=shelf-remove]').onclick=()=>{
+    if(writeShelf(shelf.filter(item=>item.id!==shelfField.value),''))setStatus('Texture retirée de la bibliothèque.');
+  };
+  refreshShelf();
   find('[data-cmd=apply]').onclick=async()=>{
     const button=find('[data-cmd=apply]');
     button.disabled=true;

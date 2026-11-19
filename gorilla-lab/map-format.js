@@ -1,4 +1,5 @@
 import {Euler,Vector3} from 'three';
+import {normalizeEnvironment} from './map-environment.js';
 import {labSpawn} from './lab-layout.js';
 import {normalizeModelPack} from './model-pack.js';
 import {isRetiredArenaAsset,isRetiredArenaModel} from './model-assets.js';
@@ -22,13 +23,14 @@ export function parseMap(input){
   if(input?.format!=='gorilla-lab-map'||input.version!==1||!Array.isArray(input.pieces)||input.pieces.length<1||input.pieces.length>maxPieces) {
     throw Error('Choisis une map Gorilla Lab v1 avec 1 à '+maxPieces+' pièces.');
   }
-  const s=input.spawn??{};
+  const s=input.spawn??{},environment=normalizeEnvironment(input.environment);
   const pieces=input.pieces.filter(piece=>
     !isRetiredArenaAsset(piece?.sceneryId)&&!isRetiredArenaModel(piece?.model));
   if(!pieces.length)throw Error('Cette carte ne contient plus de pièces après retrait des anciens éléments de l’arène.');
   return {
     format:'gorilla-lab-map',version:1,...(input.arenaBase===true?{arenaBase:true}:{}),...(input.assetLayer===true?{assetLayer:true}:{}),...(input.editableArena===true?{editableArena:true}:{}),name:text(input.name,56,'Ma map'),
     worldSize:number(input.worldSize,24,2048,240),
+    ...(environment?{environment}:{}),
     spawn:{x:number(s.x,-maxWorldReach,maxWorldReach,0),y:number(s.y,-256,256,.06),z:number(s.z,-maxWorldReach,maxWorldReach,3),yaw:number(s.yaw,-360,360,0)},
     pieces:pieces.map((p,i)=>{
       if(!p||typeof p!=='object')throw Error('Pièce invalide : '+(i+1));

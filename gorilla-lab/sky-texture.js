@@ -58,4 +58,16 @@ function buildSky(night){
   return texture;
 }
 // Les panoramas sont calculés une fois, puis échantillonnés comme des textures ordinaires.
-export function createLabSky(){return {day:buildSky(false),night:buildSky(true)};}
+export function createLabSky(){
+  const day=buildSky(false),night=buildSky(true);
+  const pixels=day.image.data.slice();
+  for(let i=0;i<pixels.length;i+=4){pixels[i]*=.89;pixels[i+1]*=.61;pixels[i+2]*=.53;}
+  const sunset=new T.DataTexture(pixels,day.image.width,day.image.height,T.RGBAFormat);
+  sunset.colorSpace=T.SRGBColorSpace;
+  for(const sky of [day,sunset,night]){
+    sky.mapping=T.EquirectangularReflectionMapping;
+    sky.magFilter=T.LinearFilter;sky.minFilter=T.LinearFilter;sky.needsUpdate=true;
+  }
+  return {day,sunset,night};
+}
+

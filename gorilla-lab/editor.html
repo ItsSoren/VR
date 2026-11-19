@@ -550,6 +550,33 @@
         </details>
         </div>
       </section>
+      <details id="environment-controls">
+        <summary>Environnement de la carte</summary>
+        <div class="fields" id="environment-fields" style="margin-top:8px">
+          <label>Ambiance<select data-env="preset"></select></label>
+          <button type="button" id="environment-reset">Réglages du jeu</button>
+          <h3 class="wide">Ciel</h3>
+          <label>Source<select data-env="sky"><option value="preset">Panorama de l'ambiance</option><option value="color">Couleur unie</option><option value="image">Image 360° importée</option></select></label>
+          <label>Orientation (°)<input data-env="rotation" type="number" min="-360" max="360"></label>
+          <label>Couleur unie<input data-env="skyColor" type="color"></label>
+          <label class="file">Importer un ciel 360°<input id="environment-image" type="file" accept="image/png,image/jpeg,image/webp"></label>
+          <output class="wide" id="environment-status" aria-live="polite"></output>
+          <h3 class="wide">Brouillard</h3>
+          <label class="compact"><input data-env="fog" type="checkbox"> En jeu</label>
+          <label class="compact"><input id="environment-fog-preview" type="checkbox"> Aperçu dans l'atelier</label>
+          <label>Couleur<input data-env="fogColor" type="color"></label>
+          <label>Début (m)<input data-env="fogNear" type="number" min="0" max="4095"></label>
+          <label>Fin (m)<input data-env="fogFar" type="number" min="1" max="4096"></label>
+          <h3 class="wide">Soleil et lumière ambiante</h3>
+          <label>Direction du soleil (°)<input data-env="azimuth" type="number" min="-360" max="360" step="1"></label>
+          <label>Hauteur du soleil (°)<input data-env="elevation" type="number" min="-89" max="89" step="1"></label>
+          <label>Couleur du soleil<input data-env="sunColor" type="color"></label>
+          <label>Intensité du soleil<input data-env="sunPower" type="number" min="0" max="12" step=".05"></label>
+          <label>Lumière du ciel<input data-env="ambientColor" type="color"></label>
+          <label>Lumière du sol<input data-env="groundColor" type="color"></label>
+          <label>Intensité ambiante<input data-env="ambientPower" type="number" min="0" max="12" step=".05"></label>
+        </div>
+      </details>
       <details id="debug-controls">
         <summary>Diagnostic de la scène</summary>
         <div class="fields" style="margin-top:8px">

@@ -2,6 +2,7 @@
 import * as T from 'three';
 import {boxCollider} from './physics.js';
 import {tiledBox} from './texture-geometry.js';
+import {environmentPreset} from './map-environment.js';
 import {createLabSky} from './sky-texture.js';
 import {labBounds,labFloors,labMaterialSample,labProbe,labStructures,labZones,labHillSeed} from './lab-layout.js';
 
@@ -13,16 +14,15 @@ function canvasTexture(w,h,paint) {
 }
 // L’arène garde ensemble les maillages, les volumes de collision et les ressources de rendu.
 export function buildArena(scene,renderer) {
-  const {day:sky,night:nightSky}=createLabSky();
-  const dome=new T.Mesh(new T.SphereGeometry(180,40,20),new T.MeshBasicMaterial({map:sky,side:T.BackSide,fog:false,toneMapped:false}));
-  scene.add(dome);
+  const {day:sky,sunset,night:nightSky}=createLabSky();
+  const panoramas=[sky,sunset,nightSky],backgroundColor=new T.Color(),fog=new T.Fog('#a6d4ea',55,135);
   const haloTexture=canvasTexture(128,128,(ctx,w)=>{
     const g=ctx.createRadialGradient(w/2,w/2,0,w/2,w/2,w/2);
     g.addColorStop(0,'#fff8df');g.addColorStop(.12,'#fff3bd');g.addColorStop(.18,'rgba(255,225,144,.40)');g.addColorStop(1,'rgba(255,220,144,0)');
     ctx.fillStyle=g;ctx.fillRect(0,0,w,w);
   });
   const halo=new T.Sprite(new T.SpriteMaterial({map:haloTexture,blending:T.AdditiveBlending,depthWrite:false,fog:false,toneMapped:false}));
-  halo.position.set(-50,38,-64);halo.scale.setScalar(34);scene.add(halo);
+  halo.scale.setScalar(34);scene.add(halo);
   const skyEnvironment=sky.clone();
   skyEnvironment.mapping=T.EquirectangularReflectionMapping;
   skyEnvironment.needsUpdate=true;
@@ -40,26 +40,50 @@ export function buildArena(scene,renderer) {
   scene.add(ambient,sun,sun.target);
   const lightOffset=new T.Vector3();
 
-  const moods=[
-    {sky:'#ffffff',fog:'#a6d4ea',fill:'#daeaff',ground:'#88724c',hemi:2.25,sun:'#fff0d0',power:3,xyz:[-14,25,-16],glow:1},
-    {sky:'#e39b85',fog:'#ec986e',fill:'#d8b6dc',ground:'#b37762',hemi:1.15,sun:'#ff9c51',power:3.25,xyz:[-25,7,-18],glow:.93},
-    {sky:'#ffffff',fog:'#0b1020',fill:'#708edc',ground:'#292e44',hemi:.21,sun:'#879eff',power:.27,xyz:[22,20,-18],glow:.19},
-  ];
-  let mood=0;
+  let mood=0,environment=null,skyQuality=true,source=null,importedSky=null,hasBloom=true;
+  let baseReflection=0,skyRequest=0;
+  const direction=new T.Vector3();
   function setTimeOfDay(index){
-    mood=moods[index]?index:0;
-    const light=moods[mood];
-    ambient.color.set(light.fill);ambient.groundColor.set(light.ground);ambient.intensity=light.hemi;
-    sun.color.set(light.sun);sun.intensity=light.power;
-    lightOffset.set(...light.xyz);
+    mood=[0,1,2].includes(index)?index:0;
+    const light=environment??environmentPreset(mood);
+    const azimuth=T.MathUtils.degToRad(light.azimuth),elevation=T.MathUtils.degToRad(light.elevation);
+    direction.set(Math.cos(azimuth)*Math.cos(elevation),Math.sin(elevation),Math.sin(azimuth)*Math.cos(elevation));
+    lightOffset.copy(direction).multiplyScalar(33);
+    ambient.color.set(light.ambientColor);
+    ambient.groundColor.set(light.groundColor);
+    ambient.intensity=light.ambientPower;
+    sun.color.set(light.sunColor);
+    sun.intensity=light.sunPower;
     sun.position.copy(sun.target.position).add(lightOffset);
-    halo.position.copy(lightOffset).normalize().multiplyScalar(94);
-    halo.material.color.set(light.sun);halo.material.opacity=light.glow;
-    dome.material.map=mood===2?nightSky:sky;
-    dome.material.color.set(light.sky);
-    scene.fog.color.set(light.fog);
-    scene.background.set(light.fog);
-    scene.environmentIntensity=baseReflection*[1,.56,.09][mood];
+    halo.material.color.set(light.sunColor);
+    halo.material.opacity=[1,.93,.22][light.preset]*Math.min(1,light.sunPower);
+    halo.visible=hasBloom&&light.sunPower>0;
+    scene.background=light.sky==='color'||!skyQuality?backgroundColor.set(light.skyColor):
+      (light.sky==='image'&&importedSky?importedSky:panoramas[light.preset]);
+    scene.backgroundRotation.y=T.MathUtils.degToRad(light.rotation);
+    fog.color.set(light.fogColor);
+    fog.near=light.fogNear;
+    fog.far=light.fogFar;
+    scene.fog=light.fog?fog:null;
+    scene.environmentIntensity=baseReflection*[1,.56,.09][light.preset];
+  }
+  function setEnvironment(value,onReady=()=>{}){
+    environment=value;
+    const image=value?.sky==='image'?value.skyImage:null;
+    if(source!==image){
+      source=image;
+      const request=++skyRequest;
+      importedSky?.dispose();importedSky=null;
+      if(image)new T.TextureLoader().load(image,texture=>{
+        if(skyRequest!==request){texture.dispose();return;}
+        texture.colorSpace=T.SRGBColorSpace;texture.mapping=T.EquirectangularReflectionMapping;
+        importedSky=texture;setTimeOfDay(mood);onReady();
+      },undefined,()=>onReady());
+    }
+    setTimeOfDay(mood);
+  }
+  function centerSky(point){
+    halo.position.copy(point).addScaledVector(direction,94);
   }
   // Centre la zone d’ombres près du joueur par pas de quatre mètres pour stabiliser la projection.
   function centerShadows(point){
@@ -69,8 +93,7 @@ export function buildArena(scene,renderer) {
     if(target.x===x&&target.y===y&&target.z===z)return;
     target.set(x,y,z);sun.position.copy(target).add(lightOffset);
   }
-  let baseReflection=0;
-  scene.background=new T.Color(moods[0].fog);
+  setTimeOfDay(0);
   const palette=[
     ['Ardoise','#555e6a','#b8c8d2',.77,0,1],
     ['Nacre','#537586','#f5e9de',.22,.34,1],
@@ -293,7 +316,7 @@ export function buildArena(scene,renderer) {
     Object.assign(sun.shadow.camera,{left:-shadowExtent,right:shadowExtent,top:shadowExtent,bottom:-shadowExtent});
     sun.shadow.camera.updateProjectionMatrix();
     if(sun.shadow.mapSize.x!==shadowSize){sun.shadow.map?.dispose();sun.shadow.map=null;sun.shadow.mapSize.set(shadowSize,shadowSize);}
-    halo.visible=bloom;
+    hasBloom=bloom;
     if(size!==textureSize){
       textureSize=size;
       tiles.forEach((m,i)=>{
@@ -324,10 +347,10 @@ export function buildArena(scene,renderer) {
     baseReflection=reflections?(.21+lighting*.067):0;
     chrome.metalness=reflections?.95:.1;
     chrome.roughness=reflections?.13:.46;
-    dome.visible=level>=2;
+    skyQuality=level>=2;
     setTimeOfDay(mood);
   }
-  return {boxes,floors,probe,display,visual,shadow,setTimeOfDay,centerShadows,get hillSeed(){return hillSeed;},setHillSeed,bakeLightmap,mapMaterial:(i,level)=>level>=4?tiles[i]:alt[i],builtObjects:[...boxes.map(b=>b.mesh).filter(m=>m?.isObject3D),probe,...props],materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
+  return {boxes,floors,probe,display,visual,shadow,setTimeOfDay,setEnvironment,centerSky,centerShadows,lighting:[ambient,sun,sun.target,halo],get hillSeed(){return hillSeed;},setHillSeed,bakeLightmap,mapMaterial:(i,level)=>level>=4?tiles[i]:alt[i],builtObjects:[...boxes.map(b=>b.mesh).filter(m=>m?.isObject3D),probe,...props],materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
 }
 
 
