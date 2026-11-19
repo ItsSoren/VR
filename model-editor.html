@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#191d23">
-<title>GORILLA / FOUNDRY · Atelier de modèles R38.5</title>
+<title>GORILLA / FOUNDRY · Atelier de modèles R38.6</title>
 <style>
 :root{color-scheme:dark;--ink:#e4e8eb;--soft:#a4adb5;--muted:#798790;--line:#39424a;
 --panel:#232a30;--panel-2:#1d252c;--bg:#151b20;--accent:#edac67;--blue:#77c7cc;
@@ -331,16 +331,37 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
                 <button data-color="#4d6655" style="--color:#4d6655" title="Forêt"></button>
                 <button data-color="#202733" style="--color:#202733" title="Carbone"></button>
               </div>
-              <label>Finition / texture<select id="part-surface"></select></label>
+              <h3>Motif et finition</h3>
+              <label>Motif<select id="part-surface"></select></label>
+              <label>Finition<select id="part-finish"></select></label>
+              <output id="part-finish-info" class="hint"></output>
+              <h3>Projection</h3>
+              <label>Coordonnées de texture<select id="part-projection">
+                <option value="native">UV de la forme</option><option value="metric">Projection par face en mètres</option>
+              </select></label>
+              <div class="axes">
+                <label>Répétition <input id="part-repeat" type="number" min=".01" max="100" step=".1" value="1"></label>
+                <label>Angle (°) <input id="part-angle" type="number" min="-360" max="360" step="5" value="0"></label>
+              </div>
+              <div class="axes">
+                <label>Décalage U <input id="part-u" type="number" min="-100" max="100" step=".1" value="0"></label>
+                <label>Décalage V <input id="part-v" type="number" min="-100" max="100" step=".1" value="0"></label>
+              </div>
               <div class="inline-actions"><button id="part-paint">🎨 Peindre la texture</button><button id="part-texture-clear">Retirer la texture</button></div>
               <p class="hint" id="part-texture-status">Applique une texture personnelle à cette pièce, indépendamment des autres pièces.</p>
               <p class="hint">La finition est conservée dans Gorilla Lab. L’export GLB préserve les formes et les couleurs.</p>
             </div>
           </div>
           <div class="panel-body" id="collision-panel">
-            <h3>COLLISION / MODÈLE ENTIER</h3>
-            <label class="check"><input id="hitbox-preview-toggle" type="checkbox" checked> Afficher le volume de collision en orange</label>
+            <h3>Volumes de collision</h3>
+            <label class="check"><input id="part-collisions" type="checkbox"> Une zone par pièce du décor</label>
+            <div id="part-zone-controls" hidden>
+              <label>Zone de la pièce sélectionnée <select id="part-zone"></select></label>
+              <p class="hint">Orange pour les zones solides, cyan pour les déclencheurs. Une pièce traversable est libre de collision.</p>
+            </div>
+            <label class="check"><input id="hitbox-preview-toggle" type="checkbox" checked> Afficher les volumes de collision</label>
             <label class="check"><input id="collidable" type="checkbox"> Activer les collisions dans le jeu</label>
+            <div id="whole-hitbox-controls">
             <p class="hint" id="hitbox-info">La hitbox définit la zone physique du modèle.</p>
             <div class="hitbox-type">
               <button id="hitbox-auto" aria-pressed="true">Auto convexe</button>
@@ -358,7 +379,7 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
               <input id="hitbox-precision" type="range" min="8" max="96" step="4" value="48">
               <output id="hitbox-precision-value">48</output>
             </label>
-            <p class="hint">Le réglage ajuste la tessellation des sphères et capsules, ou le nombre de points utilisés pour l'enveloppe convexe. Il est plafonné pour préserver les performances en VR.</p>
+            <p class="hint">Le réglage ajuste la tessellation des sphères et capsules, ou le nombre de points utilisés pour l'enveloppe convexe. Il est plafonné pour limiter le coût de la collision.</p>
             <div id="hitbox-geometry" hidden>
               <div class="inline-actions">
                 <button id="hitbox-drag">✣ Déplacer</button>
@@ -382,6 +403,7 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
               <div class="inline-actions"><button id="hitbox-fit">↻ Ajuster au modèle</button></div>
             </div>
             <p class="hint">La hitbox est enregistrée dans le modèle et réutilisée par les collisions du jeu, les objets saisissables et les cartes.</p>
+            </div>
           </div>
           <div class="panel-body" id="settings-panel">
             <h3>IDENTITÉ</h3>
@@ -394,6 +416,10 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
             <label class="check"><input id="frozen" type="checkbox"> Figé à l’apparition</label>
             <p class="hint">La hitbox se règle dans l’onglet « Hitbox ».</p>
             <label class="check"><input id="supportWhileHeld" type="checkbox"> Appui pendant la prise</label>
+            <div class="axes">
+              <label>Échelle de gravité<input id="model-gravity" type="number" min="0" max="2.5" step=".1"></label>
+              <label>Rebond<input id="model-bounce" type="number" min="0" max="1.65" step=".05"></label>
+            </div>
             <h3>AVATAR</h3>
             <label>Tête du joueur<select id="avatar"></select></label>
             <p class="hint">L’avant du modèle regarde vers −Z.</p>
@@ -415,6 +441,6 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
   <button data-action="mirror">⥊ Miroir X</button><button data-action="ground">⤓ Poser sur la grille</button>
   <button data-action="focus">⊡ Cadrer</button><button data-action="delete">✕ Supprimer</button>
 </div>
-<script defer src="./gorilla-model-editor-r38.js?v=R38.5"></script>
+<script defer src="./gorilla-model-editor-r38.js?v=R38.6"></script>
 </body>
 </html>
