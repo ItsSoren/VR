@@ -289,17 +289,18 @@ function buildWorkspaceShell(){
   content.id='property-content';
   const objectSection=$('piece-inspector').closest('.inspector-section');
   objectSection.id='object-section';
-  const surfaceControls=$('surface').closest('details');
+  const surfaceControls=objectSection.querySelector('#surface').closest('details');
   surfaceControls.id='surface-controls';
-  content.append(objectSection);
   const collision=make('section');collision.id='collision-options';
   collision.append(make('h3','','Collisions de la pièce'));
-  collision.append($('p-solid').closest('label'),$('debug-controls'));
+  collision.append(objectSection.querySelector('#p-solid').closest('label'),$('debug-controls'));
   const behavior=make('section');behavior.id='behavior-options';
   const fieldset=make('div','fields');
-  for(const id of ['surface','p-grip','p-gravity','p-bounce'])fieldset.append($(id).closest('label'));
+  for(const id of ['surface','p-grip','p-gravity','p-bounce']){
+    fieldset.append(surfaceControls.querySelector('#'+id).closest('label'));
+  }
   behavior.append(make('h3','','Propriétés physiques'));
-  behavior.append(fieldset,$('model-object-controls'));
+  behavior.append(fieldset,objectSection.querySelector('#model-object-controls'));
   const publish=make('section');publish.id='publish-options';
   const buttons=make('div','piece-actions');
   for(const [id,label] of [['test-map','Jouer cette map'],['export-map','Exporter JSON']]){
@@ -309,7 +310,7 @@ function buildWorkspaceShell(){
     buttons.append(button);
   }
   publish.append(buttons);
-  content.append(collision,behavior,publish);
+  content.append(objectSection,collision,behavior,publish);
   const sceneOptions=make('section','scene-options');
   sceneOptions.id='scene-options';
   sceneOptions.append(make('h2','','Paramètres de carte'));

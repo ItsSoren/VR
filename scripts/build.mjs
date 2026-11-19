@@ -18,6 +18,10 @@ for(const [page,entry] of pages){
   const file=html.match(/<script[^>]*\bsrc="\.\/((?:game-lab|gorilla-editor|gorilla-model-editor)-r\d+\.js)"/)?.[1];
   if(!file)throw new Error('Bundle versionné introuvable dans '+page);
   await build({entryPoints:[join(src,entry)],outfile:join(out,file),bundle:true,format:'iife',target:'es2022',define:{__LAB_RELEASE__:JSON.stringify(release)},minify:true,legalComments:'inline',logLevel:'info'});
-  await writeFile(join(out,page),html.replaceAll('{{LAB_RELEASE}}',release));
+  // Match each published HTML page to the bundle from the same release in browser caches.
+  const versionedHtml=html.replaceAll('{{LAB_RELEASE}}',release)
+    .replace('src="./'+file+'"','src="./'+file+'?v='+release+'"');
+  await writeFile(join(out,page),versionedHtml);
 }
 await copyFile(join(src,'floor-plan.html'),join(out,'floor-plan.html'));
+
