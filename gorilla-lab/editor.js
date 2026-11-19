@@ -66,7 +66,7 @@ $('model-library').addEventListener('change',()=>{
 const shapes = {
   block: makePiece(),
   ramp: makePiece({ name: 'Rampe', w: 3, h: .30, d: 4, pitch: 16, material: 5 }),
-  terrain: makePiece({name:'Terrain',w:18,h:.12,d:18,y:0,material:3,terrain:normalizeTerrain({amplitude:.7,grass:.34})}),
+  terrain: makePiece({name:'Terrain',w:18,h:.12,d:18,y:0,material:3,terrain:normalizeTerrain({amplitude:.7,grassDensity:1.7})}),
   wall: makePiece({ name: 'Mur', w: .45, h: 2.5, d: 3.5, material: 2 }),
 };
 const toolHelp = {
@@ -1017,7 +1017,17 @@ function updateInspector() {
       if(id&&![...select.options].some(option=>option.value===id))select.add(new Option(terrain[name+'Model'].name+' (carte)',id));
       select.value=id;
     }
-    $('terrain-cell-size').textContent=(piece.w/terrain.detail).toFixed(2)+' × '+(piece.d/terrain.detail).toFixed(2)+' m';
+    const area=piece.w*piece.d,triangles=2*terrain.detail**2;
+    const format=new Intl.NumberFormat('fr-FR',{maximumFractionDigits:2});
+    $('terrain-cell-size').textContent=format.format(piece.w/terrain.detail)+' × '+format.format(piece.d/terrain.detail)+
+      ' m par case · '+format.format(triangles)+' triangles · '+format.format(triangles/area)+' triangles/m²';
+    $('terrain-texture-effective').textContent=format.format(terrain.textureDensity/(piece.uvScale??1)**2)+' motifs/m²';
+    const plants=group.children[selected]?.userData.vegetation?.children??[];
+    $('terrain-vegetation-count').textContent=['grass','shrub'].map((kind,i)=>{
+      const requested=Math.round(area*terrain[kind+'Density']);
+      const count=plants.find(plant=>plant.name===kind)?.count??0;
+      return (i===0?'Herbe ':'Autres modèles ')+format.format(count)+' / '+format.format(requested);
+    }).join(' · ');
     $('p-pitch').disabled=$('p-yaw').disabled=$('p-roll').disabled=true;
   }
   $('rotate').disabled=!piece||Boolean(terrain);
@@ -1033,9 +1043,9 @@ function updateInspector() {
 function sync() {
   $('map-name').value = map.name;
   $('map-world-size').value=map.worldSize??240;
-  updateInspector();
   for (const key of ['x', 'y', 'z', 'yaw']) $('spawn-' + key).value = map.spawn[key];
   rebuildScene();
+  updateInspector();
   paintPlan();
   queueRender();
   pendingSave();
@@ -1741,7 +1751,7 @@ $('test-map').onclick = () => {
   }
 };
 
-const terrainFields=['detail','seed','amplitude','frequency','octaves','roughness','ridge','edgeFade','grass','shrub','grassSize','shrubSize'];
+const terrainFields=['detail','seed','amplitude','frequency','octaves','roughness','ridge','edgeFade','grassDensity','shrubDensity','textureDensity','grassSize','shrubSize'];
 for(const name of ['grass','shrub']){
   $('terrain-'+name+'Model').addEventListener('change',event=>{
     const piece=current();if(!piece?.terrain)return;
@@ -1799,6 +1809,7 @@ function applyBrush(canvas,event){
   if(!sculptTerrain(piece,hit.point.x,hit.point.z,brush))return;
   const mesh=group.children[index];
   mesh.geometry.dispose();mesh.geometry=terrainGeometry(piece);
+  transformUVs(mesh.geometry,piece);
   selectionBox?.update();paintPlan();queueRender();
 }
 $('texture-style').replaceChildren(...texturePresets.map((label,index)=>new Option(label,index)));

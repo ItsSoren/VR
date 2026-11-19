@@ -626,3 +626,44 @@ test('model hitbox values are clamped and invalid modes use automatic collision'
   assert.deepEqual(clean.hitbox.size,[.025,.025,12]);
   assert.deepEqual(normalizeModelPack({version:1,models:[{...model,hitbox:{mode:'bad'}}]}).models[0].hitbox,{mode:'auto'});
 });
+
+test('terrain accepts intermediate mesh sizes, keeps sculpting and handles 32-bit indices',()=>{
+ const piece={x:0,y:0,z:0,w:14,d:22,terrain:normalizeTerrain({detail:16})};
+ assert.equal(sculptTerrain(piece,0,0,{mode:'raise',radius:2,strength:3}),true);
+ assert.equal(terrainHeight(piece,0,0),3);
+ for(const detail of [50,100,256]){
+  piece.terrain=resizeTerrain(piece.terrain,detail);
+  assert.equal(normalizeTerrain(piece.terrain).detail,detail);
+  assert.equal(terrainHeight(piece,0,0),3);
+  const geometry=terrainGeometry(piece);
+  assert.equal(geometry.index.count/3,2*detail**2);
+  if(detail===256)assert.equal(geometry.index.array.at(-3),66048);
+  geometry.dispose();
+ }
+});
+
+test('terrain vegetation and texture keep their density when area changes',()=>{
+ const piece={x:0,y:0,z:0,w:5,d:5,terrain:normalizeTerrain({
+  detail:16,grassDensity:2,shrubDensity:.2,textureDensity:4,
+ })};
+ for(const w of [5,10]){
+  piece.w=w;
+  const plants=terrainVegetation(piece);
+  assert.deepEqual(plants.children.map(plant=>plant.count),[w*10,w]);
+  disposeVegetation(plants);
+  const geometry=terrainGeometry(piece);
+  assert.equal(geometry.attributes.uv.getX(16),2*w);
+  geometry.dispose();
+ }
+});
+
+test('legacy vegetation percentages convert using the saved terrain area',()=>{
+ const map=exampleMap();
+ Object.assign(map.pieces[0],{w:50,d:50,terrain:{detail:16,grass:.5,shrub:.25}});
+ const piece=parseMap(map).pieces[0];
+ assert.equal(piece.terrain.grassDensity,1600/2500);
+ assert.equal(piece.terrain.shrubDensity,12/2500);
+ const roundTrip=parseMap(parseMap(map)).pieces[0].terrain;
+ assert.equal(roundTrip.grassDensity,piece.terrain.grassDensity);
+ assert.equal(roundTrip.shrubDensity,piece.terrain.shrubDensity);
+});

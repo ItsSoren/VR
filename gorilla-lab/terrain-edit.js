@@ -1,7 +1,10 @@
 import * as T from 'three';
 import {normalizeModelPack,createModelUnitGeometry,createModelMaterial,disposeModelMaterial} from './model-pack.js';
 
-export const terrainDetails = Object.freeze([8, 16, 32, 48, 64, 96, 128]);
+export const maxTerrainDetail=256;
+export const defaultTerrainTextureDensity=1/2.6**2;
+const maxVegetationDensity=100;
+const maxTextureDensity=256;
 const defaultDetail = 16;
 const maxSculptHeight = 24;
 const grids = new WeakMap();
@@ -19,8 +22,20 @@ function validVegetationModel(raw) {
   return normalized.models[0]?.parts.length ? normalized.models[0] : null;
 }
 const texturePattern=/^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=\r\n]+$/i;
-export function normalizeTerrain(value = {}) {
-  const detail = terrainDetails.includes(value?.detail) ? value.detail : defaultDetail;
+function terrainDetail(value,fallback=defaultDetail){
+  return Math.round(bounded(value,1,maxTerrainDetail,fallback));
+}
+
+function readVegetationDensity(value,name,area,legacyRate,legacyMax){
+  if(Number.isFinite(value[name+'Density']))return bounded(value[name+'Density'],0,maxVegetationDensity,0);
+  const legacy=bounded(value[name],0,1,0);
+  if(!legacy)return 0;
+  const count=Math.max(1,Math.round(Math.min(legacyMax,area*legacyRate)*legacy));
+  return bounded(count/area,0,maxVegetationDensity,0);
+}
+
+export function normalizeTerrain(value = {},area=1) {
+  const detail=terrainDetail(value?.detail);
   const heights = value?.heights;
   return {
     detail,
@@ -31,8 +46,9 @@ export function normalizeTerrain(value = {}) {
     roughness:bounded(value?.roughness,.15,.95,.42),
     ridge:bounded(value?.ridge,0,1,0),
     edgeFade:bounded(value?.edgeFade,0,1,0),
-    grass: bounded(value?.grass, 0, 1, 0),
-    shrub: bounded(value?.shrub, 0, 1, 0),
+    grassDensity:readVegetationDensity(value??{},'grass',area,5,3200),
+    shrubDensity:readVegetationDensity(value??{},'shrub',area,.17,48),
+    textureDensity:bounded(value?.textureDensity,.0001,maxTextureDensity,defaultTerrainTextureDensity),
     grassSize:bounded(value?.grassSize,.1,5,1),shrubSize:bounded(value?.shrubSize,.1,5,1),
     grassModel:validVegetationModel(value?.grassModel),shrubModel:validVegetationModel(value?.shrubModel),
     grassTexture:typeof value?.grassTexture==='string'&&value.grassTexture.length<500000&&texturePattern.test(value.grassTexture)?value.grassTexture:null,
@@ -53,7 +69,7 @@ function sampleGrid(heights, detail, x, z) {
 }
 
 export function resizeTerrain(terrain, requestedDetail) {
-  const detail = terrainDetails.includes(requestedDetail) ? requestedDetail : defaultDetail;
+  const detail=terrainDetail(requestedDetail,terrain.detail);
   if (detail === terrain.detail) return terrain;
   if (!terrain.heights) return { ...terrain, detail, heights: null };
   const stride = detail + 1;
@@ -211,15 +227,17 @@ export function terrainGeometry(piece) {
   const stride = detail + 1;
   const positions = new Float32Array(stride ** 2 * 3);
   const uvs = new Float32Array(stride ** 2 * 2);
-  const index = new Uint16Array(detail ** 2 * 6);
+  const IndexArray=stride**2>65536?Uint32Array:Uint16Array;
+  const index=new IndexArray(detail**2*6);
+  const repetitionsPerMetre=Math.sqrt(terrain.textureDensity??defaultTerrainTextureDensity);
   let indexOffset = 0;
   for (let row = 0; row <= detail; row++) {
     for (let col = 0; col <= detail; col++) {
       const vertex = row * stride + col;
       positions[3 * vertex] = (col / detail - .5) * w;
       positions[3 * vertex + 2] = (row / detail - .5) * d;
-      uvs[2 * vertex] = col / detail * w / 2.6;
-      uvs[2 * vertex + 1] = (1 - row / detail) * d / 2.6;
+      uvs[2 * vertex] = col/detail*w*repetitionsPerMetre;
+      uvs[2 * vertex + 1] = (1-row/detail)*d*repetitionsPerMetre;
       if (row < detail && col < detail) {
         index.set([vertex, vertex + stride, vertex + 1,
           vertex + stride + 1, vertex + 1, vertex + stride], indexOffset);
@@ -290,17 +308,16 @@ function shrubGeometry() {
 }
 
 const vegetationKinds = [
-  { name: 'grass', geometry: grassGeometry, perMetre: 5, max: 3200, salt: 21, color: '#527a34' },
-  { name: 'shrub', geometry: shrubGeometry, perMetre: .17, max: 48, salt: 47, color: '#36583c' },
+  { name: 'grass', geometry: grassGeometry, max: 3200, salt: 21, color: '#527a34' },
+  { name: 'shrub', geometry: shrubGeometry, max: 1024, salt: 47, color: '#36583c' },
 ];
 
 export function terrainVegetation(piece) {
   const group = new T.Group();
-  for (const { name, geometry, perMetre, max, salt, color } of vegetationKinds) {
-    const density = piece.terrain[name];
-    if (!density) continue;
-    // Cap the area first so the density slider still spans its full range on large plots.
-    const count = Math.max(1, Math.round(Math.min(max,piece.w*piece.d*perMetre)*density));
+  for (const { name, geometry, max, salt, color } of vegetationKinds) {
+    const density=piece.terrain[name+'Density']??0;
+    const requested=Math.round(piece.w*piece.d*density);
+    if(!requested)continue;
     const imported=piece.terrain[name+'Model'];
     const size=piece.terrain[name+'Size']??1;
     let plantGeometry, material;
@@ -322,7 +339,11 @@ export function terrainVegetation(piece) {
         material.userData.ownTexture=true;
       }
     }
+    const triangles=(plantGeometry.index?.count??plantGeometry.attributes.position.count)/3;
+    const triangleLimit=Math.max(1,Math.floor(120000/Math.max(1,triangles)));
+    const count=Math.min(requested,max,triangleLimit);
     const plants = new T.InstancedMesh(plantGeometry, material, count);
+    plants.userData.requestedCount=requested;
     plants.name = name;
     plants.instanceMatrix.setUsage(T.DynamicDrawUsage);
     plants.userData.salt = salt;
@@ -369,4 +390,5 @@ export function disposeVegetation(group) {
   group.clear();
   group.removeFromParent();
 }
+
 

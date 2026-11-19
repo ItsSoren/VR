@@ -443,8 +443,8 @@
         <details id="terrain-controls" hidden>
           <summary>Relief et végétation</summary>
           <div class="fields">
-            <label>Maillage<select id="terrain-detail"><option value="8">8 × 8</option><option value="16">16 × 16</option><option value="32">32 × 32</option><option value="48">48 × 48</option><option value="64">64 × 64</option><option value="96">96 × 96</option><option value="128">128 × 128</option></select></label>
-            <label>Dimensions d'un polygone <output id="terrain-cell-size" style="color:var(--text)">—</output></label>
+            <label>Cases de maillage par axe<input id="terrain-detail" type="number" min="1" max="256" step="1"></label>
+            <label>Dimensions et densité du maillage <output id="terrain-cell-size" style="color:var(--text)">—</output></label>
             <label>Graine<input id="terrain-seed" type="number" min="0" max="2147483647"></label>
             <label>Hauteur du bruit (m)<input id="terrain-amplitude" type="number" min="0" max="12" step=".1"></label>
             <label>Fréquence du bruit<input id="terrain-frequency" type="number" min=".015" max="2" step=".015"></label>
@@ -452,12 +452,15 @@
             <label>Rugosité<input id="terrain-roughness" type="range" min=".15" max=".95" step=".05"></label>
             <label>Crêtes / montagnes<input id="terrain-ridge" type="range" min="0" max="1" step=".05"></label>
             <label>Adoucir les bords<input id="terrain-edgeFade" type="range" min="0" max="1" step=".05"></label>
-            <label>Densité d’herbe<input id="terrain-grass" type="range" min="0" max="1" step=".05"></label>
-            <label>Buissons<input id="terrain-shrub" type="range" min="0" max="1" step=".05"></label>
+            <label>Herbe (touffes/m²)<input id="terrain-grassDensity" type="number" min="0" max="100" step="any"></label>
+            <label>Autres modèles (instances/m²)<input id="terrain-shrubDensity" type="number" min="0" max="100" step="any"></label>
+            <label class="wide">Instances affichées / demandées <output id="terrain-vegetation-count">–</output></label>
+            <label>Texture de terrain (motifs/m²)<input id="terrain-textureDensity" type="number" min=".0001" max="256" step="any"></label>
+            <label>Densité après échelle UV <output id="terrain-texture-effective">–</output></label>
             <label>Modèle d'herbe<select id="terrain-grassModel"></select></label>
             <label>Taille de l’herbe<input id="terrain-grassSize" type="number" min=".1" max="5" step=".1"></label>
-            <label>Modèle de buisson<select id="terrain-shrubModel"></select></label>
-            <label>Taille des buissons<input id="terrain-shrubSize" type="number" min=".1" max="5" step=".1"></label>
+            <label>Modèle à répartir<select id="terrain-shrubModel"></select></label>
+            <label>Taille du modèle réparti<input id="terrain-shrubSize" type="number" min=".1" max="5" step=".1"></label>
             <label class="file wide">Texture de l’herbe<input id="terrain-grassTexture-file" type="file" accept="image/png,image/jpeg,image/webp"></label>
             <button class="wide" id="terrain-grassTexture-clear">Retirer la texture d’herbe</button>
             <button class="wide" id="terrain-grassTexture-paint">🎨 Peindre la texture de végétation</button>
