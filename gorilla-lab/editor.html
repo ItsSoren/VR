@@ -226,6 +226,9 @@
     border-radius:3px;font-size:12px;color:#f2e7dd;
   }
   #terrain-texture-density-fields[hidden],#terrain-grass-texture[hidden]{display:none}
+  .mesh-stats{display:block;color:#b6c5d6;font-size:11px;line-height:1.4}
+  .mesh-stats[hidden],#terrain-relief-fields[hidden]{display:none}
+  .terrain-filter-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
   .terrain-rules{display:grid;width:100%;border-collapse:collapse}
   .terrain-rules tbody{display:grid;gap:9px}
   .terrain-rules tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:7px;
@@ -432,6 +435,7 @@
       </section>
       <section class="inspector-section" aria-labelledby="selection-title">
         <h2 id="selection-title">Pièce sélectionnée</h2>
+        <output id="selection-mesh-stats" class="mesh-stats" hidden></output>
         <p id="selection-help">Clique une pièce dans la vue 3D ou le plan. Tu peux aussi la choisir dans la liste.</p>
         <div id="piece-inspector" hidden>
         <div class="piece-actions">
@@ -475,11 +479,19 @@
           <div class="fields">
             <label>Graine<input id="terrain-seed" type="number" min="0" max="2147483647"></label>
             <label>Hauteur du bruit (m)<input id="terrain-amplitude" type="number" min="0" max="12" step=".1"></label>
-            <label>Fréquence du bruit<input id="terrain-frequency" type="number" min=".015" max="2" step=".015"></label>
-            <label>Couches de bruit<select id="terrain-octaves"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></label>
-            <label>Rugosité<input id="terrain-roughness" type="range" min=".15" max=".95" step=".05"></label>
-            <label>Crêtes / montagnes<input id="terrain-ridge" type="range" min="0" max="1" step=".05"></label>
-            <label>Adoucir les bords<input id="terrain-edgeFade" type="range" min="0" max="1" step=".05"></label>
+            <label>Fréquence de base (cycles/m)<input id="terrain-frequency" type="number" min=".015" max="2" step=".015"></label>
+            <label>Couches de bruit<input id="terrain-octaves" type="number" min="1" max="10" step="1" title="Chaque couche double la fréquence"></label>
+            <label>Rugosité (0,15–0,95)<input id="terrain-roughness" type="number" min=".15" max=".95" step=".01" title="Poids des couches fines"></label>
+            <label>Crêtes (0–1)<input id="terrain-ridge" type="number" min="0" max="1" step=".01" title="Transforme les bosses en crêtes"></label>
+            <label>Adoucissement des bords (0–1)<input id="terrain-edgeFade" type="number" min="0" max="1" step=".01"></label>
+            <label class="wide check"><input id="terrain-relief-local" type="checkbox"> Limiter le relief à une zone</label>
+            <div class="wide fields" id="terrain-relief-fields" hidden>
+              <label>Centre local X (m)<input id="terrain-relief-x" type="number" min="-256" max="256" step=".1"></label>
+              <label>Centre local Z (m)<input id="terrain-relief-z" type="number" min="-256" max="256" step=".1"></label>
+              <label>Rayon (m)<input id="terrain-relief-radius" type="number" min=".1" max="512" step=".1"></label>
+              <label>Transition (0–1)<input id="terrain-relief-blend" type="number" min="0" max="1" step=".05"></label>
+            </div>
+            <output id="terrain-generation-stats" class="wide mesh-stats"></output>
           </div>
           <h3>Sculpture</h3>
           <div class="fields">
@@ -497,6 +509,7 @@
         </details>
         <section id="terrain-props" hidden>
           <h3>Distribution des props</h3>
+          <p class="mesh-stats">Densité par m² horizontal. Avec altitude ou pente, la surface admissible est estimée.</p>
           <table class="terrain-rules" aria-label="Règles de distribution"><tbody id="terrain-rules"></tbody></table>
           <button class="add-terrain-rule" id="terrain-add-rule" type="button"><span aria-hidden="true">+</span> Ajouter une ligne</button>
           <details id="terrain-grass-texture" hidden>
@@ -544,6 +557,9 @@
           <label class="compact"><input id="debug-wire" type="checkbox"> Triangles / fil de fer</label>
           <label class="compact"><input id="debug-hitboxes" type="checkbox"> Volumes de collision</label>
           <label class="compact"><input id="debug-coords" type="checkbox" checked> Coordonnées</label>
+          <output class="wide mesh-stats" id="scene-mesh-stats"></output>
+          <output class="wide mesh-stats" id="scene-heavy-mesh"></output>
+          <button class="wide" type="button" id="scene-select-heavy">Sélectionner la pièce la plus détaillée</button>
           <output class="wide" id="debug-stats" style="font-size:12px;color:var(--muted)">Statistiques —</output>
         </div>
       </details>

@@ -41,6 +41,19 @@ const distributionKinds=['grass','shrub','model'];
 const fitModes=['keep','fit','stretch'];
 const colorPattern=/^#[a-f\d]{6}$/i;
 
+export const maxTerrainOctaves=10;
+function normalizeTerrainScatter(raw={}){
+  const ordered=(a,b)=>a<=b?[a,b]:[b,a];
+  const [minHeight,maxHeight]=ordered(bounded(raw.minHeight,-300,300,-300),bounded(raw.maxHeight,-300,300,300));
+  const [minX,maxX]=ordered(bounded(raw.minX,0,100,0),bounded(raw.maxX,0,100,100));
+  const [minZ,maxZ]=ordered(bounded(raw.minZ,0,100,0),bounded(raw.maxZ,0,100,100));
+  return {minHeight,maxHeight,minX,maxX,minZ,maxZ,maxSlope:bounded(raw.maxSlope,0,90,90),
+    yaw:bounded(raw.yaw,-360,360,0),yawVariation:bounded(raw.yawVariation,0,360,360)};
+}
+function normalizeReliefArea(raw){
+  return raw?{x:bounded(raw.x,-256,256,0),z:bounded(raw.z,-256,256,0),
+    radius:bounded(raw.radius,.1,512,5),blend:bounded(raw.blend,0,1,.5)}:null;
+}
 export function normalizeTerrainRule(rule={}){
   const model=validVegetationModel(rule.model);
   const kind=model?'model':rule.kind==='shrub'?'shrub':'grass';
@@ -56,6 +69,7 @@ export function normalizeTerrainRule(rule={}){
     fit:fitModes.includes(rule.fit)?rule.fit:'keep',
     collidable:rule.collidable===true,
     variation:bounded(rule.variation,0,maxTerrainSizeVariation,0),
+    ...(rule.scatter?{scatter:normalizeTerrainScatter(rule.scatter)}:{}),
   };
 }
 
@@ -81,10 +95,11 @@ export function normalizeTerrain(value = {},area=1) {
     seed: Math.round(bounded(value?.seed, 0, 2147483647, 1)),
     amplitude: bounded(value?.amplitude, 0, 12, 0),
     frequency: bounded(value?.frequency, .015, 2, .12),
-    octaves:Math.round(bounded(value?.octaves,1,5,3)),
+    octaves:Math.round(bounded(value?.octaves,1,maxTerrainOctaves,3)),
     roughness:bounded(value?.roughness,.15,.95,.42),
     ridge:bounded(value?.ridge,0,1,0),
     edgeFade:bounded(value?.edgeFade,0,1,0),
+    ...(value?.reliefArea?{reliefArea:normalizeReliefArea(value.reliefArea)}:{}),
     rules:readTerrainRules(value??{},area),
     textureDensity:bounded(value?.textureDensity,.0001,maxTextureDensity,defaultTerrainTextureDensity),
     grassTexture:typeof value?.grassTexture==='string'&&value.grassTexture.length<500000&&texturePattern.test(value.grassTexture)?value.grassTexture:null,
@@ -131,11 +146,11 @@ function noise(x, z, seed) {
 
 function gridFor(piece) {
   const { w, d, terrain } = piece;
-  const { detail, seed, amplitude, frequency, octaves, roughness, ridge, edgeFade, heights } = terrain;
+  const { detail, seed, amplitude, frequency, octaves, roughness, ridge, edgeFade, reliefArea, heights } = terrain;
   const cached = grids.get(piece);
   const sameNoise = cached && cached.w === w && cached.d === d && cached.detail === detail &&
     cached.seed === seed && cached.amplitude === amplitude && cached.frequency === frequency &&
-    cached.octaves === octaves && cached.roughness === roughness && cached.ridge === ridge && cached.edgeFade === edgeFade;
+    cached.octaves === octaves && cached.roughness === roughness && cached.ridge === ridge && cached.edgeFade === edgeFade && cached.reliefArea === reliefArea;
   if (sameNoise && cached.heights === heights) return cached;
 
   const stride = detail + 1;
@@ -143,8 +158,14 @@ function gridFor(piece) {
   if (!sameNoise && amplitude) {
     for (let row = 0; row <= detail; row++) {
       for (let col = 0; col <= detail; col++) {
-        const x = (col / detail - .5) * w * frequency;
-        const z = (row / detail - .5) * d * frequency;
+        const localX=(col/detail-.5)*w,localZ=(row/detail-.5)*d;
+        let mask=1;
+        if(reliefArea){
+          const distance=Math.hypot(localX-reliefArea.x,localZ-reliefArea.z);
+          if(distance>=reliefArea.radius)continue;
+          if(reliefArea.blend)mask=smooth(Math.min(1,(reliefArea.radius-distance)/(reliefArea.radius*reliefArea.blend)));
+        }
+        const x=localX*frequency,z=localZ*frequency;
         let height=0,weight=1,total=0;
         for(let octave=0;octave<octaves;octave++){
           const n=noise(x*2**octave,z*2**octave,seed+octave*13);
@@ -155,15 +176,15 @@ function gridFor(piece) {
           (.5-Math.abs(row/detail-.5))*2)),edgeFade*2):1;
         // Preserve previously saved terrain shapes when users have not enabled new noise controls.
         const classic=octaves===3&&roughness===.42&&ridge===0&&edgeFade===0;
-        procedural[row*stride+col]=classic
+        procedural[row*stride+col]=mask*(classic
           ? amplitude*(.62*noise(x,z,seed)+.26*noise(x*2.03,z*2.03,seed+13)
               +.12*noise(x*4.13,z*4.13,seed+37))
-          : amplitude*height/total*fade;
+          : amplitude*height/total*fade);
       }
     }
   }
   const surface = heights ? procedural.map((height, i) => height + heights[i]) : procedural;
-  const grid = { w, d, detail, seed, amplitude, frequency, octaves, roughness, ridge, edgeFade, heights, procedural, surface };
+  const grid = { w, d, detail, seed, amplitude, frequency, octaves, roughness, ridge, edgeFade, reliefArea, heights, procedural, surface };
   grids.set(piece, grid);
   return grid;
 }
@@ -369,9 +390,8 @@ export function updateTerrainGeometry(geometry, piece) {
 }
 
 // Matches the diagonal and vertices written by terrainGeometry(), including at steep crests.
-function terrainNormal(piece, x, z, out) {
-  const {detail,w,d,surface}=gridFor(piece);
-  const [localX,localZ]=terrainLocalXZ(piece,x,z);
+function terrainLocalNormal(grid,localX,localZ,out){
+  const {detail,w,d,surface}=grid;
   const u=clamp((localX/w+.5)*detail,0,detail);
   const v=clamp((localZ/d+.5)*detail,0,detail);
   const col=Math.min(detail-1,Math.floor(u)),row=Math.min(detail-1,Math.floor(v));
@@ -379,8 +399,14 @@ function terrainNormal(piece, x, z, out) {
   const lower=u-col+v-row<=1;
   const dx=lower?surface[i+1]-surface[i]:surface[i+stride+1]-surface[i+stride];
   const dz=lower?surface[i+stride]-surface[i]:surface[i+stride+1]-surface[i+1];
-  const {cos,sin}=terrainAxes(piece),nx=-dx*detail/w,nz=-dz*detail/d;
-  return out.set(cos*nx+sin*nz,1,-sin*nx+cos*nz).normalize();
+  return out.set(-dx*detail/w,1,-dz*detail/d).normalize();
+}
+
+function terrainNormal(piece,x,z,out){
+  const [localX,localZ]=terrainLocalXZ(piece,x,z),{cos,sin}=terrainAxes(piece);
+  terrainLocalNormal(gridFor(piece),localX,localZ,out);
+  const nx=out.x,nz=out.z;
+  return out.set(cos*nx+sin*nz,out.y,-sin*nx+cos*nz);
 }
 
 export function terrainCollider(piece, mesh) {
@@ -421,15 +447,52 @@ export function terrainRuleDimensions(dimensions,fit,size){
   return dimensions.clone().multiplyScalar(factor);
 }
 
+// Density is based on the horizontal footprint. Altitude and slope are measured on the actual mesh.
+function scatterPlan(piece,rule,grid){
+  const filter=rule.scatter;
+  if(!filter)return {requested:Math.round(piece.w*piece.d*rule.density),positions:null,area:piece.w*piece.d};
+  const x0=(filter.minX/100-.5)*piece.w,x1=(filter.maxX/100-.5)*piece.w;
+  const z0=(filter.minZ/100-.5)*piece.d,z1=(filter.maxZ/100-.5)*piece.d;
+  const area=(x1-x0)*(z1-z0),positions=[],normal=new T.Vector3();
+  if(!area||!rule.density)return {requested:0,positions,area};
+  const slopeCos=Math.cos(T.MathUtils.degToRad(filter.maxSlope));
+  const slopeActive=filter.maxSlope<90,altitudeActive=filter.minHeight>-300||filter.maxHeight<300;
+  const accept=(x,z)=>{
+    if(altitudeActive){
+      const h=piece.y+localHeight(grid,x,z);
+      if(h<filter.minHeight||h>filter.maxHeight)return false;
+    }
+    return !slopeActive||terrainLocalNormal(grid,x,z,normal).y>=slopeCos-1e-7;
+  };
+  let eligible=1;
+  if(slopeActive||altitudeActive){
+    let passed=0;
+    const resolution=32;
+    for(let row=0;row<resolution;row++)for(let col=0;col<resolution;col++)
+      if(accept(lerp(x0,x1,(col+.5)/resolution),lerp(z0,z1,(row+.5)/resolution)))passed++;
+    eligible=passed/resolution**2;
+  }
+  const requested=Math.round(area*eligible*rule.density),target=Math.min(requested,maxTerrainRuleInstances);
+  const attempts=slopeActive||altitudeActive?Math.min(120000,Math.ceil(target/Math.max(eligible,.001))*3):target;
+  for(let i=0;i<attempts&&positions.length<target;i++){
+    const x=lerp(x0,x1,hash(i,27,rule.seed)),z=lerp(z0,z1,hash(i,27,rule.seed+1));
+    if(accept(x,z))positions.push([x,z]);
+  }
+  return {requested,positions,area:area*eligible};
+}
+
 export function terrainVegetation(piece) {
-  const group=new T.Group();
+  const group=new T.Group(),grid=gridFor(piece);
+  group.userData.distribution=[];
   for(const [index,rule] of (piece.terrain.rules??[]).entries()){
-    const requested=Math.round(piece.w*piece.d*rule.density);
-    const count=Math.min(requested,maxTerrainRuleInstances);
+    const {requested,positions,area}=scatterPlan(piece,rule,grid);
+    const count=positions?positions.length:Math.min(requested,maxTerrainRuleInstances);
+    group.userData.distribution[index]={requested,count,area};
     if(!count)continue;
     const grass=rule.kind==='grass';
-    const geometry=rule.model?createModelUnitGeometry(rule.model):grass?grassGeometry():shrubGeometry();
-    if(rule.model)geometry.scale(...terrainRuleDimensions(modelDimensions(rule.model),rule.fit,rule.size));
+    const dimensions=rule.model?terrainRuleDimensions(modelDimensions(rule.model),rule.fit,rule.size):null;
+    const geometry=rule.model?createModelUnitGeometry(rule.model,dimensions):grass?grassGeometry():shrubGeometry();
+    if(dimensions)geometry.scale(...dimensions);
     else geometry.scale(rule.size,rule.size,rule.size);
     geometry.computeBoundingBox();
     geometry.translate(0,-geometry.boundingBox.min.y,0);
@@ -442,7 +505,7 @@ export function terrainVegetation(piece) {
     }
     const plants=new T.InstancedMesh(geometry,material,count);
     plants.name=rule.kind;
-    plants.userData={ruleIndex:index,seed:rule.seed,variation:rule.variation,collidable:rule.collidable,requestedCount:requested};
+    plants.userData={ruleIndex:index,seed:rule.seed,variation:rule.variation,collidable:rule.collidable,requestedCount:requested,positions,scatter:rule.scatter};
     plants.instanceMatrix.setUsage(T.DynamicDrawUsage);
     plants.receiveShadow=true;
     const colors=rule.colors.map(value=>new T.Color(value)),tint=new T.Color();
@@ -459,11 +522,12 @@ export function terrainVegetation(piece) {
 export function updateTerrainVegetation(group,piece){
   const grid=gridFor(piece),plant=new T.Object3D();
   for(const plants of group.children){
-    const {seed,variation}=plants.userData;
+    const {seed,variation,positions,scatter}=plants.userData;
     for(let i=0;i<plants.count;i++){
-      const x=(hash(i,27,seed)-.5)*.96*piece.w,z=(hash(i,27,seed+1)-.5)*.96*piece.d;
+      const x=positions?.[i][0]??(hash(i,27,seed)-.5)*.96*piece.w;
+      const z=positions?.[i][1]??(hash(i,27,seed+1)-.5)*.96*piece.d;
       plant.position.set(x,localHeight(grid,x,z),z);
-      plant.rotation.y=hash(i,27,seed+2)*Math.PI*2;
+      plant.rotation.y=scatter?T.MathUtils.degToRad(scatter.yaw+hash(i,27,seed+2)*scatter.yawVariation):hash(i,27,seed+2)*Math.PI*2;
       plant.scale.setScalar(lerp(Math.max(.05,1-variation),1+variation,hash(i,27,seed+3)));
       plant.updateMatrix();
       plants.setMatrixAt(i,plant.matrix);

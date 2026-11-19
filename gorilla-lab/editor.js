@@ -78,6 +78,7 @@ const toolHelp = {
   model: 'Choisis un modèle dans la bibliothèque, puis clique dans la vue 3D ou sur le plan pour le poser.',
 };
 let map, selected = -1, tool = 'move', gesture = null, ghost = null;
+let pieceMeshStats=[],sceneMeshStats=null;
 const editorEvents=[];
 function editorTrace(event,details={},level='info'){
   const entry={time:new Date().toISOString(),event,tool,selected,...details};
@@ -903,6 +904,7 @@ function rebuildScene() {
       material.map.wrapS = material.map.wrapT = T.RepeatWrapping;
       material.color.set(piece.color);
     }
+    const generationStarted=piece.terrain?performance.now():0;
     const geometry=piece.terrain?terrainGeometry(piece):
       piece.primitive==='ramp'?rampGeometry(piece.w,piece.h,piece.d).scale(1/piece.w,1/piece.h,1/piece.d):
       piece.primitive&&piece.primitive!=='box'?decorPrimitiveGeometry(piece.primitive):
@@ -911,12 +913,14 @@ function rebuildScene() {
     const mesh = new T.Mesh(geometry, material);
     mesh.userData.ownsTexture=Boolean(piece.texture);
     if(piece.terrain){
+      mesh.userData.generationMs=performance.now()-generationStarted;
       const vegetation=terrainVegetation(piece);
       if(vegetation){mesh.add(vegetation);mesh.userData.vegetation=vegetation;}
     }
     group.add(mesh);
     placeMesh(mesh, piece);
   }
+  collectMeshStats();
   spawn.position.set(map.spawn.x, map.spawn.y+spawnOffset, map.spawn.z);
   spawn.rotation.y=T.MathUtils.degToRad(map.spawn.yaw);
   refreshDiagnostics();
@@ -1055,6 +1059,9 @@ function updateInspector() {
   $('delete').firstChild.textContent=piece?.model?'Retirer ':'Supprimer ';
   $('texture-clear').disabled = !piece?.texture;
   $('texture-paint').disabled = !piece||Boolean(piece.model);
+  const meshStats=pieceMeshStats[selected],statsOutput=$('selection-mesh-stats');
+  statsOutput.hidden=!meshStats;
+  if(meshStats)statsOutput.textContent=formatMeshStats(meshStats);
   const terrain=piece?.terrain;
   $('terrain-grassTexture-paint').disabled = !terrain;
   for(const key of uvFields){const input=$('p-'+key);input.disabled=!piece||Boolean(piece?.model);input.value=piece?.[key]??(key==='uvScale'?1:0);}
@@ -1062,6 +1069,13 @@ function updateInspector() {
   $('terrain-controls').hidden=$('terrain-props').hidden=$('terrain-texture-density-fields').hidden=!terrain;
   if(terrain){
     for(const key of terrainFields)$('terrain-'+key).value=terrain[key];
+    const reliefArea=terrain.reliefArea??defaultReliefArea(piece);
+    $('terrain-relief-local').checked=Boolean(terrain.reliefArea);
+    $('terrain-relief-fields').hidden=!terrain.reliefArea;
+    for(const key of ['x','z','radius','blend'])$('terrain-relief-'+key).value=reliefArea[key];
+    const generationMs=group.children[selected]?.userData.generationMs;
+    $('terrain-generation-stats').textContent=Number.isFinite(generationMs)
+      ?'Calcul du relief · '+generationMs.toFixed(1)+' ms · '+((terrain.detail+1)**2).toLocaleString('fr-FR')+' sommets. Collision par champ de hauteur.':'';
     const area=piece.w*piece.d,triangles=2*terrain.detail**2;
     const format=new Intl.NumberFormat('fr-FR',{maximumFractionDigits:2});
     $('terrain-cell-size').textContent=format.format(piece.w/terrain.detail)+' × '+format.format(piece.d/terrain.detail)+
@@ -1811,7 +1825,7 @@ const terrainFields=['detail','seed','amplitude','frequency','octaves','roughnes
 
 function renderTerrainRules(piece){
   const rules=piece.terrain.rules;
-  const plants=group.children[selected]?.userData.vegetation?.children??[];
+  const distributions=group.children[selected]?.userData.vegetation?.userData.distribution??[];
   $('terrain-add-rule').disabled=rules.length>=maxTerrainRules;
   $('terrain-grass-texture').hidden=!rules.some(rule=>rule.kind==='grass');
   $('terrain-rules').replaceChildren(...rules.map((rule,index)=>{
@@ -1872,8 +1886,31 @@ function renderTerrainRules(piece){
     add('Variation de taille',numeric('variation',0,maxTerrainSizeVariation,.05));
     const collision=document.createElement('input');collision.type='checkbox';collision.checked=rule.collidable;
     collision.onchange=()=>update({collidable:collision.checked});add('Collision · boîte',collision);
+    const filters=document.createElement('details');
+    const summary=document.createElement('summary');summary.textContent='Zone, pente, altitude et rotation';
+    const fields=document.createElement('div');fields.className='terrain-filter-fields';
+    const defaults={minX:0,maxX:100,minZ:0,maxZ:100,minHeight:-300,maxHeight:300,maxSlope:90,yaw:0,yawVariation:360};
+    filters.open=Boolean(rule.scatter);
+    filters.append(summary,fields);
+    for(const [key,name,min,max] of [
+      ['minX','X min (%)',0,100],['maxX','X max (%)',0,100],['minZ','Z min (%)',0,100],['maxZ','Z max (%)',0,100],
+      ['minHeight','Altitude min (m)',-300,300],['maxHeight','Altitude max (m)',-300,300],
+      ['maxSlope','Pente max (°)',0,90],['yaw','Orientation (°)',-360,360],['yawVariation','Variation d’angle (°)',0,360],
+    ]){
+      const label=document.createElement('label'),input=document.createElement('input');label.textContent=name;
+      input.type='number';input.min=min;input.max=max;input.step='any';input.value=rule.scatter?.[key]??defaults[key];
+      input.onchange=()=>{if(Number.isFinite(input.valueAsNumber))update({scatter:{...rule.scatter,[key]:input.valueAsNumber}});};
+      label.append(input);fields.append(label);
+    }
+    if(rule.scatter){
+      const clear=document.createElement('button');clear.type='button';clear.textContent='Réinitialiser la zone';
+      clear.onclick=()=>update({scatter:null});filters.append(clear);
+    }
+    const filterCell=document.createElement('td');filterCell.dataset.wide='';filterCell.append(filters);row.append(filterCell);
     const count=document.createElement('output');
-    count.textContent=(plants.find(plant=>plant.userData.ruleIndex===index)?.count??0)+' / '+Math.round(piece.w*piece.d*rule.density);
+    const distribution=distributions[index]??{count:0,requested:0,area:0};
+    count.textContent=distribution.count+' / '+distribution.requested+' · '+distribution.area.toFixed(1)+' m²';
+    if(distribution.requested>maxTerrainRuleInstances)count.textContent+=' · plafond '+maxTerrainRuleInstances;
     const cell=add('Affichées / demandées',count,true);
     const remove=document.createElement('button');remove.type='button';remove.textContent='Retirer la ligne';
     remove.onclick=()=>{remember();rules.splice(index,1);sync();};
@@ -1924,6 +1961,24 @@ for(const key of terrainFields)$('terrain-'+key).onchange=event=>{
   piece.terrain=key==='detail'?resizeTerrain(piece.terrain,Number(event.target.value)):
     normalizeTerrain({...piece.terrain,[key]:Number(event.target.value)});
   sync();
+};
+function defaultReliefArea(piece){
+  return {x:0,z:0,radius:Math.min(piece.w,piece.d)/4,blend:.5};
+}
+function changeReliefArea(change){
+  const piece=current();
+  if(!piece?.terrain)return;
+  remember();
+  piece.terrain=normalizeTerrain({...piece.terrain,reliefArea:change},piece.w*piece.d);
+  sync();
+}
+$('terrain-relief-local').onchange=event=>{
+  const piece=current();
+  if(piece?.terrain)changeReliefArea(event.target.checked?defaultReliefArea(piece):null);
+};
+for(const key of ['x','z','radius','blend'])$('terrain-relief-'+key).onchange=event=>{
+  const piece=current(),value=event.target.valueAsNumber;
+  if(piece?.terrain?.reliefArea&&Number.isFinite(value))changeReliefArea({...piece.terrain.reliefArea,[key]:value});
 };
 $('terrain-reset').onclick=()=>{
   if(!current()?.terrain)return;
@@ -1993,6 +2048,41 @@ document.addEventListener('keydown', event => {
 });
 
 const diagnosticBoxes=new T.Group();scene.add(diagnosticBoxes);
+function geometryStats(root){
+  let triangles=0,vertices=0,instances=0;
+  root.traverse(node=>{
+    if(!node.isMesh||!node.visible||node.name==='model-selection-volume'||!node.geometry?.attributes.position)return;
+    const geometry=node.geometry,count=node.isInstancedMesh?node.count:1;
+    vertices+=geometry.attributes.position.count;
+    triangles+=(geometry.index?.count??geometry.attributes.position.count)/3*count;
+    if(node.isInstancedMesh)instances+=count;
+  });
+  return {triangles,vertices,instances};
+}
+function formatMeshStats(stats){
+  const number=value=>Math.round(value).toLocaleString('fr-FR');
+  return number(stats.triangles)+' triangles · '+number(stats.vertices)+' sommets stockés'+
+    (stats.instances?' · '+number(stats.instances)+' instances':'');
+}
+function collectMeshStats(){
+  pieceMeshStats=group.children.map(geometryStats);
+  sceneMeshStats={triangles:0,vertices:0,instances:0,heavy:-1};
+  for(const [index,stats] of pieceMeshStats.entries()){
+    for(const key of ['triangles','vertices','instances'])sceneMeshStats[key]+=stats[key];
+    if(sceneMeshStats.heavy<0||stats.triangles>pieceMeshStats[sceneMeshStats.heavy].triangles)sceneMeshStats.heavy=index;
+  }
+  $('scene-mesh-stats').textContent='Objets de la carte · '+formatMeshStats(sceneMeshStats);
+  const heavy=sceneMeshStats.heavy;
+  $('scene-heavy-mesh').textContent=heavy<0?'':'Plus détaillé · '+map.pieces[heavy].name+' · '+formatMeshStats(pieceMeshStats[heavy]);
+  $('scene-select-heavy').disabled=heavy<0;
+}
+$('scene-select-heavy').onclick=()=>{
+  const index=sceneMeshStats?.heavy??-1;
+  if(index<0)return;
+  choose(index);
+  window.setInspectorTab('object');
+  $('focus-piece').click();
+};
 function updateDebugStats(){
   if(!$('debug-stats'))return;
   const tris=renderer.info.render.triangles;

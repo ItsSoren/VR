@@ -907,3 +907,46 @@ test('metric UVs repeat with placed dimensions and finish settings survive norma
  assert.equal(metal.map.wrapS,T.RepeatWrapping);
  base.dispose();stretched.dispose();disposeModelMaterial(metal);disposeModelMaterial(matte);
 });
+
+test('localized terrain noise is deterministic and independent from manual sculpting',()=>{
+ const map=exampleMap();
+ Object.assign(map.pieces[0],{x:0,y:2,z:0,w:20,d:10,terrain:{
+  detail:20,amplitude:2,frequency:.2,octaves:10,seed:19,
+  reliefArea:{x:-3,z:0,radius:3,blend:.5},
+ }});
+ const saved=parseMap(map),piece=saved.pieces[0],loaded=parseMap(JSON.stringify(saved)).pieces[0];
+ const heights=[-4,-3,-2,8].map(x=>terrainHeight(piece,x,0));
+ assert.deepEqual(heights,[-4,-3,-2,8].map(x=>terrainHeight(loaded,x,0)));
+ assert.equal(loaded.terrain.octaves,10);
+ assert.deepEqual(loaded.terrain.reliefArea,piece.terrain.reliefArea);
+ assert.ok(heights.slice(0,3).some(height=>Math.abs(height-2)>.05));
+ assert.equal(heights[3],2);
+ assert.ok(sculptTerrain(piece,8,0,{mode:'raise',radius:1.5,strength:1}));
+ assert.ok(terrainHeight(piece,8,0)>2);
+ assert.equal(terrainHeight(piece,10,0),2);
+});
+
+test('terrain prop filters honor area, slope, altitude, and orientation across JSON round trips',()=>{
+ const map=exampleMap();
+ Object.assign(map.pieces[0],{x:0,y:2,z:0,w:20,d:10,terrain:{rules:[
+  {kind:'shrub',density:.5,seed:7,scatter:{minX:50,yaw:90,yawVariation:0}},
+  {kind:'shrub',density:1,scatter:{minHeight:3,maxHeight:9}},
+ ]}});
+ const saved=parseMap(map),piece=saved.pieces[0],loaded=parseMap(JSON.stringify(saved)).pieces[0];
+ const first=terrainVegetation(piece),second=terrainVegetation(loaded);
+ assert.deepEqual(first.userData.distribution,[{requested:50,count:50,area:100},{requested:0,count:0,area:0}]);
+ assert.deepEqual(first.children[0].instanceMatrix.array,second.children[0].instanceMatrix.array);
+ const matrix=new T.Matrix4(),position=new T.Vector3(),rotation=new T.Quaternion(),scale=new T.Vector3();
+ for(let index=0;index<first.children[0].count;index++){
+  first.children[0].getMatrixAt(index,matrix);
+  matrix.decompose(position,rotation,scale);
+  assert.ok(position.x>=0&&position.x<=10);
+  assert.ok(new T.Vector3(0,0,1).applyQuaternion(rotation).x>.99);
+ }
+ const slope={...piece,w:2,d:2,terrain:normalizeTerrain({detail:1,heights:[-.5,.5,-.5,.5],rules:[
+  {kind:'shrub',density:1,scatter:{maxSlope:20}},{kind:'shrub',density:1,scatter:{maxSlope:45}},
+ ]})};
+ const inclined=terrainVegetation(slope);
+ assert.deepEqual(inclined.userData.distribution.map(rule=>rule.count),[0,4]);
+ disposeVegetation(first);disposeVegetation(second);disposeVegetation(inclined);
+});
