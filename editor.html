@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Atelier Gorilla Lab R38.8</title>
+<title>Atelier Gorilla Lab R38.9</title>
 <style>
   :root{color-scheme:dark;--page:#101b22;--panel:#192932;--border:#334b58;--text:#f5efdf;--muted:#b4cbd1;--accent:#ffda90;--field:#12232c}
   *{box-sizing:border-box}
@@ -337,7 +337,7 @@
 </head>
 <body>
   <header class="header">
-    <h1>Atelier des cartes <small style="font-size:11px;color:var(--muted)">Gorilla Lab R38.8</small></h1>
+    <h1>Atelier des cartes <small style="font-size:11px;color:var(--muted)">Gorilla Lab R38.9</small></h1>
     <a href="./">Retour au jeu</a>
     <a href="./model-editor.html" id="open-model-editor" title="Ouvrir GORILLA / FOUNDRY pour créer et modifier les modèles">✎ Atelier modèles</a>
     <div class="header-actions">
@@ -558,6 +558,7 @@
           <h3 class="wide">Ciel</h3>
           <label>Source<select data-env="sky"><option value="preset">Panorama de l'ambiance</option><option value="color">Couleur unie</option><option value="image">Image 360° importée</option></select></label>
           <label>Orientation (°)<input data-env="rotation" type="number" min="-360" max="360"></label>
+          <label>Teinte du panorama<input data-env="skyTint" type="color"></label>
           <label>Couleur unie<input data-env="skyColor" type="color"></label>
           <label class="file">Importer un ciel 360°<input id="environment-image" type="file" accept="image/png,image/jpeg,image/webp"></label>
           <output class="wide" id="environment-status" aria-live="polite"></output>
@@ -568,11 +569,12 @@
           <label>Début (m)<input data-env="fogNear" type="number" min="0" max="4095"></label>
           <label>Fin (m)<input data-env="fogFar" type="number" min="1" max="4096"></label>
           <h3 class="wide">Soleil et lumière ambiante</h3>
+          <button class="wide" type="button" id="environment-aim-sun">Viser le soleil</button>
           <label>Direction du soleil (°)<input data-env="azimuth" type="number" min="-360" max="360" step="1"></label>
           <label>Hauteur du soleil (°)<input data-env="elevation" type="number" min="-89" max="89" step="1"></label>
           <label>Couleur du soleil<input data-env="sunColor" type="color"></label>
           <label>Intensité du soleil<input data-env="sunPower" type="number" min="0" max="12" step=".05"></label>
-          <label>Lumière du ciel<input data-env="ambientColor" type="color"></label>
+          <label>Lumière ambiante du ciel<input data-env="ambientColor" type="color"></label>
           <label>Lumière du sol<input data-env="groundColor" type="color"></label>
           <label>Intensité ambiante<input data-env="ambientPower" type="number" min="0" max="12" step=".05"></label>
         </div>
@@ -612,7 +614,7 @@
     <button data-context-action="focus">Cadrer</button>
     <button data-context-action="delete">Supprimer</button>
   </div>
-  <script defer src="./gorilla-editor-r38.js?v=R38.8"></script>
+  <script defer src="./gorilla-editor-r38.js?v=R38.9"></script>
 </body>
 </html>
 
