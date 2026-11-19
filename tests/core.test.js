@@ -1,3 +1,4 @@
+import {encodeRoomMapLink,decodeRoomMapLink} from '../gorilla-lab/room-map-link.js';
 import {avatarTemplateParts,createAvatarRig} from '../gorilla-lab/avatar-rig.js';
 import {palmCenter,palmHalfExtent} from '../gorilla-lab/hand-skin.js';
 import {createSettings,readScreenRenderSettings,saveScreenRenderSettings} from '../gorilla-lab/game-settings.js';
@@ -172,6 +173,9 @@ test('TurboWarp prioritizes avatars and recovers skipped shot and object updates
   }
   run(625);
   assert.equal(guest.remote.protocol,5);
+  assert.ok(guest.stats.peerTiming.samples>0);
+  assert.equal(guest.stats.peerTiming.intervalMs,100);
+  assert.equal(guest.stats.peerTiming.jitterMs,0);
   assert.equal(poses.get('player').avatar.hands[1].pressure[1],1);
   assert.equal(poses.get('player').avatar.gun.position.y,1);
   assert.equal(poses.get('vr').score,3);
@@ -192,6 +196,8 @@ test('TurboWarp prioritizes avatars and recovers skipped shot and object updates
   assert.equal(shots.length,2,'the repeated shot reaches the host exactly once');
   assert.equal(actionLog.length,1,'retransmitted actions do not run twice');
   assert.equal(objects.get(1).position.x,4,'a dropped rest state still reaches spectators');
+  assert.ok(guest.stats.peerTiming.p95IntervalMs>=100);
+  assert.ok(guest.stats.peerTiming.jitterMs>0);
   assert.ok(playerSent.slice(1).every((t,i)=>t-playerSent[i]===100));
   assert.ok(spectatorSent.slice(1).every((t,i)=>t-spectatorSent[i]===200));
 
@@ -871,7 +877,7 @@ test('map decor has independent solid volumes and non-blocking enter and exit tr
   const model={id:'custom-model-zones-check',name:'Porte',kind:'structure',partCollisions:true,parts:[
    {name:'Montant',shape:'box',zone:'solid',position:[-1,0,0],scale:[1,1,1]},
    {name:'Passage',shape:'box',zone:'pass',position:[1,0,0],scale:[1,1,1]},
-   {name:'Capteur',shape:'box',zone:'trigger',position:[0,0,0],scale:[1,1,1]},
+   {name:'Capteur',shape:'box',zone:'trigger',notice:{phase:'exit',text:'À bientôt'},position:[0,0,0],scale:[1,1,1]},
   ]};
   const map=exampleMap();
   Object.assign(map.pieces[0],{x:0,y:.5,z:0,w:3,h:1,d:1,solid:true,model});
@@ -884,7 +890,7 @@ test('map decor has independent solid volumes and non-blocking enter and exit tr
   assert.equal(arena.boxes[0].position.x,-1);
   assert.deepEqual(maps.checkTriggers(new T.Vector3(0,1.6,0)).map(({phase,part})=>[phase,part]),[['enter','Capteur']]);
   assert.deepEqual(maps.checkTriggers(new T.Vector3(0,1.6,0)),[]);
-  assert.deepEqual(maps.checkTriggers(new T.Vector3(2,1.6,0)).map(({phase})=>phase),['exit']);
+  assert.deepEqual(maps.checkTriggers(new T.Vector3(2,1.6,0)).map(({phase,message})=>[phase,message]),[['exit','À bientôt']]);
   maps.reset();
   assert.equal(arena.environment,null);
   assert.deepEqual(maps.checkTriggers(new T.Vector3(0,1.6,0)),[]);
@@ -1018,4 +1024,39 @@ test('avatar joints keep their hierarchy and flex around persisted pivots',()=>{
  rig.dispose();
  raw.models[0].parts=raw.models[0].parts.filter(part=>part.avatarJoint!=='head');
  assert.equal(normalizeModelPack(raw).avatarId,null);
+});
+
+test('a temporary room map preserves the local draft and restores it on departure',async()=>{
+ const original=globalThis.document,storage=globalThis.localStorage;
+ const saved=new Map();
+ globalThis.document={querySelector:()=>({})};
+ Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{
+  setItem:(key,value)=>saved.set(key,value),removeItem:key=>saved.delete(key),
+ }});
+ try{
+  const arena={boxes:[],bakeLightmap(){},setEnvironment(){},mapMaterial:()=>new T.MeshStandardMaterial()};
+  const maps=connectMaps({scene:new T.Scene(),arena,boot:new T.Vector3(),onReset(){},onVisual(){},getLevel:()=>0,defaultObjects:[]});
+  maps.load({...exampleMap(),name:'Brouillon local'});
+  const disk=[...saved.values()][0];
+  assert.equal(await maps.loadRoomMap('arena',()=>false),false);
+  assert.equal(maps.name,'Brouillon local');
+  assert.equal(await maps.loadRoomMap('arena',value=>value===null),true);
+  assert.equal(maps.active,false);
+  assert.equal([...saved.values()][0],disk);
+  maps.leaveRoomMap();
+  assert.equal(maps.name,'Brouillon local');
+  assert.equal([...saved.values()][0],disk);
+ }finally{
+  globalThis.document=original;
+  Object.defineProperty(globalThis,'localStorage',{configurable:true,value:storage});
+ }
+});
+
+test('a small custom map can be carried in a room invitation with bounded decoding',async()=>{
+ const map=exampleMap();
+ const packed=await encodeRoomMapLink(map);
+ assert.ok(packed.startsWith('gzip:'));
+ assert.deepEqual(JSON.parse(await decodeRoomMapLink(packed,100_000)),map);
+ await assert.rejects(decodeRoomMapLink(packed,20),/trop lourde/);
+ await assert.rejects(decodeRoomMapLink('gzip:invalid+',100_000),/invalide/);
 });

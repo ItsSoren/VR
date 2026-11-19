@@ -770,6 +770,12 @@ maps=connectMaps({scene,arena,boot,onReset:angle=>{
 });
 const spectator=addSpectator({scene,currentMap:()=>(maps.signature||'arena-r25-'+arena.hillSeed)+modelSignature,
   seedArena:seed=>arena.setHillSeed(seed),
+  onRoomMap:(value,expected,active)=>maps.loadRoomMap(value,candidate=>{
+    const signature=candidate?'custom-'+mapCode(JSON.stringify(candidate)):'arena-r25-'+arena.hillSeed;
+    return active()&&mapCode(signature+modelSignature)===expected;
+  }),
+  restoreRoomMap:()=>maps.leaveRoomMap(),
+  roomMapSource:()=>maps.roomMapSource(),
   makeReplica:type=>{
     const mesh=makePropMesh(type,true);
     if(mesh)grade(mesh.material);
@@ -1671,7 +1677,7 @@ renderer.setAnimationLoop((time,frame)=>{
   if(!inVR&&!spectating)for(const event of maps.checkTriggers(worldHead)){
     diagnostics.record('map-trigger',event);
     window.dispatchEvent(new CustomEvent('gorilla-model-trigger',{detail:event}));
-    if(event.phase==='enter')showGameHint('Déclencheur · '+event.part);
+    if(event.message||event.phase==='enter')showGameHint(event.message??'Déclencheur · '+event.part);
   }
   // En spectateur ou joueur invité, les objets reçus sont dessinés comme répliques du monde VR.
   const remoteWorld=spectating||spectator.guestActive;

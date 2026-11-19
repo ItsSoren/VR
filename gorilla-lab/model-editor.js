@@ -345,6 +345,13 @@ function updateHitboxControls(){
   $('part-zone-controls').hidden=!compound;
   $('part-zone').disabled=!currentPart();
   $('part-zone').value=currentPart()?.zone??'solid';
+  const trigger=currentPart()?.zone==='trigger';
+  $('trigger-notice').hidden=!compound||!trigger;
+  if(trigger){
+    const notice=currentPart().notice;
+    $('trigger-notice-phase').value=notice?.phase??'enter';
+    if(document.activeElement!==$('trigger-notice-text'))$('trigger-notice-text').value=notice?.text??'';
+  }
   $('hitbox-auto').setAttribute('aria-pressed',String(!manual));
   $('hitbox-manual').setAttribute('aria-pressed',String(!!manual));
   $('hitbox-geometry').hidden=!manual;$('hitbox-auto').disabled=$('hitbox-manual').disabled=!model?.parts.length;
@@ -1340,6 +1347,13 @@ $('add-game-asset').onclick=()=>importBuiltinAsset($('game-asset').value);
 setOptions($('part-surface'),Object.entries(modelSurfaces),'plain');
 setOptions($('part-finish'),Object.entries(modelFinishes).map(([id,finish])=>[id,finish.label]),'original');
 setOptions($('part-zone'),Object.entries(modelPartZones),'solid');
+for(const field of ['phase','text'])$('trigger-notice-'+field).onchange=event=>{
+  const part=currentPart();
+  if(part?.zone!=='trigger')return;
+  beforeChange(event.target);
+  part.notice={text:$('trigger-notice-text').value,phase:$('trigger-notice-phase').value};
+  markDirty();
+};
 $('part-collisions').onchange=event=>{
   const model=currentModel();if(!model||model.kind!=='structure')return;
   remember();model.partCollisions=event.target.checked;hitboxEditing=false;
@@ -1347,7 +1361,7 @@ $('part-collisions').onchange=event=>{
 };
 $('part-zone').onchange=event=>{
   const part=currentPart();if(!part)return;
-  remember();part.zone=event.target.value;markDirty();updateHitboxPreview();
+  remember();part.zone=event.target.value;markDirty();updateHitboxControls();updateHitboxPreview();
 };
 $('part-finish').onchange=event=>{
   const part=currentPart();if(!part)return;

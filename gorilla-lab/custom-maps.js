@@ -1,3 +1,4 @@
+import {encodeRoomMapLink,decodeRoomMapLink,isEncodedRoomMap} from './room-map-link.js';
 
 import * as T from 'three';
 import {shouldKeepArenaAsset} from './arena-map-pieces.js';
@@ -15,7 +16,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   const meshRows=[],mirrorRows=[],history=[],triggerRows=[];
   let insideTriggers=new Set();
   const loader=new T.TextureLoader(), textures=new Map();
-  let loadRequest=0;
+  let loadRequest=0,roomBase=null,loadedSource=null;
   let map=null, signature='', selection=-1,moving=-1,status='', lastGhostKey='';
   const slab=new T.BoxGeometry(1,1,1),ramp=rampGeometry();
   const ghost=new T.Mesh(slab,new T.MeshBasicMaterial({color:'#8be4b9',wireframe:true,transparent:true,opacity:.8,depthWrite:false}));
@@ -90,7 +91,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
           const position=zone.center.clone().applyQuaternion(mesh.quaternion).add(mesh.position);
           const quaternion=mesh.quaternion.clone();
           if(zone.mode==='trigger'){
-            triggerRows.push({name:zone.name,model:piece.name,position,
+            triggerRows.push({name:zone.name,model:piece.name,position,notice:zone.notice,
               inverse:quaternion.invert(),bounds:new T.Box3(half.clone().negate(),half)});
           }else colliders.push({position,quaternion,half,min:half.clone().negate(),shape:boxCollider(half),
             friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:true,type:piece.material});
@@ -171,24 +172,27 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     arena.setEnvironment(map?.environment??null);
     arena.bakeLightmap();
     onVisual();
-    if(map){
-      try{localStorage.setItem(storageKey,JSON.stringify(map));}catch{}
-    }else{
-      try{localStorage.removeItem(storageKey);}catch{}
+    if(!roomBase){
+      try{
+        if(map)localStorage.setItem(storageKey,JSON.stringify(map));
+        else localStorage.removeItem(storageKey);
+      }catch{}
     }
+  }
+  function applyMap(value){
+    map=value;selection=moving=-1;
+    boot.set(map?.spawn.x??0,map?.spawn.y??0,map?.spawn.z??3);
+    rebuild();onReset(map?.spawn.yaw??0);
   }
   function load(value){
     const validated=parseMap(value);
-    loadRequest++;
-    history.length=0;map=validated;selection=moving=-1;
-    boot.set(map.spawn.x,map.spawn.y,map.spawn.z);
-    rebuild();onReset(map.spawn.yaw);
+    loadRequest++;roomBase=null;loadedSource=null;history.length=0;
+    applyMap(validated);
     inform('Map : '+map.name+' · '+map.pieces.length+' pièces');
   }
   function reset(){
-    loadRequest++;
-    map=null;history.length=0;selection=moving=-1;boot.set(0,0,3);
-    rebuild();onReset(0);inform('Arène intégrée');
+    loadRequest++;roomBase=null;loadedSource=null;history.length=0;
+    applyMap(null);inform('Arène intégrée');
   }
   function blank(){
     load({format:'gorilla-lab-map',version:1,name:'Atelier VR',spawn:{x:0,y:.04,z:3},
@@ -288,19 +292,55 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     }catch(e){if(request===loadRequest)inform(e.message);}
   };
   // Une importation peut se terminer après un reset ou un autre import. Seule l’opération courante peut charger la carte.
+  async function fetchMap(value,httpsOnly){
+    const url=new URL(value,location.href);
+    if(url.username||url.password||!(httpsOnly?url.protocol==='https:':['http:','https:'].includes(url.protocol)))
+      throw Error(httpsOnly?'La carte du salon doit être accessible en HTTPS.':'Il faut une URL HTTP ou HTTPS.');
+    const response=await fetch(url,{credentials:'omit',referrerPolicy:'no-referrer'});
+    if(!response.ok)throw Error('URL de map inaccessible ('+response.status+').');
+    if(Number(response.headers.get('content-length'))>maxMapBytes)throw Error('Map trop lourde.');
+    return {url:url.href,map:parseMap(await response.text())};
+  }
   async function loadURL(value){
     const request=++loadRequest;
     try{
-      const requested=new URL(value,location.href);
-      if(!['http:','https:'].includes(requested.protocol))throw Error('Il faut une URL HTTP ou HTTPS.');
-      const response=await fetch(requested,{credentials:'omit'});
+      const source=await fetchMap(value,false);
       if(request!==loadRequest)return;
-      if(!response.ok)throw Error('URL de map inaccessible ('+response.status+').');
-      const length=Number(response.headers.get('content-length'));
-      if(length>maxMapBytes)throw Error('Map trop lourde.');
-      const contents=await response.text();
-      if(request===loadRequest)load(contents);
+      load(source.map);
+      loadedSource={url:source.url,signature};
     }catch(e){if(request===loadRequest)inform(e.message);}
+  }
+  async function loadRoomMap(value,accepts){
+    const request=++loadRequest;
+    try{
+      const remote=value==='arena'?null:isEncodedRoomMap(value)?
+        parseMap(await decodeRoomMapLink(value,maxMapBytes)):(await fetchMap(value,true)).map;
+      if(request!==loadRequest)return false;
+      if(!accepts(remote))return false;
+      roomBase??={map,history:history.slice(),source:loadedSource};
+      history.length=0;applyMap(remote);
+      inform(remote?'Carte du salon · '+remote.name:'Carte du salon · Arène intégrée');
+      return true;
+    }catch(e){
+      if(request===loadRequest)inform('Carte du salon indisponible · '+e.message);
+      return false;
+    }
+  }
+  function leaveRoomMap(){
+    loadRequest++;
+    if(!roomBase)return;
+    const previous=roomBase;
+    roomBase=null;loadedSource=previous.source;
+    history.splice(0,history.length,...previous.history);
+    applyMap(previous.map);
+    inform(previous.map?'Carte locale restaurée · '+previous.map.name:'Arène locale restaurée');
+  }
+  async function roomMapSource(){
+    if(!map)return 'arena';
+    if(loadedSource?.signature===signature&&loadedSource.url.startsWith('https:'))return loadedSource.url;
+    if(typeof CompressionStream==='undefined')return null;
+    const packed=await encodeRoomMapLink(map);
+    return packed;
   }
   const triggerRay=new T.Ray(),triggerEnd=new T.Vector3(),triggerHit=new T.Vector3();
   function checkTriggers(head){
@@ -314,8 +354,8 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
       if(row.bounds.containsPoint(triggerRay.origin)||row.bounds.containsPoint(triggerEnd)||
         hit&&triggerHit.distanceToSquared(triggerRay.origin)<=1.45**2){
         inside.add(row);
-        if(!insideTriggers.has(row))events.push({phase:'enter',part:row.name,model:row.model});
-      }else if(insideTriggers.has(row))events.push({phase:'exit',part:row.name,model:row.model});
+        if(!insideTriggers.has(row))events.push({phase:'enter',part:row.name,model:row.model,...(row.notice?.phase==='enter'?{message:row.notice.text}:{})});
+      }else if(insideTriggers.has(row))events.push({phase:'exit',part:row.name,model:row.model,...(row.notice?.phase==='exit'?{message:row.notice.text}:{})});
     }
     insideTriggers=inside;
     return events;
@@ -323,7 +363,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   document.querySelector('#map-load-url').onclick=()=>loadURL(url.value);
   document.querySelector('#map-export').onclick=save;
   document.querySelector('#map-reset').onclick=reset;
-  return {checkTriggers,placedModels:()=>map?.pieces.filter(p=>p.model?.kind==='prop')??[],modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,reset,blank,undo,save,edit,recenter,inform,
+  return {checkTriggers,placedModels:()=>map?.pieces.filter(p=>p.model?.kind==='prop')??[],modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,loadRoomMap,leaveRoomMap,roomMapSource,reset,blank,undo,save,edit,recenter,inform,
     mirrors:()=>mirrorRows,
     get usesBuiltInMirror(){return !map||map.arenaBase&&!map.editableArena&&!map.pieces.some(piece=>piece.sceneryId==='lab-mirror');},
     clearGhost(){ghost.visible=false;},get active(){return Boolean(map);},get builtIn(){return !map||map.arenaBase===true;},get assetLayer(){return map?.assetLayer===true;},

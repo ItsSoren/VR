@@ -420,6 +420,11 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
             <label class="check"><input id="part-collisions" type="checkbox"> Une zone par pièce du décor</label>
             <div id="part-zone-controls" hidden>
               <label>Zone de la pièce sélectionnée <select id="part-zone"></select></label>
+              <div id="trigger-notice" hidden>
+                <h3>Message du déclencheur</h3>
+                <label>Moment<select id="trigger-notice-phase"><option value="enter">À l’entrée</option><option value="exit">À la sortie</option></select></label>
+                <label>Texte<input id="trigger-notice-text" maxlength="48" placeholder="Ex. Bienvenue dans la grotte"></label>
+              </div>
               <p class="hint">Orange pour les zones solides, cyan pour les déclencheurs. Une pièce traversable est libre de collision.</p>
             </div>
             <label class="check"><input id="hitbox-preview-toggle" type="checkbox" checked> Afficher les volumes de collision</label>

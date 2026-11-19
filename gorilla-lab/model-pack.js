@@ -88,6 +88,8 @@ export function normalizeModelPack(input) {
         scale: vector(part?.scale, .35, .02, 4),
         color: typeof part?.color === 'string' && colorPattern.test(part.color) ? part.color : '#51bdd2',
         ...(Object.hasOwn(modelPartZones,part?.zone)?{zone:part.zone}:{}),
+        ...(part?.zone==='trigger'&&typeof part?.notice?.text==='string'&&part.notice.text.trim()
+          ?{notice:{text:label(part.notice.text,'Message'),phase:part.notice.phase==='exit'?'exit':'enter'}}:{}),
         ...(Object.hasOwn(modelFinishes,part?.finish)?{finish:part.finish}:{}),
         ...(part?.uv?{uv:modelPartUv(part)}:{}),
         surface: Object.hasOwn(modelSurfaces, part?.surface) ? part.surface : 'plain',
@@ -395,7 +397,7 @@ export function modelCollisionZones(model,mapDimensions=null){
     const geometry=createModelPartGeometry(part);
     geometry.computeBoundingBox();
     const box=geometry.boundingBox;
-    const zone={mode:part.zone==='trigger'?'trigger':'solid',name:part.name,
+    const zone={mode:part.zone==='trigger'?'trigger':'solid',name:part.name,notice:part.notice,
       center:box.getCenter(new T.Vector3()).sub(center).multiply(ratio),
       size:box.getSize(new T.Vector3()).multiply(ratio).max(new T.Vector3(.01,.01,.01))};
     geometry.dispose();

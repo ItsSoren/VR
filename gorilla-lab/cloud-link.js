@@ -44,6 +44,18 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
   let networkStats={sent:0,received:0,bytesSent:0,bytesReceived:0,bufferedBytes:0};
   function status(next,message){state=next;onStatus(message);}
   function waitLabel(){return 'Salon '+code+' · '+(role==='vr'?'en attente de joueurs ou du spectateur':'en attente de l’hôte');}
+  function peerTiming(){
+    if(!remote)return null;
+    const gaps=senders.get(remote.id)?.gaps??[];
+    if(!gaps.length)return null;
+    const mean=gaps.reduce((total,ms)=>total+ms,0)/gaps.length;
+    const ordered=gaps.slice().sort((a,b)=>a-b);
+    return {
+      peer:remote.id,samples:gaps.length,intervalMs:Math.round(mean),
+      p95IntervalMs:Math.round(ordered[Math.ceil(ordered.length*.95)-1]),
+      jitterMs:Math.round(gaps.reduce((total,ms)=>total+Math.abs(ms-mean),0)/gaps.length),
+    };
+  }
   function peerPoses(){return [...senders.values()].map(sender=>sender.pose).filter(Boolean);}
   function selectRemote(){
     const candidates=peerPoses().filter(p=>role==='vr'?p.role!=='vr':p.role==='vr');
@@ -55,7 +67,7 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
   function disconnectPeers(reset){
     for(const sender of senders.values()){
       if(sender.pose)onPeer(null,sender.pose);
-      sender.pose=sender.candidate=null;
+      sender.pose=sender.candidate=null;sender.gaps.length=0;
     }
     if(reset)senders.clear();
     selectRemote();
@@ -94,7 +106,7 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
     let sender=senders.get(data.id);
     if(!sender){
       if(senders.size>=64)return;
-      sender={lastTime:-Infinity,lastAction:0,lastShot:0,shotWindow:-Infinity,shotCount:0,lastArrival:time,pose:null,candidate:null};
+      sender={gaps:[],lastTime:-Infinity,lastAction:0,lastShot:0,shotWindow:-Infinity,shotCount:0,lastArrival:time,pose:null,candidate:null};
       senders.set(data.id,sender);
     }
     if(data.time<=sender.lastTime)return;
@@ -115,6 +127,13 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
     }
     sender.candidate=null;
     if(!sender.pose&&candidate?.objects&&candidate.ready&&candidate.map===pose.map&&!pose.objects)pose.objects=candidate.objects;
+    if(sender.pose?.map===pose.map){
+      const gap=time-sender.pose.arrival;
+      if(gap>0&&gap<=freshness){
+        sender.gaps.push(gap);
+        if(sender.gaps.length>48)sender.gaps.shift();
+      }
+    }else sender.gaps.length=0;
     sender.pose=pose;
     if(role==='vr'&&peerRole==='vr'&&pose.ready){
       // Un salon déjà ouvert a la priorité. En cas d’ouverture simultanée, compare les identifiants.
@@ -264,7 +283,7 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
     networkStats.sent++;networkStats.bytesSent+=value.length;
     return true;
   }
-  return {join,leave,tick,sendAction,queueShot,get stats(){return {...networkStats};},get role(){return role;},get code(){return code;},get state(){return state;},
+  return {join,leave,tick,sendAction,queueShot,get stats(){return {...networkStats,peerTiming:peerTiming()};},get role(){return role;},get code(){return code;},get state(){return state;},
     get remote(){return remote;},get peers(){return peerPoses();}};
 }
 

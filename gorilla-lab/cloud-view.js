@@ -111,7 +111,7 @@ function disposeArt(root){
   for(const material of materials)material.dispose();
 }
 
-export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,onAction,onShot,onStatus}){
+export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,onAction,onShot,onStatus,onRoomMap,restoreRoomMap,roomMapSource}){
   const peers=new Map(),replicas=new Map(),feed=createObjectFeed();
   let replicaHost=0,replicaMap=-1,replicaLight=-1;
   let cachedMap='',cachedId=0;
@@ -244,11 +244,18 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     return Array.from(crypto.getRandomValues(new Uint8Array(8)),n=>(n%36).toString(36)).join('').toUpperCase();
   }
   room.value=/^[A-Z0-9]{5,12}$/.test(roomFromURL)?roomFromURL:privateCode();
+  const invitedMap=new URLSearchParams(location.search).get('roomMap');
+  let roomMapPending=false,visit=0,lastMapAttempt=null,telemetryAt=-Infinity;
+  function leave(){
+    visit++;roomMapPending=false;lastMapAttempt=null;client.leave();restoreRoomMap?.();
+    const output=$('#cloud-telemetry');
+    if(output)output.textContent='';
+  }
   function connect(role,value=room.value){
     const code=roomCode(value);
     if(client.role===role&&client.code===code)return;
     if(!/^[A-Z0-9]{5,12}$/.test(code)){status.textContent='Entre un code de 5 à 12 lettres ou chiffres.';return;}
-    if(client.role)client.leave();
+    if(client.role)leave();
     if(!client.join(code,role))return;
     room.value=code;
     if(role!=='vr')$('#game').focus();
@@ -264,10 +271,24 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
   $('#cloud-pc').onclick=()=>connect('pc');
   const playerButton=$('#cloud-player');
   if(playerButton)playerButton.onclick=()=>connect('player');
-  $('#cloud-leave').onclick=()=>{copyUntil=0;client.leave();};
+  $('#cloud-leave').onclick=()=>{copyUntil=0;leave();};
   $('#cloud-copy').onclick=async()=>{
     const url=new URL(location.href);
+    url.searchParams.delete('roomMap');
+    url.searchParams.delete('map');
+    url.searchParams.delete('custom');
     url.searchParams.set('room',client.code||roomCode(room.value));
+    if(client.role==='vr'){
+      const code=client.code;
+      let source;
+      try{source=await roomMapSource?.();}catch{}
+      if(client.role!=='vr'||client.code!==code)return;
+      if(!source){
+        status.textContent='Carte trop volumineuse pour le lien. Charge-la depuis une URL HTTPS partageable.';
+        copyUntil=performance.now()+5500;return;
+      }
+      url.searchParams.set('roomMap',source);
+    }
     try{await navigator.clipboard.writeText(url.href);status.textContent='Lien copié.';}
     catch{status.textContent=url.href;}
     copyUntil=performance.now()+2500;
@@ -321,7 +342,8 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     if(client.state==='open'){
       const prefix='Salon '+client.code+' · ';
       const readyPeers=client.peers.filter(pose=>pose.ready);
-      if(!localReady)caption=prefix+'quitte la session VR pour utiliser le mode spectateur';
+      if(roomMapPending)caption=prefix+'chargement de la carte du salon';
+      else if(!localReady)caption=prefix+'quitte la session VR pour utiliser le mode spectateur';
       else if(client.role!=='vr'&&host&&host.map!==localMap())caption=prefix+'le joueur qui héberge utilise une autre carte. Chargez la même carte.';
       else if(client.role!=='vr'&&host&&!host.ready)caption=prefix+'hôte connecté · partie en préparation';
       else if(client.role==='player'&&host&&host.protocol<5)caption=prefix+'mets à jour le jeu chez l’hôte pour synchroniser la partie';
@@ -343,6 +365,17 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     if(!client.role){clearReplicas();return;}
     const ready=client.role!=='pc'||!inVR,now=performance.now();
     const map=localMap(),host=client.role!=='vr'?client.remote:null;
+    if(client.role==='player'&&client.state==='open'&&host?.ready&&host.map!==map&&onRoomMap){
+      const source=client.code===roomFromURL&&invitedMap?invitedMap:'arena';
+      const key=host.id+':'+host.map+':'+source;
+      if(lastMapAttempt!==key){
+        const attempt=++visit;
+        lastMapAttempt=key;roomMapPending=true;
+        Promise.resolve(onRoomMap(source,host.map,()=>attempt===visit&&client.remote?.map===host.map)).finally(()=>{
+          if(attempt===visit)roomMapPending=false;
+        });
+      }
+    }
     const showWorld=ready&&(client.role==='player'?guestActive():readyHere(host));
     if(!showWorld&&replicaMap!==-1)clearReplicas();
     drawReplicas(dt,showWorld,now);
@@ -368,9 +401,14 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     client.tick({x:position.x,y:position.y,z:position.z,yaw,map,ready,avatar:ready&&client.role!=='pc'?avatar:null,
       objectFeed:ready&&client.role==='vr'&&bodies?t=>feed.capture(t,bodies):null});
     if(now-statusAt>=150){statusAt=now;updateStatus(ready,now);}
+    if(now-telemetryAt>=750){
+      telemetryAt=now;
+      const output=$('#cloud-telemetry'),timing=showWorld||client.role==='vr'?client.stats.peerTiming:null;
+      if(output)output.textContent=timing?'Mises à jour reçues · '+timing.intervalMs+' ms en moyenne · '+timing.p95IntervalMs+' ms au 95e percentile · variation '+timing.jitterMs+' ms':'Mises à jour reçues · en attente de mesures';
+    }
   }
   function getPeer(id){const pose=peers.get(id)?.pose;return readyHere(pose)?pose:null;}
-  return {update,getPeer,connect,leave:()=>client.leave(),get caption(){return status.textContent;},handMotion(id,index){return peers.get(id)?.handMotion[index];},sendAction(action){return client.sendAction(action,localMap());},
+  return {update,getPeer,connect,leave,get caption(){return status.textContent;},handMotion(id,index){return peers.get(id)?.handMotion[index];},sendAction(action){return client.sendAction(action,localMap());},
     sendShot(position,quaternion){client.queueShot(position,quaternion,localMap());},
     get stats(){return client.stats;},
     get role(){return client.role;},get connected(){return readyHere(client.remote);},get guestActive(){return guestActive();},
