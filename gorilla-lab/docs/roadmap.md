@@ -27,3 +27,5 @@ Terminer les points PC et éditeurs et valider leurs parcours de test. Signaler 
 | 3 | 13–17 | Comportements, animation visuelle et outils de création, entités, audio et validation |
 
 La porte de FOUNDRY en R39.2 est validée. La demande d’animation vise les effets visuels déjà illustrés par la Gelée rouge (déformation) et le Cube du Néant (matière animée). Leur réutilisation dans les créations de FOUNDRY relève de la partie 3. Les essais sur casque suivent les trois parties PC.
+
+La partie 1 (R39.3) a été validée sur PC. La partie 2 (R39.4) ajoute le chargement depuis le code du salon, la réception de l’état initial et la réplication des portes sous l’autorité de l’hôte. Les très grandes cartes locales demandent toujours une URL HTTPS ou un import sur les deux appareils. Voir [les scénarios de validation](r39.md#r394--pc-partie-2-lots-1112).

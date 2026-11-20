@@ -4,7 +4,7 @@ import {palmCenter,palmHalfExtent} from '../gorilla-lab/hand-skin.js';
 import {createSettings,readScreenRenderSettings,saveScreenRenderSettings} from '../gorilla-lab/game-settings.js';
 import {GorillaLocomotion} from '../gorilla-lab/locomotion.js';
 import {boxCollider,colliderFor,palmContact,playerObjectContact,penetration} from '../gorilla-lab/physics.js';
-import {createCloudClient,createObjectFeed,decodeAvatar} from '../gorilla-lab/cloud-link.js';
+import {createCloudClient,createObjectFeed,encodePose,encodeAvatar,decodeAvatar} from '../gorilla-lab/cloud-link.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from 'three';
@@ -166,19 +166,21 @@ test('TurboWarp prioritizes avatars and recovers skipped shot and object updates
         for(const socket of links)if(socket!==from)socket.onmessage({data:message});
       }
       if(at%10!==0)continue;
-      host.tick({...player,score:3,objectFeed:t=>authoritativeFeed.capture(t,[body])});
+      host.tick({...player,score:3,roomSource:'https://example.test/lune.json',hinges:[{id:1,progress:.75}],objectFeed:t=>authoritativeFeed.capture(t,[body],true)});
       guest.tick(player);
       watcher.tick({...player,map:observerMap,avatar:null});
     }
   }
   run(625);
-  assert.equal(guest.remote.protocol,5);
+  assert.equal(guest.remote.protocol,6);
   assert.ok(guest.stats.peerTiming.samples>0);
   assert.equal(guest.stats.peerTiming.intervalMs,100);
   assert.equal(guest.stats.peerTiming.jitterMs,0);
   assert.equal(poses.get('player').avatar.hands[1].pressure[1],1);
   assert.equal(poses.get('player').avatar.gun.position.y,1);
   assert.equal(poses.get('vr').score,3);
+  assert.equal(guest.remote.roomSource,'https://example.test/lune.json');
+  assert.deepEqual(guest.remote.hinges,[{id:1,progress:.75}]);
   assert.equal(objects.get(1).position.x,0);
   const action={type:'hold',objectId:1,hand:2};
   assert.ok(guest.sendAction(action,7));
@@ -284,6 +286,10 @@ test('an active public host keeps authority and a second host attempt can spawn 
   assert.ok(guest.sendAction({type:'world',mode:3,typeId:1},12));
   run(2600);
   assert.deepEqual(actions,[{type:'spawn',typeId:1},{type:'world',mode:3,typeId:1}]);
+  assert.ok(guest.sendAction({type:'hinge',objectId:101},12));
+  run(2900);
+  assert.deepEqual(actions.at(-1),{type:'hinge',objectId:101});
+  assert.equal(actions.filter(action=>action.type==='hinge').length,1);
 });
 
 test('the two gun models meet their triangle budget',()=>{
@@ -1144,4 +1150,50 @@ test('thick terrain is closed and collides on top, bottom and side',()=>{
  }
  assert.equal(penetration(new T.Vector3(0,.7,0),.2,field,normal),0);
  geometry.dispose();
+});
+
+test('protocol 6 keeps precision near spawn and replicates avatars and objects past 180 metres',()=>{
+ const time=1_780_000_000_000,position={x:-255.9,y:1.23,z:511.4},quaternion=new T.Quaternion();
+ const pose=encodePose({time,id:1000001,...position,yaw:0,map:13},true);
+ const avatar={head:quaternion,hands:[{position,quaternion},null]};
+ const body={netId:1,netType:1,mesh:{position,quaternion,visible:true},velocity:new T.Vector3(),angular:new T.Vector3()};
+ const feed=createObjectFeed();
+ assert.ok(feed.capture(0,[body],true).full);
+ feed.requestFull();
+ const world=feed.capture(100,[body],true);
+ assert.ok(world.full);
+ const packet=decodeAvatar(encodeAvatar(pose,avatar,world,{version:6,ready:true}),time);
+ assert.deepEqual({x:packet.x,y:packet.y,z:packet.z},position);
+ assert.deepEqual(packet.avatar.hands[0].position,position);
+ assert.deepEqual(packet.objects.records[0].position,position);
+});
+
+test('host-authoritative hinges reject distant requests and initialize a late guest collider',()=>{
+ const original=globalThis.document;
+ globalThis.document={querySelector:()=>({})};
+ try{
+  const createWorld=()=>{
+   const arena={boxes:[],bakeLightmap(){},setEnvironment(){}};
+   const maps=connectMaps({scene:new T.Scene(),arena,boot:new T.Vector3(),onReset(){},onVisual(){},
+     getLevel:()=>0,defaultObjects:[]});
+   maps.load({...exampleMap(),pieces:[{name:'Porte',x:0,y:1,z:0,w:2,h:2,d:.2,solid:true,
+    model:{id:'custom-model-online-hinge',kind:'structure',parts:[
+     {shape:'box',scale:[2,2,.2],hinge:{pivot:[-1,0,0],open:90,seconds:.5}},
+    ]}}]});
+   return {maps,arena};
+  };
+  const host=createWorld(),guest=createWorld();
+  assert.equal(host.maps.receiveHingeRequest(1,new T.Vector3(9,1,0)),false);
+  assert.equal(host.maps.receiveHingeRequest(1,new T.Vector3(0,1,2)),true);
+  host.maps.updateHinges(.5,true);
+  guest.maps.receiveHinges(host.maps.hingeSnapshot(),true);
+  const closed=new T.Vector3(0,1,0),opened=new T.Vector3(-1,1,-1),normal=new T.Vector3();
+  assert.equal(penetration(closed,.08,guest.arena.boxes[0],normal),0);
+  assert.ok(penetration(opened,.08,guest.arena.boxes[0],normal)>0);
+  assert.equal(host.maps.receiveHingeRequest(1,new T.Vector3(0,1,-1)),true);
+  host.maps.updateHinges(.5,true);
+  guest.maps.receiveHinges(host.maps.hingeSnapshot(),false);
+  guest.maps.updateHinges(1,false,true);
+  assert.ok(penetration(closed,.08,guest.arena.boxes[0],normal)>0);
+ }finally{globalThis.document=original;}
 });

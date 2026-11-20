@@ -782,6 +782,8 @@ const spectator=addSpectator({scene,localColor:avatarColor,currentMap:()=>(maps.
     return active()&&mapCode(signature+modelSignature)===expected;
   }),
   restoreRoomMap:()=>maps.leaveRoomMap(),
+  hingeSnapshot:()=>maps.hingeSnapshot(),
+  applyHinges:(states,initial)=>maps.receiveHinges(states,initial),
   roomMapSource:()=>maps.roomMapSource(),
   makeReplica:type=>{
     const mesh=makePropMesh(type,true);
@@ -904,6 +906,7 @@ function requestSpawn(index,origin=null){
 }
 function handleNetworkAction(action,peer){
   if(!peer)return;
+  if(action.type==='hinge'){maps.receiveHingeRequest(action.objectId,spawnOrigin.copy(peer));return;}
   if(action.type==='world'){
     if(action.mode===1){settings.timeOfDay=action.typeId+1;applyVisual();}
     else if(action.mode===3)[clearObjects,resetObjects][action.typeId]?.();
@@ -1680,7 +1683,7 @@ renderer.setAnimationLoop((time,frame)=>{
   if(guestActive&&!wasGuestActive)releaseAll();
   wasGuestActive=guestActive;
   animateProps(time*.001);
-  maps.updateHinges(dt,!spectator.role);
+  maps.updateHinges(dt,!spectator.role||spectator.role==='vr',spectator.role==='player'||spectator.role==='pc');
   if(hintUntil&&time>hintUntil){hint.hidden=true;hintUntil=0;vrHint='';}
   cursor.visible=false;toolVisual.hide();toolState.mode=0;
   activeBoxes=settings.collisions?arena.boxes:blocked;
@@ -1751,7 +1754,9 @@ renderer.setAnimationLoop((time,frame)=>{
     const interact=actions.delete('KeyE');
     if(settings.toolActive)useToolRay(raySource,forward,interact,null);
     else if(interact){
-      const door=maps.interactHinge(raySource,forward,!spectator.role);
+      const hosting=spectator.role==='vr';
+      const request=spectator.guestActive?id=>spectator.sendAction({type:'hinge',objectId:id}):null;
+      const door=maps.interactHinge(raySource,forward,!spectator.role||hosting,request,hosting);
       if(door)showGameHint(door);
       else if(!grabFlat(raySource,forward))fixtureRay(raySource,forward,true);
     }

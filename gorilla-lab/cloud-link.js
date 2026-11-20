@@ -7,6 +7,8 @@ const publicHost='☁ GorillaHost';
 export const publicRooms=['ARENE1','ARENE2','ARENE3'];
 const roles=new Map([[publicHost,'vr'],[names.vr,'vr'],[names.pc,'pc'],...playerNames.map(name=>[name,'player'])]);
 const maxObjectType=53, freshness=4400, maxValueLength=64000;
+export const maxRoomSourceLength=4096,maxSyncedHinges=512;
+const protocolVersion=6;
 // TurboWarp regroupe les mises à jour : un seul paquet toutes les 100 ms par client actif.
 const playerInterval=100, spectatorInterval=200, repeatShotsFor=450, maxShotEvents=6;
 const digits=(n,width)=>Math.round(n).toString().padStart(width,'0');
@@ -16,20 +18,20 @@ export function mapCode(value){
   for(let i=0;i<value.length;i++)hash=Math.imul(hash^value.charCodeAt(i),16777619);
   return (hash>>>0)%1000000;
 }
-export function encodePose({time,id,x,y,z,yaw,map}){
-  const coords=[x,y,z];
+export function encodePose({time,id,x,y,z,yaw,map},wide=false){
+  const coords=packPoint({x,y,z},wide);
   if(!Number.isSafeInteger(time)||time<1e12||time>=1e13||!Number.isInteger(id)||id<1e6||id>=1e7||
-      !coords.every(n=>Number.isFinite(n)&&Math.abs(n)<=180)||!Number.isFinite(yaw)||!Number.isInteger(map)||map<0||map>=1e6)return null;
+      !coords||!Number.isFinite(yaw)||!Number.isInteger(map)||map<0||map>=1e6)return null;
   const angle=((yaw*180/Math.PI%360)+360)%360;
-  return '1'+time+digits(id,7)+coords.map(n=>digits(n*100+20000,5)).join('')+digits(Math.round(angle*10)%3600,4)+digits(map,6);
+  return (wide?'6':'1')+time+digits(id,7)+coords+digits(Math.round(angle*10)%3600,4)+digits(map,6);
 }
 export function decodePose(value,now=Date.now()){
-  if(typeof value!=='string'||!/^1[0-9]{45}$/.test(value))return null;
+  if(typeof value!=='string'||!/^[16][0-9]{45}$/.test(value))return null;
   const time=Number(value.slice(1,14)),id=Number(value.slice(14,21));
-  const [x,y,z]=[21,26,31].map(i=>(Number(value.slice(i,i+5))-20000)/100);
+  const point=unpackPoint(value,21,value[0]==='6');
   const angle=Number(value.slice(36,40)),map=Number(value.slice(40,46));
-  if(time<1e12||now!==null&&Math.abs(time-now)>25000||id<1e6||angle>=3600||[x,y,z].some(n=>Math.abs(n)>180))return null;
-  return {time,id,x,y,z,yaw:angle*Math.PI/1800,map};
+  if(time<1e12||now!==null&&Math.abs(time-now)>25000||id<1e6||angle>=3600||!point)return null;
+  return {time,id,...point,yaw:angle*Math.PI/1800,map};
 }
 
 // Le relais transporte des états et des intentions. L’hôte garde l’autorité sur la physique.
@@ -126,7 +128,17 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
       return;
     }
     sender.candidate=null;
-    if(!sender.pose&&candidate?.objects&&candidate.ready&&candidate.map===pose.map&&!pose.objects)pose.objects=candidate.objects;
+    if(!sender.pose&&candidate?.ready&&candidate.map===pose.map){
+      if(candidate.objects?.full&&!pose.objects?.full){
+        const records=new Map(candidate.objects.records.map(record=>[record.id,record]));
+        for(const record of pose.objects?.records??[]){
+          if(record.removed)records.delete(record.id);
+          else records.set(record.id,record);
+        }
+        pose.objects={full:true,records:[...records.values()]};
+      }
+      pose.roomSource??=candidate.roomSource;
+    }
     if(sender.pose?.map===pose.map){
       const gap=time-sender.pose.arrival;
       if(gap>0&&gap<=freshness){
@@ -157,7 +169,7 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
       onShot({position,quaternion},pose);
     }
     if(role!=='vr'||peerRole!=='player'||data.actionTarget!==id)return;
-    for(const {seq,action} of data.actions){
+    for(const {seq,action} of data.actions??[]){
       if(seq<=sender.lastAction)continue;
       sender.lastAction=seq;
       onAction(action,pose);
@@ -226,7 +238,7 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
     return false;
   }
   function sendAction(action,map){
-    const minimumProtocol=action.hand||action.type==='world'?5:4;
+    const minimumProtocol=action.type==='hinge'?6:action.hand||action.type==='world'?5:4;
     if(role!=='player'||state!=='open'||!remote?.ready||remote.protocol<minimumProtocol||remote.map!==map||!encodeAction(action)||actionNumber>=99_999_999)return false;
     const time=monotonicNow();
     pendingActions=pendingActions.filter(entry=>entry.expires>=time&&entry.target===remote.id&&entry.map===map);
@@ -236,7 +248,7 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
   }
   function queueShot(position,quaternion,map){
     if(!role||role==='pc'||state!=='open'||shotNumber>=99_999_999)return;
-    const point=packPoint(position),rotation=packQuat(quaternion);
+    const point=packPoint(position,true),rotation=packQuat(quaternion);
     if(!point||!rotation)return;
     const time=monotonicNow();
     pendingShots=pendingShots.filter(s=>s.expires>=time&&s.map===map).slice(-(maxShotEvents-1));
@@ -267,15 +279,16 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
     }
     if(retries||state==='capacity'){retries=0;status('open',waitLabel());}
     const wallTime=Math.round(wallStart+time-clockStart);
-    const pose=encodePose({...data,time:wallTime,id});
+    const pose=encodePose({...data,time:wallTime,id},true);
     if(!pose)return false;
     pendingActions=pendingActions.filter(entry=>entry.expires>=time&&entry.target===remote?.id&&entry.map===data.map);
     pendingShots=pendingShots.filter(s=>s.expires>=time&&s.map===data.map);
     const delta=networkStats.bufferedBytes===0?data.objectFeed?.(time):null;
     const avatar=typeof data.avatar==='function'?data.avatar():data.avatar;
     const value=encodeAvatar(pose,avatar,delta,{
-      version:5,ready:data.ready!==false,actions:pendingActions,actionTarget:pendingActions[0]?.target??0,
+      version:protocolVersion,ready:data.ready!==false,actions:pendingActions,actionTarget:pendingActions[0]?.target??0,
       shots:pendingShots,score:data.score,
+      roomSource:role==='vr'?data.roomSource:null,hinges:role==='vr'?data.hinges:null,
     });
     lastSend=time;
     if(role==='vr')firstHostSend=Math.min(firstHostSend,time);
@@ -290,11 +303,16 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
 
 
 const pointSize=15, quatSize=12, objectSize=44, actionSize=15, shotSize=35;
-const packPoint=p=>p&&[p.x,p.y,p.z].every(n=>Number.isFinite(n)&&Math.abs(n)<=180)
-  ?[p.x,p.y,p.z].map(n=>digits(n*100+20000,5)).join(''):null;
-function unpackPoint(s,i){
-  const [x,y,z]=[i,i+5,i+10].map(k=>(Number(s.slice(k,k+5))-20000)/100);
-  return [x,y,z].some(n=>Math.abs(n)>180)?null:{x,y,z};
+const packPoint=(p,wide=false)=>p&&[p.x,p.y,p.z].every(n=>Number.isFinite(n)&&Math.abs(n)<=(wide?2999:180))
+  ?[p.x,p.y,p.z].map(n=>Math.abs(n)>180?digits(n*10+70000,5):digits(n*100+20000,5)).join(''):null;
+function unpackPoint(s,i,wide=false){
+  const [x,y,z]=[i,i+5,i+10].map(k=>{
+    const value=Number(s.slice(k,k+5));
+    if(value>=2000&&value<=38000)return (value-20000)/100;
+    if(wide&&value>=40010&&value<=99990)return (value-70000)/10;
+    return NaN;
+  });
+  return [x,y,z].every(Number.isFinite)?{x,y,z}:null;
 }
 const packQuat=q=>q&&[q.x,q.y,q.z,q.w].every(Number.isFinite)
   ?[q.x,q.y,q.z,q.w].map(n=>digits(Math.max(0,Math.min(998,n*499+499)),3)).join(''):null;
@@ -304,8 +322,8 @@ function unpackQuat(s,i){
   if(length<.82||length>1.18)return null;
   const [x,y,z,w]=values.map(n=>n/length);return {x,y,z,w};
 }
-export function encodeObjectState(body){
-  const p=packPoint(body.mesh.position),q=packQuat(body.mesh.quaternion);
+export function encodeObjectState(body,wide=false){
+  const p=packPoint(body.mesh.position,wide),q=packQuat(body.mesh.quaternion);
   const id=body.netId, type=body.netType;
   if(!p||!q||!Number.isInteger(id)||id<1||id>=100000||!Number.isInteger(type)||type<0||type>maxObjectType)return null;
   const flags=(body.owner?1:0)+(body.frozen?2:0)+((body.velocity.lengthSq()<.002&&body.angular.lengthSq()<.004&&!body.owner)?4:0);
@@ -316,13 +334,13 @@ export function encodeObjectState(body){
 export function objectRemoval(id){
   return digits(id,5)+'99'+'0'.repeat(objectSize-7);
 }
-function packAvatar(avatar){
+function packAvatar(avatar,wide){
   if(!avatar)return null;
   const head=packQuat(avatar.head);
   if(!head)return null;
   const handStates=[avatar.hands?.[0],avatar.hands?.[1]];
   const hands=handStates.map(h=>{
-    const p=h&&packPoint(h.position),q=h&&packQuat(h.quaternion);
+    const p=h&&packPoint(h.position,wide),q=h&&packQuat(h.quaternion);
     return p&&q?'1'+p+q:'0'+'0'.repeat(pointSize+quatSize);
   });
   const height=digits(Math.max(0,Math.min(999,(avatar.height??1)*100)),3);
@@ -343,6 +361,7 @@ function encodeAction(action){
     return Number.isInteger(typeId)&&typeId>=0&&typeId<=maxType?'5'+mode+digits(typeId,5):null;
   }
   if(!Number.isInteger(objectId)||objectId<1||objectId>=100000)return null;
+  if(type==='hinge')return '60'+digits(objectId,5);
   if(type==='tool')return Number.isInteger(mode)&&mode>=1&&mode<=7?'2'+mode+digits(objectId,5):null;
   const hand=action.hand??0;
   if((type==='hold'||type==='release')&&[0,1,2].includes(hand))return (type==='hold'?'3':'4')+hand+digits(objectId,5);
@@ -350,7 +369,7 @@ function encodeAction(action){
 }
 function decodeAction(value){
   const kind=value[0],mode=Number(value[1]),objectId=Number(value.slice(2));
-  const type=['','spawn','tool','hold','release','world'][kind];
+  const type=['','spawn','tool','hold','release','world','hinge'][kind];
   if(!type)return null;
   let action={type,objectId};
   if(type==='spawn')action={type,typeId:objectId};
@@ -359,34 +378,43 @@ function decodeAction(value){
   else if(mode)action.hand=mode;
   return encodeAction(action)===value?action:null;
 }
-function packTool(tool){
-  const p=packPoint(tool?.position),q=packQuat(tool?.quaternion),end=packPoint(tool?.end);
+function packTool(tool,wide){
+  const p=packPoint(tool?.position,wide),q=packQuat(tool?.quaternion),end=packPoint(tool?.end,wide);
   return p&&q&&end&&Number.isInteger(tool.mode)&&tool.mode>=1&&tool.mode<=7?'1'+tool.mode+p+q+end:'0';
 }
+function packRoomState(source,hinges){
+  const text=typeof source==='string'&&source.length<=maxRoomSourceLength&&/^[!-~]+$/.test(source)?source:'';
+  const doors=(hinges??[]).slice(0,maxSyncedHinges);
+  const encoded=[...text].map(character=>digits(character.charCodeAt(0),3)).join('');
+  return digits(text.length,4)+encoded+digits(doors.length,3)+doors
+    .map(({id,progress})=>digits(id,5)+digits(Math.round(progress*1000),4)).join('');
+}
+
 export function encodeAvatar(pose,avatar,delta,meta=null){
-  const packed=packAvatar(avatar);
+  const wide=meta?.version===6;
+  const packed=packAvatar(avatar,wide);
   let records=delta?.records.join('')??'';
   if(!meta){
     if(!packed)return pose;
     return pose+'3'+packed+(delta?(delta.full?'2':'1')+records:'0');
   }
   const actions=(meta.actions??[]).map(({seq,action})=>digits(seq,8)+encodeAction(action)).join('');
-  const extended=meta.version===5;
-  const gunPosition=extended&&packPoint(avatar?.gun?.position),gunRotation=extended&&packQuat(avatar?.gun?.quaternion);
+  const extended=wide||meta.version===5;
+  const gunPosition=extended&&packPoint(avatar?.gun?.position,wide),gunRotation=extended&&packQuat(avatar?.gun?.quaternion);
   const gun=packed&&gunPosition&&gunRotation?'1'+gunPosition+gunRotation:'0';
   const shots=meta.shots??[];
   const extra=extended?gun+digits(shots.length,1)+shots.map(s=>s.record).join('')+
     digits(Math.max(0,Math.min(999999,meta.score??0)),6):'';
-  const head=pose+(extended?'5':'4')+Number(meta.ready)+Number(Boolean(packed))+(packed??'')+packTool(packed?avatar.tool:null)+
-    digits(meta.actionTarget??0,7)+digits(actions.length/actionSize,1)+actions+extra;
+  const head=pose+(wide?'6':extended?'5':'4')+Number(meta.ready)+Number(Boolean(packed))+(packed??'')+packTool(packed?avatar.tool:null,wide)+
+    digits(meta.actionTarget??0,7)+digits(actions.length/actionSize,1)+actions+extra+(wide?packRoomState(meta.roomSource,meta.hinges):'');
   if(head.length+1+records.length>maxValueLength){delta=null;records='';}
   return head+(delta?(delta.full?'2':'1'):'0')+records;
 }
-function unpackAvatar(value,start,legacy){
+function unpackAvatar(value,start,legacy,wide=false){
   const head=unpackQuat(value,start);
   if(!head)return null;
   const hands=[start+12,start+40].map((i,hand)=>value[i]==='1'?{
-    position:unpackPoint(value,i+1),quaternion:unpackQuat(value,i+16),
+    position:unpackPoint(value,i+1,wide),quaternion:unpackQuat(value,i+16),
     pressure:legacy?null:[0,1,2].map(k=>Number(value[start+79+3*hand+k])/9),
   }:null);
   if(hands.some(h=>h&&(!h.position||!h.quaternion)))return null;
@@ -403,18 +431,20 @@ export function decodeAvatar(value,now){
   const legacy=value[46]==='2';
   const stride=legacy?43:objectSize;
   let header=legacy?125:133;
-  if(value[46]==='4'||value[46]==='5'){
+  const wide=value[46]==='6';
+  if(value[0]==='6'&&!wide)return null;
+  if(value[46]==='4'||value[46]==='5'||wide){
     pose.protocol=Number(value[46]);
     if(value.length<59||!/[01]/.test(value[47])||!/[01]/.test(value[48]))return null;
     pose.ready=value[47]==='1';
     let i=49;
     if(value[48]==='1'){
-      if(value.length<i+85||!(pose.avatar=unpackAvatar(value,i,false)))return null;
+      if(value.length<i+85||!(pose.avatar=unpackAvatar(value,i,false,wide)))return null;
       i+=85;
     }
     if(value[i]==='1'){
       if(!pose.avatar||value.length<i+44)return null;
-      const mode=Number(value[i+1]),position=unpackPoint(value,i+2),quaternion=unpackQuat(value,i+17),end=unpackPoint(value,i+29);
+      const mode=Number(value[i+1]),position=unpackPoint(value,i+2,wide),quaternion=unpackQuat(value,i+17),end=unpackPoint(value,i+29,wide);
       if(mode<1||mode>7||!position||!quaternion||!end)return null;
       pose.avatar.tool={mode,position,quaternion,end};
       i+=44;
@@ -434,10 +464,10 @@ export function decodeAvatar(value,now){
       if(!action||seq<=lastSeq)return null;
       pose.actions.push({seq,action});lastSeq=seq;
     }
-    if(pose.protocol===5){
+    if(pose.protocol>=5){
       if(value[i]==='1'){
         if(!pose.avatar||value.length<i+28)return null;
-        const position=unpackPoint(value,i+1),quaternion=unpackQuat(value,i+16);
+        const position=unpackPoint(value,i+1,wide),quaternion=unpackQuat(value,i+16);
         if(!position||!quaternion)return null;
         pose.avatar.gun={position,quaternion};
         i+=28;
@@ -448,12 +478,34 @@ export function decodeAvatar(value,now){
       pose.shots=[];
       let previous=0;
       for(let end=i+count*shotSize;i<end;i+=shotSize){
-        const seq=Number(value.slice(i,i+8)),position=unpackPoint(value,i+8),quaternion=unpackQuat(value,i+23);
+        const seq=Number(value.slice(i,i+8)),position=unpackPoint(value,i+8,wide),quaternion=unpackQuat(value,i+23);
         if(seq<=previous||!position||!quaternion)return null;
         pose.shots.push({seq,position,quaternion});previous=seq;
       }
       pose.score=Number(value.slice(i,i+6));
       header=i+7;
+    }
+    if(wide){
+      i=header-1;
+      const length=Number(value.slice(i,i+4));i+=4;
+      if(length>maxRoomSourceLength||value.length<i+length*3+4)return null;
+      let source='';
+      for(let end=i+length*3;i<end;i+=3){
+        const byte=Number(value.slice(i,i+3));
+        if(byte<33||byte>126)return null;
+        source+=String.fromCharCode(byte);
+      }
+      if(source)pose.roomSource=source;
+      const count=Number(value.slice(i,i+3));i+=3;
+      if(count>maxSyncedHinges||value.length<i+count*9+1)return null;
+      pose.hinges=[];
+      let previous=0;
+      for(let end=i+count*9;i<end;i+=9){
+        const id=Number(value.slice(i,i+5)),progress=Number(value.slice(i+5,i+9));
+        if(id<=previous||progress>1000)return null;
+        pose.hinges.push({id,progress:progress/1000});previous=id;
+      }
+      header=i+1;
     }
   }else{
     if((!legacy&&value[46]!=='3')||value.length<header)return null;
@@ -469,7 +521,7 @@ export function decodeAvatar(value,now){
       if(!id)return null;
       if(type===(legacy?9:99)){records.push({id,removed:true});continue;}
       const flags=Number(value[offset]),style=Number(value[offset+1]),color=Number(value.slice(offset+2,offset+10));
-      const position=unpackPoint(value,offset+10),rotation=unpackQuat(value,offset+25);
+      const position=unpackPoint(value,offset+10,wide),rotation=unpackQuat(value,offset+25);
       if(type>maxObjectType||flags>7||style>4||color>0xffffff||!position||!rotation)return null;
       records.push({id,type,flags,style,color,position,rotation});
     }
@@ -482,7 +534,7 @@ const smallObjectRadius=.45, fastObjectSpeed=2.5;
 export function createObjectFeed(){
   const previous=new Map(),recent=new Map();
   let slowAt=-Infinity,fullAt=-Infinity;
-  function capture(now,bodies){
+  function capture(now,bodies,wide=false){
     const full=now-fullAt>=1600;
     const regular=full||now-slowAt>=200;
     if(full)fullAt=now;
@@ -497,7 +549,7 @@ export function createObjectFeed(){
       );
       // En quittant la cadence rapide, publie aussi la pose de transition ou d’arrêt.
       if(!regular&&!fast&&!prior?.fast)continue;
-      const record=encodeObjectState(body);
+      const record=encodeObjectState(body,wide);
       if(!record)continue;
       keep?.add(id);
       const changed=record!==prior?.record;
@@ -519,7 +571,7 @@ export function createObjectFeed(){
     }
     return (full||records.length)?{full,records}:null;
   }
-  return {capture,reset(){previous.clear();recent.clear();slowAt=fullAt=-Infinity;}};
+  return {capture,requestFull(){fullAt=-Infinity;},reset(){previous.clear();recent.clear();slowAt=fullAt=-Infinity;}};
 }
 
 

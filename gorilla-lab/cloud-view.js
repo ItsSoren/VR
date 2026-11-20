@@ -4,7 +4,7 @@ import {createHandSkin} from './hand-skin.js';
 import {createBodySkin} from './body-skin.js';
 import {createBlasterModel} from './arcade-blaster.js';
 import {createToolVisual} from './tool-visual.js';
-import {createCloudClient,mapCode,roomCode,createObjectFeed,publicRooms} from './cloud-link.js';
+import {createCloudClient,mapCode,roomCode,createObjectFeed,publicRooms,maxRoomSourceLength} from './cloud-link.js';
 
 const up=T.Object3D.DEFAULT_UP;
 const cameraType=15;
@@ -112,13 +112,14 @@ function disposeArt(root){
   for(const material of materials)material.dispose();
 }
 
-export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,applyLight,onAction,onShot,onStatus,onRoomMap,restoreRoomMap,roomMapSource}){
+export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,applyLight,onAction,onShot,onStatus,onRoomMap,restoreRoomMap,roomMapSource,hingeSnapshot,applyHinges}){
   const peers=new Map(),replicas=new Map(),feed=createObjectFeed();
   function removePeer(id,entry){
     if(entry.art){disposeArt(entry.art.model);disposeArt(entry.art.toolRoot);entry.art.dispose?.();}
     peers.delete(id);
   }
-  let replicaHost=0,replicaMap=-1,replicaLight=-1;
+  let replicaHost=0,replicaMap=-1,replicaLight=-1,hasInitialWorld=false;
+  let sharedSourceMap=-1,sharedSource=null,sourceAt=-Infinity;
   let cachedMap='',cachedId=0;
   function localMap(){
     const name=currentMap();
@@ -127,7 +128,7 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
   }
   function readyHere(pose){return !!pose?.ready&&pose.map===localMap();}
   function guestActive(){
-    return client.role==='player'&&client.state==='open'&&readyHere(client.remote)&&client.remote.protocol>=5;
+    return client.role==='player'&&client.state==='open'&&readyHere(client.remote)&&client.remote.protocol>=5&&hasInitialWorld;
   }
   function removeReplica(id){
     const r=replicas.get(id);
@@ -135,7 +136,7 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
   }
   function clearReplicas(){
     for(const id of replicas.keys())removeReplica(id);
-    replicaHost=0;replicaMap=-1;
+    replicaHost=0;replicaMap=-1;hasInitialWorld=false;
     if(replicaLight!==-1){replicaLight=-1;applyLight?.(null);}
   }
   function setReplicaAppearance(replica,record){
@@ -159,6 +160,10 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
   function takeObjects(pose){
     if(!readyHere(pose)){clearReplicas();return;}
     if(replicaHost!==pose.id||replicaMap!==pose.map){clearReplicas();replicaHost=pose.id;replicaMap=pose.map;}
+    const initial=!hasInitialWorld;
+    if(initial&&!pose.objects?.full)return;
+    if(pose.hinges)applyHinges?.(pose.hinges,initial);
+    hasInitialWorld=true;
     if(pose.avatar&&pose.avatar.light!==replicaLight){replicaLight=pose.avatar.light;applyLight?.(replicaLight);}
     if(!pose.objects)return;
     const present=pose.objects.full?new Set():null;
@@ -233,6 +238,8 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
       let entry=peers.get(pose.id);
       if(!entry){entry={art:null,motion:new T.Vector3(),handMotion:[new T.Vector3(),new T.Vector3()]};peers.set(pose.id,entry);}
       const prior=entry.pose;
+      if(client.role==='vr'&&readyHere(pose)&&(!readyHere(prior)||entry.inactive))feed.requestFull();
+      if(pose.role==='vr'&&pose.roomSource)entry.source={map:pose.map,value:pose.roomSource};
       entry.motion.set(0,0,0);
       for(const motion of entry.handMotion)motion.set(0,0,0);
       if(prior&&prior.map===pose.map){
@@ -260,6 +267,7 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
   let roomMapPending=false,visit=0,lastMapAttempt=null,telemetryAt=-Infinity;
   function leave(){
     visit++;roomMapPending=false;lastMapAttempt=null;client.leave();
+    sharedSourceMap=-1;sharedSource=null;sourceAt=-Infinity;
     for(const [id,entry] of peers)removePeer(id,entry);restoreRoomMap?.();refreshRoomActions();
     const output=$('#cloud-telemetry');
     if(output)output.textContent='';
@@ -273,7 +281,7 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
     room.value=code;
     refreshRoomActions();
     if(role!=='vr')$('#game').focus();
-    feed.reset();setCamera(0);
+    feed.reset();setCamera(0);sourceAt=-Infinity;
     seedArena(mapCode(code));cachedMap='';
   }
   $('#cloud-new').onclick=()=>connect('vr',privateCode());
@@ -284,8 +292,8 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
   $('#cloud-pc').onclick=()=>connect('pc');
   playerButton.onclick=()=>connect('player');
   room.addEventListener('keydown',event=>{if(event.key==='Enter')connect('player');});
-  if(invitedMap&&room.value){
-    playerButton.textContent='Rejoindre la partie invitée';
+  if(room.value){
+    if(invitedMap)playerButton.textContent='Rejoindre la partie invitée';
     queueMicrotask(showInvitation);
   }
   $('#cloud-leave').onclick=()=>{copyUntil=0;leave();};
@@ -308,7 +316,7 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
       if(client.role!=='vr'||client.code!==code)return;
       if(!source){
         try{await navigator.clipboard.writeText(url.href);}catch{window.prompt('Copie le lien du salon',url.href);}
-        status.textContent='Lien du salon prêt. La carte est trop lourde : l’invité doit importer le même JSON avant de rejoindre.';
+        status.textContent='Lien copié. Pour cette grande carte, charge le JSON depuis une URL HTTPS partageable ou envoie le fichier à l’invité.';
         copyUntil=performance.now()+12000;return;
       }
       url.hash=new URLSearchParams({roomMap:source}).toString();
@@ -378,11 +386,11 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
       else if(client.role!=='vr'&&host&&host.map!==localMap()){
         const hasInvitation=client.code===roomFromURL&&invitedMap;
         caption=prefix+(hasInvitation?'le lien ne correspond pas à la carte actuelle ou la carte est inaccessible. Demande un nouveau lien.':
-          'l’hôte joue sur une autre carte. Demande son lien d’invitation.');
+          'carte différente. Attends son chargement ou demande le lien d’invitation ou le fichier JSON.');
       }
       else if(client.role!=='vr'&&host&&!host.ready)caption=prefix+'hôte connecté · partie en préparation';
       else if(client.role==='player'&&host&&host.protocol<5)caption=prefix+'mets à jour le jeu chez l’hôte pour synchroniser la partie';
-      else if(client.role!=='vr'&&readyHere(host))caption=prefix+'hôte connecté';
+      else if(client.role!=='vr'&&readyHere(host))caption=prefix+(hasInitialWorld?'hôte connecté · état du monde synchronisé':'hôte connecté · réception de l’état initial');
       else if(client.role==='player'&&!host)caption=prefix+'aucun hôte pour l’instant · tu joues en solo en attendant';
       else if(client.role==='vr'){
         const local=readyPeers.filter(readyHere);
@@ -401,8 +409,9 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
     if(!client.role){clearReplicas();return;}
     const ready=client.role!=='pc'||!inVR,now=performance.now();
     const map=localMap(),host=client.role!=='vr'?client.remote:null;
-    if(client.role==='player'&&client.state==='open'&&host?.ready&&host.map!==map&&onRoomMap){
-      const source=client.code===roomFromURL&&invitedMap?invitedMap:'arena';
+    if(ready&&client.state==='open'&&host?.ready&&host.map!==map&&onRoomMap){
+      const advertised=peers.get(host.id)?.source;
+      const source=(advertised?.map===host.map?advertised.value:null)??(client.code===roomFromURL?invitedMap:null)??'arena';
       const key=host.id+':'+host.map+':'+source;
       if(lastMapAttempt!==key){
         const attempt=++visit;
@@ -412,8 +421,8 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
         });
       }
     }
-    const showWorld=ready&&(client.role==='player'?guestActive():readyHere(host));
-    if(!showWorld&&replicaMap!==-1)clearReplicas();
+    const showWorld=ready&&(client.role==='player'?guestActive():readyHere(host)&&hasInitialWorld);
+    if(!readyHere(host)&&client.role!=='vr'&&replicaMap!==-1)clearReplicas();
     drawReplicas(dt,showWorld,now);
     renderPeers(ready,time,dt,now);
     if(client.role==='pc'&&!inVR){
@@ -434,8 +443,20 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
         position.copy(rig.position);
       }else fly(frame);
     }
-    client.tick({x:position.x,y:position.y,z:position.z,yaw,map,ready,avatar:ready&&client.role!=='pc'?avatar:null,
-      objectFeed:ready&&client.role==='vr'&&bodies?t=>feed.capture(t,bodies):null});
+    const hosting=ready&&client.role==='vr';
+    if(hosting&&sharedSourceMap!==map){
+      const code=client.code;
+      sharedSourceMap=map;sharedSource=null;sourceAt=-Infinity;
+      Promise.resolve().then(()=>roomMapSource?.()).then(source=>{
+        if(client.role==='vr'&&client.code===code&&sharedSourceMap===map&&source?.length<=maxRoomSourceLength)
+          sharedSource=source;
+      }).catch(()=>{});
+    }
+    const share=hosting&&sharedSource&&now-sourceAt>=1800&&client.peers.some(p=>p.role!=='vr'&&p.map!==map);
+    const sent=client.tick({x:position.x,y:position.y,z:position.z,yaw,map,ready,avatar:ready&&client.role!=='pc'?avatar:null,
+      roomSource:share?sharedSource:null,hinges:hosting?hingeSnapshot?.():null,
+      objectFeed:hosting&&bodies?t=>feed.capture(t,bodies,true):null});
+    if(share&&sent)sourceAt=now;
     if(now-statusAt>=150){statusAt=now;updateStatus(ready,now);}
     if(now-telemetryAt>=750){
       telemetryAt=now;
@@ -447,7 +468,7 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
   return {update,getPeer,connect,leave,clearMapReplicas:clearReplicas,get caption(){return status.textContent;},handMotion(id,index){return peers.get(id)?.handMotion[index];},sendAction(action){return client.sendAction(action,localMap());},
     sendShot(position,quaternion){client.queueShot(position,quaternion,localMap());},
     get stats(){return client.stats;},
-    get role(){return client.role;},get connected(){return readyHere(client.remote);},get guestActive(){return guestActive();},
+    get role(){return client.role;},get connected(){return readyHere(client.remote)&&hasInitialWorld;},get guestActive(){return guestActive();},
     get remoteSpectator(){return client.peers.find(p=>p.role==='pc'&&readyHere(p))??null;},
     get remoteLight(){return replicaLight===-1?null:replicaLight;},get replicaCount(){return replicas.size;},
     forEachReplica(fn){for(const r of replicas.values())if(r.mesh.visible)fn(r.mesh);}};
