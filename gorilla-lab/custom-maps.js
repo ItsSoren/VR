@@ -91,7 +91,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
           const position=zone.center.clone().applyQuaternion(mesh.quaternion).add(mesh.position);
           const quaternion=mesh.quaternion.clone();
           if(zone.mode==='trigger'){
-            triggerRows.push({name:zone.name,model:piece.name,position,notice:zone.notice,
+            triggerRows.push({name:zone.name,model:piece.name,position,notice:zone.notice,portal:zone.portal,
               inverse:quaternion.invert(),bounds:new T.Box3(half.clone().negate(),half)});
           }else colliders.push({position,quaternion,half,min:half.clone().negate(),shape:boxCollider(half),
             friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:true,type:piece.material});
@@ -308,7 +308,9 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
       if(request!==loadRequest)return;
       load(source.map);
       loadedSource={url:source.url,signature};
+      return true;
     }catch(e){if(request===loadRequest)inform(e.message);}
+    return false;
   }
   async function loadRoomMap(value,accepts){
     const request=++loadRequest;
@@ -354,7 +356,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
       if(row.bounds.containsPoint(triggerRay.origin)||row.bounds.containsPoint(triggerEnd)||
         hit&&triggerHit.distanceToSquared(triggerRay.origin)<=1.45**2){
         inside.add(row);
-        if(!insideTriggers.has(row))events.push({phase:'enter',part:row.name,model:row.model,...(row.notice?.phase==='enter'?{message:row.notice.text}:{})});
+        if(!insideTriggers.has(row))events.push({phase:'enter',part:row.name,model:row.model,...(row.notice?.phase==='enter'?{message:row.notice.text}:{}),...(row.portal?{portal:row.portal}:{})});
       }else if(insideTriggers.has(row))events.push({phase:'exit',part:row.name,model:row.model,...(row.notice?.phase==='exit'?{message:row.notice.text}:{})});
     }
     insideTriggers=inside;

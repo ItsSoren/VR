@@ -114,10 +114,9 @@ function shape(parent,material,x,y,z,sx,sy,sz) {
   parent.add(m);m.castShadow=true;return m;
 }
 const modelPack=readModelPack(localStorage);
-const mapModels=modelPack.models.filter(model=>model.kind!=='avatar');
+const synchronizedModels=modelPack.models.filter(model=>model.kind!=='avatar'&&model.inGame&&model.parts.length).slice(0,36);
 const equippedRig=modelPack.models.find(model=>model.id===modelPack.avatarId&&model.kind==='avatar'&&avatarReady(model));
-const mapModelPack={...modelPack,models:mapModels,avatarId:equippedRig?null:modelPack.avatarId};
-const modelSignature=mapModels.length?'|atelier-'+mapCode(JSON.stringify(mapModelPack)):'';
+const modelSignature=synchronizedModels.length?'|atelier-'+mapCode(JSON.stringify(synchronizedModels)):'';
 const pcAvatar=equippedRig?createAvatarRig(equippedRig,part=>{
   const mesh=new T.Mesh(createModelPartGeometry(part),createModelPartMaterial(part));
   mesh.castShadow=true;mesh.receiveShadow=true;
@@ -182,7 +181,7 @@ const cameraGeometry=new T.BoxGeometry(.26,.176,.23);
 const cameraAtlas=new T.MeshStandardMaterial({color:'#536771',roughness:.36,metalness:.28});
 objectSpecs[CAMERA_TYPE]={name:'Caméra du spectateur',geo:cameraGeometry,material:cameraAtlas,shape:cameraHull,lowShape:cameraHull,mass:1.2};
 const {props:animatedProps,animate:animateProps}=makeAnimatedProps();
-const workshopProps=createModelPropDefinitions(modelPack).slice(0,36);
+const workshopProps=createModelPropDefinitions({models:synchronizedModels});
 const animatedTypes=[],workshopTypes=[];
 // L’index du catalogue sert aussi d’identifiant de type dans les paquets réseau.
 function registerProps(specs,types){
@@ -194,6 +193,7 @@ function registerProps(specs,types){
 }
 registerProps(animatedProps,animatedTypes);
 registerProps(workshopProps,workshopTypes);
+const firstPlacedModelType=objectSpecs.length;
 const spawnTypes=[...basicTypes,...detailTypes,...animatedTypes,...workshopTypes];
 objectSpecs[8].properties={supportWhileHeld:true};
 objectSpecs[11].properties={supportWhileHeld:true};
@@ -762,7 +762,12 @@ function spawnPlacedModels(){
   }
 }
 maps=connectMaps({scene,arena,boot,onReset:angle=>{
-  clearObjects();resetPlayer();yaw=T.MathUtils.degToRad(angle);
+  clearObjects();spectator.clearMapReplicas();
+  for(const spec of objectSpecs.splice(firstPlacedModelType)){
+    spec.geo.dispose();disposeModelMaterial(spec.material);
+  }
+  placedModelTypes.clear();
+  resetPlayer();yaw=T.MathUtils.degToRad(angle);
   if(maps.builtIn)spawnSamples();
   spawnPlacedModels();
 },onVisual:applyVisual,
@@ -1648,7 +1653,7 @@ function captureNetworkAvatar(){
   };
 }
 // Une image enchaîne les entrées, la simulation locale, la réception des états distants et le rendu.
-let wasGuestActive=false;
+let wasGuestActive=false,portalInProgress=false,portalCooldown=0;
 renderer.setAnimationLoop((time,frame)=>{
   const actual=frameTime?Math.max(0,(time-frameTime)/1000):.014;
   frameTime=time;
@@ -1678,6 +1683,16 @@ renderer.setAnimationLoop((time,frame)=>{
     diagnostics.record('map-trigger',event);
     window.dispatchEvent(new CustomEvent('gorilla-model-trigger',{detail:event}));
     if(event.message||event.phase==='enter')showGameHint(event.message??'Déclencheur · '+event.part);
+    if(event.portal&&!spectator.role&&!portalInProgress&&time>=portalCooldown){
+      portalInProgress=true;
+      const destination=event.portal;
+      Promise.resolve().then(async()=>{
+        if(destination==='arena'){maps.reset();return true;}
+        return maps.loadURL(destination);
+      }).then(success=>{
+        showGameHint(success?'Carte chargée.':'Impossible de charger la carte du portail.');
+      }).finally(()=>{portalInProgress=false;portalCooldown=performance.now()+1000;});
+    }
   }
   // En spectateur ou joueur invité, les objets reçus sont dessinés comme répliques du monde VR.
   const remoteWorld=spectating||spectator.guestActive;

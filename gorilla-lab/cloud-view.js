@@ -244,7 +244,8 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     return Array.from(crypto.getRandomValues(new Uint8Array(8)),n=>(n%36).toString(36)).join('').toUpperCase();
   }
   room.value=/^[A-Z0-9]{5,12}$/.test(roomFromURL)?roomFromURL:privateCode();
-  const invitedMap=new URLSearchParams(location.search).get('roomMap');
+  const invitedMap=new URLSearchParams(location.hash.slice(1)).get('roomMap')??
+    new URLSearchParams(location.search).get('roomMap');
   let roomMapPending=false,visit=0,lastMapAttempt=null,telemetryAt=-Infinity;
   function leave(){
     visit++;roomMapPending=false;lastMapAttempt=null;client.leave();restoreRoomMap?.();
@@ -274,6 +275,7 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
   $('#cloud-leave').onclick=()=>{copyUntil=0;leave();};
   $('#cloud-copy').onclick=async()=>{
     const url=new URL(location.href);
+    url.hash='';
     url.searchParams.delete('roomMap');
     url.searchParams.delete('map');
     url.searchParams.delete('custom');
@@ -287,7 +289,7 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
         status.textContent='Carte trop volumineuse pour le lien. Charge-la depuis une URL HTTPS partageable.';
         copyUntil=performance.now()+5500;return;
       }
-      url.searchParams.set('roomMap',source);
+      url.hash=new URLSearchParams({roomMap:source}).toString();
     }
     try{await navigator.clipboard.writeText(url.href);status.textContent='Lien copié.';}
     catch{status.textContent=url.href;}
@@ -344,7 +346,11 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
       const readyPeers=client.peers.filter(pose=>pose.ready);
       if(roomMapPending)caption=prefix+'chargement de la carte du salon';
       else if(!localReady)caption=prefix+'quitte la session VR pour utiliser le mode spectateur';
-      else if(client.role!=='vr'&&host&&host.map!==localMap())caption=prefix+'le joueur qui héberge utilise une autre carte. Chargez la même carte.';
+      else if(client.role!=='vr'&&host&&host.map!==localMap()){
+        const hasInvitation=client.code===roomFromURL&&invitedMap;
+        caption=prefix+(hasInvitation?'le lien ne correspond pas à la carte actuelle ou la carte est inaccessible. Demande un nouveau lien.':
+          'l’hôte joue sur une autre carte. Demande son lien d’invitation.');
+      }
       else if(client.role!=='vr'&&host&&!host.ready)caption=prefix+'hôte connecté · partie en préparation';
       else if(client.role==='player'&&host&&host.protocol<5)caption=prefix+'mets à jour le jeu chez l’hôte pour synchroniser la partie';
       else if(client.role!=='vr'&&readyHere(host))caption=prefix+'hôte connecté';
@@ -408,7 +414,7 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     }
   }
   function getPeer(id){const pose=peers.get(id)?.pose;return readyHere(pose)?pose:null;}
-  return {update,getPeer,connect,leave,get caption(){return status.textContent;},handMotion(id,index){return peers.get(id)?.handMotion[index];},sendAction(action){return client.sendAction(action,localMap());},
+  return {update,getPeer,connect,leave,clearMapReplicas:clearReplicas,get caption(){return status.textContent;},handMotion(id,index){return peers.get(id)?.handMotion[index];},sendAction(action){return client.sendAction(action,localMap());},
     sendShot(position,quaternion){client.queueShot(position,quaternion,localMap());},
     get stats(){return client.stats;},
     get role(){return client.role;},get connected(){return readyHere(client.remote);},get guestActive(){return guestActive();},

@@ -877,7 +877,7 @@ test('map decor has independent solid volumes and non-blocking enter and exit tr
   const model={id:'custom-model-zones-check',name:'Porte',kind:'structure',partCollisions:true,parts:[
    {name:'Montant',shape:'box',zone:'solid',position:[-1,0,0],scale:[1,1,1]},
    {name:'Passage',shape:'box',zone:'pass',position:[1,0,0],scale:[1,1,1]},
-   {name:'Capteur',shape:'box',zone:'trigger',notice:{phase:'exit',text:'À bientôt'},position:[0,0,0],scale:[1,1,1]},
+   {name:'Capteur',shape:'box',zone:'trigger',notice:{phase:'exit',text:'À bientôt'},portal:'arena',position:[0,0,0],scale:[1,1,1]},
   ]};
   const map=exampleMap();
   Object.assign(map.pieces[0],{x:0,y:.5,z:0,w:3,h:1,d:1,solid:true,model});
@@ -888,7 +888,7 @@ test('map decor has independent solid volumes and non-blocking enter and exit tr
   assert.equal(arena.environment.fogNear,45);
   assert.equal(arena.boxes.length,1);
   assert.equal(arena.boxes[0].position.x,-1);
-  assert.deepEqual(maps.checkTriggers(new T.Vector3(0,1.6,0)).map(({phase,part})=>[phase,part]),[['enter','Capteur']]);
+  assert.deepEqual(maps.checkTriggers(new T.Vector3(0,1.6,0)).map(({phase,part,portal})=>[phase,part,portal]),[['enter','Capteur','arena']]);
   assert.deepEqual(maps.checkTriggers(new T.Vector3(0,1.6,0)),[]);
   assert.deepEqual(maps.checkTriggers(new T.Vector3(2,1.6,0)).map(({phase,message})=>[phase,message]),[['exit','À bientôt']]);
   maps.reset();

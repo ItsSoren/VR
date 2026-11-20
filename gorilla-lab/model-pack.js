@@ -43,6 +43,14 @@ function label(value, fallback) {
 function vector(value, fallback, min, max) {
   return [0, 1, 2].map(index => Number.isFinite(value?.[index]) ? T.MathUtils.clamp(value[index], min, max) : fallback);
 }
+function portalDestination(value){
+  if(value==='arena')return value;
+  if(typeof value!=='string'||value.length>700)return null;
+  try{
+    const url=new URL(value);
+    return url.protocol==='https:'&&!url.username&&!url.password?url.href:null;
+  }catch{return null;}
+}
 const hitboxShapes=new Set(['box','sphere','capsule','convex']);
 function normalizeHitbox(raw){
   if(raw?.mode==='box')return {mode:'box',center:vector(raw.center,0,-6,6),size:vector(raw.size,.5,.025,12)};
@@ -91,6 +99,7 @@ export function normalizeModelPack(input) {
         ...(part?.zone==='trigger'&&typeof part?.notice?.text==='string'&&part.notice.text.trim()
           ?{notice:{text:label(part.notice.text,'Message'),phase:part.notice.phase==='exit'?'exit':'enter'}}:{}),
         ...(Object.hasOwn(modelFinishes,part?.finish)?{finish:part.finish}:{}),
+        ...(part?.zone==='trigger'&&portalDestination(part.portal)?{portal:portalDestination(part.portal)}:{}),
         ...(part?.uv?{uv:modelPartUv(part)}:{}),
         surface: Object.hasOwn(modelSurfaces, part?.surface) ? part.surface : 'plain',
         texture:typeof part?.texture==='string'&&part.texture.length<=modelLimits.textureBytes&&texturePattern.test(part.texture)
@@ -397,7 +406,7 @@ export function modelCollisionZones(model,mapDimensions=null){
     const geometry=createModelPartGeometry(part);
     geometry.computeBoundingBox();
     const box=geometry.boundingBox;
-    const zone={mode:part.zone==='trigger'?'trigger':'solid',name:part.name,notice:part.notice,
+    const zone={mode:part.zone==='trigger'?'trigger':'solid',name:part.name,notice:part.notice,portal:part.portal,
       center:box.getCenter(new T.Vector3()).sub(center).multiply(ratio),
       size:box.getSize(new T.Vector3()).multiply(ratio).max(new T.Vector3(.01,.01,.01))};
     geometry.dispose();

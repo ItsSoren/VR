@@ -351,6 +351,7 @@ function updateHitboxControls(){
     const notice=currentPart().notice;
     $('trigger-notice-phase').value=notice?.phase??'enter';
     if(document.activeElement!==$('trigger-notice-text'))$('trigger-notice-text').value=notice?.text??'';
+    if(document.activeElement!==$('trigger-portal'))$('trigger-portal').value=currentPart().portal??'';
   }
   $('hitbox-auto').setAttribute('aria-pressed',String(!manual));
   $('hitbox-manual').setAttribute('aria-pressed',String(!!manual));
@@ -1347,6 +1348,25 @@ $('add-game-asset').onclick=()=>importBuiltinAsset($('game-asset').value);
 setOptions($('part-surface'),Object.entries(modelSurfaces),'plain');
 setOptions($('part-finish'),Object.entries(modelFinishes).map(([id,finish])=>[id,finish.label]),'original');
 setOptions($('part-zone'),Object.entries(modelPartZones),'solid');
+$('trigger-portal').onchange=event=>{
+  const part=currentPart();
+  if(part?.zone!=='trigger')return;
+  const value=event.target.value.trim();
+  if(value&&value!=='arena'){
+    try{
+      const target=new URL(value);
+      if(target.protocol!=='https:'||target.username||target.password)throw Error();
+    }catch{
+      status('Destination invalide. Entre une URL HTTPS publique ou le mot arena.',true);
+      event.target.value=part.portal??'';
+      return;
+    }
+  }
+  beforeChange(event.target);
+  if(value)part.portal=value;
+  else delete part.portal;
+  markDirty();
+};
 for(const field of ['phase','text'])$('trigger-notice-'+field).onchange=event=>{
   const part=currentPart();
   if(part?.zone!=='trigger')return;
