@@ -320,6 +320,7 @@ function applyVisual(){
   arena.setTimeOfDay(spectator.remoteLight??settings.timeOfDay-1);
   activeLights=lightSlots.slice(0,lightLevel()>=8?3:lightLevel()>=4?2:1);
   shaderMode.value=settings.shaderMode-1;
+  arena.setRetroSky(shaderMode.value===3);
   const hardwareFocus=renderer.xr.isPresenting&&renderer.xr.getBaseLayer?.()?.fixedFoveation!=null;
   arena.focus(settings.focus&&!hardwareFocus,settings.focusStrength,settings.focusSize);
   renderer.toneMappingExposure=.58+settings.exposure*.114;
@@ -509,7 +510,7 @@ function change(key,step){
   }
   if(key==='shaderMode'){
     settings.shaderMode=(settings.shaderMode-1+step+shaderNames.length)%shaderNames.length+1;
-    shaderMode.value=settings.shaderMode-1;persistScreenRendering();hudDirty=true;return;
+    shaderMode.value=settings.shaderMode-1;arena.setRetroSky(shaderMode.value===3);persistScreenRendering();hudDirty=true;return;
   }
   if(key==='timeOfDay'){
     if(spectator.guestActive){
@@ -774,7 +775,7 @@ maps=connectMaps({scene,arena,boot,onReset:angle=>{
 },onVisual:applyVisual,
   getLevel:()=>liveLevel,defaultObjects:[...arena.builtObjects,...scene.children.filter(n=>!beforeFixtures.has(n)),mirrorBacking],
 });
-const spectator=addSpectator({scene,currentMap:()=>(maps.signature||'arena-r25-'+arena.hillSeed)+modelSignature,
+const spectator=addSpectator({scene,localColor:avatarColor,currentMap:()=>(maps.signature||'arena-r25-'+arena.hillSeed)+modelSignature,
   seedArena:seed=>arena.setHillSeed(seed),
   onRoomMap:(value,expected,active)=>maps.loadRoomMap(value,candidate=>{
     const signature=candidate?'custom-'+mapCode(JSON.stringify(candidate)):'arena-r25-'+arena.hillSeed;
@@ -1626,7 +1627,7 @@ function grade(material){
         vec3 ink=mix(vec3(.071,.13,.24),vec3(.99,.83,.54),smoothstep(.10,.92,luma));
         photo=mix(ink,photo,.28);
       }else if(uLabShader==3){
-        vec2 tile=mod(floor(gl_FragCoord.xy),2.);
+        vec2 tile=mod(floor(gl_FragCoord.xy/2.),2.);
         float threshold=mod(2.*tile.x+3.*tile.y,4.)*.25;
         photo=floor(photo*7.+threshold)/7.;
       }
@@ -1640,10 +1641,18 @@ for(const material of arena.materials) grade(material);
 scene.traverse(object=>{ if(object.isMesh&&![panel.mesh,wrist.mesh,cursor].includes(object))grade(object.material); });
 applyVisual();
 const mapQuery=new URLSearchParams(location.search);
-if(mapQuery.has('map'))maps.loadURL(mapQuery.get('map'));
-else{
-  readLocalMap(storageKey).then(saved=>{if(saved&&!maps.active)maps.load(saved);}).catch(error=>maps.inform(error.message));
+let startingMap=true;
+async function restoreStartingMap(){
+  try{
+    if(mapQuery.has('map'))await maps.loadURL(mapQuery.get('map'));
+    else{
+      const saved=await readLocalMap(storageKey);
+      if(saved&&!maps.active)maps.load(saved);
+    }
+  }catch(error){maps.inform(error.message);}
+  finally{startingMap=false;}
 }
+restoreStartingMap();
 function captureNetworkAvatar(){
   const inVR=renderer.xr.isPresenting;
   return {
@@ -1658,6 +1667,8 @@ let wasGuestActive=false,portalInProgress=false,portalCooldown=0;
 renderer.setAnimationLoop((time,frame)=>{
   const actual=frameTime?Math.max(0,(time-frameTime)/1000):.014;
   frameTime=time;
+  if(startingMap||arena.skyLoading&&gameCanvas.dataset.loading==='true')return;
+  gameCanvas.removeAttribute('data-loading');
   const inputDt=Math.max(.0001,Math.min(.035,actual));
   // Ralentir la simulation locale sans changer la cadence WebXR, audio ou réseau.
   const speed=!spectator.role?debugSpeeds[settings.debugSpeed-1]:1;
@@ -1783,7 +1794,7 @@ renderer.setAnimationLoop((time,frame)=>{
   updatePropLights(remoteWorld);
   const far=renderer.xr.isPresenting?210:Math.max(210,maps.worldSize*1.5,maps.fogDistance+10);
   if(camera.far!==far){camera.far=far;camera.updateProjectionMatrix();}
-  arena.centerSky(lightView);
+  arena.centerSky(lightView,camera.far);
   arena.centerShadows(lightView);
   const interval=25+(10-shadowLevel())*(inVR?7:4);
   if(renderer.shadowMap.enabled&&time-lastShadowRender>=interval){

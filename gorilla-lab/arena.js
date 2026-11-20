@@ -16,13 +16,18 @@ function canvasTexture(w,h,paint) {
 export function buildArena(scene,renderer) {
   const {day:sky,sunset,night:nightSky}=createLabSky();
   const panoramas=[sky,sunset,nightSky],backgroundColor=new T.Color(),fog=new T.Fog('#a6d4ea',55,135);
+  const diskTexture=canvasTexture(64,64,(ctx,w)=>{
+    ctx.fillStyle='#ffffff';ctx.beginPath();ctx.arc(w/2,w/2,w*.48,0,Math.PI*2);ctx.fill();
+  });
+  const disk=new T.Sprite(new T.SpriteMaterial({map:diskTexture,alphaTest:.15,depthWrite:false,fog:false,toneMapped:false}));
+  scene.add(disk);
   const haloTexture=canvasTexture(128,128,(ctx,w)=>{
     const g=ctx.createRadialGradient(w/2,w/2,0,w/2,w/2,w/2);
-    g.addColorStop(0,'#fff8df');g.addColorStop(.12,'#fff3bd');g.addColorStop(.18,'rgba(255,225,144,.40)');g.addColorStop(1,'rgba(255,220,144,0)');
+    g.addColorStop(0,'rgba(255,255,255,.85)');g.addColorStop(.16,'rgba(255,255,255,.42)');g.addColorStop(1,'rgba(255,255,255,0)');
     ctx.fillStyle=g;ctx.fillRect(0,0,w,w);
   });
   const halo=new T.Sprite(new T.SpriteMaterial({map:haloTexture,blending:T.AdditiveBlending,depthWrite:false,fog:false,toneMapped:false}));
-  halo.scale.setScalar(34);scene.add(halo);
+  scene.add(halo);
   const skyEnvironment=sky.clone();
   skyEnvironment.mapping=T.EquirectangularReflectionMapping;
   skyEnvironment.needsUpdate=true;
@@ -40,10 +45,10 @@ export function buildArena(scene,renderer) {
   scene.add(ambient,sun,sun.target);
   const lightOffset=new T.Vector3();
 
-  let mood=0,environment=null,skyQuality=true,source=null,importedSky=null,hasBloom=true;
+  let mood=0,environment=null,skyQuality=true,source=null,importedSky=null,hasBloom=true,skyLoading=false;
   let baseReflection=0,skyRequest=0;
   const direction=new T.Vector3();
-  let tinted=null,tintSource=null,tintColor=null;
+  let tinted=null,tintSource=null,tintColor=null,pixelSky=null,pixelSource=null,retro=false,lastShadowLevel=0;
   function tintPanorama(panorama,color){
     if(color==='#ffffff')return panorama;
     if(panorama===tintSource&&color===tintColor)return tinted;
@@ -64,23 +69,45 @@ export function buildArena(scene,renderer) {
     tintSource=panorama;tintColor=color;
     return tinted;
   }
+  function pixelateSky(panorama){
+    if(pixelSource===panorama)return pixelSky;
+    pixelSky?.dispose();
+    const tiny=document.createElement('canvas'),expanded=document.createElement('canvas');
+    tiny.width=384;tiny.height=192;expanded.width=1536;expanded.height=768;
+    tiny.getContext('2d').drawImage(panorama.image,0,0,tiny.width,tiny.height);
+    const ctx=expanded.getContext('2d');
+    ctx.imageSmoothingEnabled=false;ctx.drawImage(tiny,0,0,expanded.width,expanded.height);
+    pixelSky=new T.CanvasTexture(expanded);
+    pixelSky.mapping=T.EquirectangularReflectionMapping;pixelSky.colorSpace=T.SRGBColorSpace;pixelSky.flipY=panorama.flipY;
+    pixelSource=panorama;return pixelSky;
+  }
+  function updateShadowRange(light){
+    const extent=light.shadowRange?Math.max(13,light.shadowRange):13+lastShadowLevel*1.2;
+    const distance=Math.max(33,extent*1.4);
+    lightOffset.copy(direction).multiplyScalar(distance);
+    Object.assign(sun.shadow.camera,{left:-extent,right:extent,top:extent,bottom:-extent,far:Math.max(72,distance+extent*1.5)});
+    sun.shadow.camera.updateProjectionMatrix();
+  }
   function setTimeOfDay(index){
     mood=[0,1,2].includes(index)?index:0;
     const light=environment??environmentPreset(mood);
     const azimuth=T.MathUtils.degToRad(light.azimuth),elevation=T.MathUtils.degToRad(light.elevation);
     direction.set(Math.cos(azimuth)*Math.cos(elevation),Math.sin(elevation),Math.sin(azimuth)*Math.cos(elevation));
-    lightOffset.copy(direction).multiplyScalar(33);
+    updateShadowRange(light);
     ambient.color.set(light.ambientColor);
     ambient.groundColor.set(light.groundColor);
     ambient.intensity=light.ambientPower;
     sun.color.set(light.sunColor);
     sun.intensity=light.sunPower;
     sun.position.copy(sun.target.position).add(lightOffset);
+    disk.material.color.set(light.sunColor);
+    disk.visible=light.sunPower>0;
     halo.material.color.set(light.sunColor);
-    halo.material.opacity=[1,.93,.22][light.preset]*Math.min(1,light.sunPower);
-    halo.visible=hasBloom&&light.sunPower>0;
+    halo.material.opacity=Math.min(1,light.sunHalo*.48)*[1,.93,.45][light.preset];
+    halo.visible=hasBloom&&disk.visible&&light.sunHalo>0;
     const panorama=light.sky==='image'&&importedSky?importedSky:panoramas[light.preset];
-    scene.background=light.sky==='color'||!skyQuality?backgroundColor.set(light.skyColor):tintPanorama(panorama,light.skyTint);
+    const colored=tintPanorama(panorama,light.skyTint);
+    scene.background=light.sky==='color'||!skyQuality?backgroundColor.set(light.skyColor):retro&&!colored.isDataTexture?pixelateSky(colored):colored;
     scene.backgroundRotation.y=T.MathUtils.degToRad(light.rotation);
     fog.color.set(light.fogColor);
     fog.near=light.fogNear;
@@ -94,17 +121,21 @@ export function buildArena(scene,renderer) {
     if(source!==image){
       source=image;
       const request=++skyRequest;
-      importedSky?.dispose();importedSky=null;
+      importedSky?.dispose();importedSky=null;skyLoading=Boolean(image);
       if(image)new T.TextureLoader().load(image,texture=>{
         if(skyRequest!==request){texture.dispose();return;}
         texture.colorSpace=T.SRGBColorSpace;texture.mapping=T.EquirectangularReflectionMapping;
-        importedSky=texture;setTimeOfDay(mood);onReady();
-      },undefined,()=>onReady());
+        importedSky=texture;skyLoading=false;setTimeOfDay(mood);onReady();
+      },undefined,()=>{if(request===skyRequest){skyLoading=false;onReady();}});
     }
     setTimeOfDay(mood);
   }
-  function centerSky(point){
-    halo.position.copy(point).addScaledVector(direction,94);
+  function centerSky(point,far=210){
+    const light=environment??environmentPreset(mood),distance=far*.96;
+    const size=2*distance*Math.tan(T.MathUtils.degToRad(light.sunDiameter/2));
+    disk.position.copy(point).addScaledVector(direction,distance);
+    halo.position.copy(point).addScaledVector(direction,distance*.999);
+    disk.scale.setScalar(size);halo.scale.setScalar(size*(3+light.sunHalo*2));
   }
   // Centre la zone d’ombres près du joueur par pas de quatre mètres pour stabiliser la projection.
   function centerShadows(point){
@@ -333,9 +364,7 @@ export function buildArena(scene,renderer) {
     const shadowSize=shadows>=9?2048:shadows>=6?1024:shadows>=4?512:256;
     sun.shadow.intensity=.45+shadows*.055;
     sun.shadow.radius=.65+shadows*.12;
-    const shadowExtent=13+shadows*1.2;
-    Object.assign(sun.shadow.camera,{left:-shadowExtent,right:shadowExtent,top:shadowExtent,bottom:-shadowExtent});
-    sun.shadow.camera.updateProjectionMatrix();
+    lastShadowLevel=shadows;
     if(sun.shadow.mapSize.x!==shadowSize){sun.shadow.map?.dispose();sun.shadow.map=null;sun.shadow.mapSize.set(shadowSize,shadowSize);}
     hasBloom=bloom;
     if(size!==textureSize){
@@ -371,7 +400,7 @@ export function buildArena(scene,renderer) {
     skyQuality=level>=2;
     setTimeOfDay(mood);
   }
-  return {boxes,floors,probe,display,visual,shadow,setTimeOfDay,setEnvironment,centerSky,sunDirection:()=>direction.clone(),centerShadows,lighting:[ambient,sun,sun.target,halo],get hillSeed(){return hillSeed;},setHillSeed,bakeLightmap,mapMaterial:(i,level)=>level>=4?tiles[i]:alt[i],builtObjects:[...boxes.map(b=>b.mesh).filter(m=>m?.isObject3D),probe,...props],materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
+  return {boxes,floors,probe,display,visual,shadow,setTimeOfDay,setEnvironment,centerSky,setRetroSky(value){if(retro!==value){retro=value;setTimeOfDay(mood);}},sunDirection:()=>direction.clone(),centerShadows,lighting:[ambient,sun,sun.target,halo,disk],sunDisk:disk,sunHalo:halo,get skyLoading(){return skyLoading;},get hillSeed(){return hillSeed;},setHillSeed,bakeLightmap,mapMaterial:(i,level)=>level>=4?tiles[i]:alt[i],builtObjects:[...boxes.map(b=>b.mesh).filter(m=>m?.isObject3D),probe,...props],materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
 }
 
 

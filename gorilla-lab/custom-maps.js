@@ -108,7 +108,15 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
         shape,radius:shape.radius,friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:true,type:piece.material};
       return {mesh,collider,custom:true,model:true};
     }
-    const {material,custom,ownTexture}=card(piece);
+    let {material,custom,ownTexture}=card(piece);
+    if(piece.terrain){
+      if(!custom){
+        const base=material;
+        material=base.clone();material.onBeforeCompile=base.onBeforeCompile;
+        material.customProgramCacheKey=base.customProgramCacheKey;custom=true;
+      }
+      material.side=T.DoubleSide;
+    }
     const geometry=piece.terrain?terrainGeometry(piece):piece.primitive==='ramp'?rampGeometry(piece.w,piece.h,piece.d):piece.primitive&&piece.primitive!=='box'
       ?decorPrimitiveGeometry(piece.primitive).scale(piece.w,piece.h,piece.d)
       :tiledBox(piece.w,piece.h,piece.d);

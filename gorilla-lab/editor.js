@@ -557,16 +557,30 @@ const raycaster = new T.Raycaster();
 const worldUp = new T.Vector3(0, 1, 0);
 const horizontalPlane = new T.Plane(worldUp, 0);
 const normalMatrix = new T.Matrix3();
-let selectionBox = null, renderRequested = false;
+let selectionBox = null, renderRequested = false, editorFps=60, previousEditorFrame=-Infinity;
 
 // L’éditeur ne redessine que si la vue ou le contenu change.
 function queueRender() {
   if (renderRequested) return;
   renderRequested = true;
-  requestAnimationFrame(() => {
+  requestAnimationFrame(time => {
     renderRequested = false;
-    previewArena.centerSky(camera.position);
+    const interval=time-previousEditorFrame;
+    previousEditorFrame=time;
+    if(interval<125)editorFps=T.MathUtils.lerp(editorFps,1000/Math.max(10,interval),.17);
+    const distance=camera.position.distanceTo(controls.target);
+    const fullRange=Math.max(640,map.worldSize*2,distance+map.worldSize*2);
+    const reducedRange=Math.max(140,distance+map.worldSize*.35);
+    const weight=$('adaptive-editor-view').checked?T.MathUtils.smoothstep(editorFps,24,50):1;
+    const desired=T.MathUtils.lerp(reducedRange,fullRange,weight);
+    camera.far=Math.max(reducedRange,T.MathUtils.lerp(camera.far,desired,.20));
+    camera.updateProjectionMatrix();
+    previewArena.centerSky(camera.position,camera.far);
+    const started=performance.now();
     renderer.render(scene, camera);
+    const elapsed=performance.now()-started;
+    if(elapsed>25)editorFps=Math.min(editorFps,1000/elapsed);
+    if(Math.abs(camera.far-desired)>3)queueRender();
     updateDebugStats();
   });
 }
@@ -893,6 +907,7 @@ function rebuildScene() {
     const glass = [10, 11, 12].includes(piece.material);
     const material = new T.MeshLambertMaterial({
       color: new T.Color(materialColors[piece.material]).multiply(new T.Color(piece.color)),
+      side: piece.terrain?T.DoubleSide:T.FrontSide,
       transparent: !piece.solid || glass,
       opacity: piece.solid ? (glass ? .55 : 1) : .40,
     });
@@ -1073,7 +1088,9 @@ function updateInspector() {
   for(const key of uvFields){const input=$('p-'+key);input.disabled=!piece||Boolean(piece?.model);input.value=piece?.[key]??(key==='uvScale'?1:0);}
   $('uv-reset').disabled=!piece||Boolean(piece?.model);
   $('terrain-controls').hidden=$('terrain-props').hidden=$('terrain-texture-density-fields').hidden=!terrain;
+  $('texture-scale-label').hidden=Boolean(terrain);
   if(terrain){
+    $('terrain-triangulation').value=terrain.triangulation??'regular';
     for(const key of terrainFields)$('terrain-'+key).value=terrain[key];
     const reliefArea=terrain.reliefArea??defaultReliefArea(piece);
     $('terrain-relief-local').checked=Boolean(terrain.reliefArea);
@@ -1086,7 +1103,7 @@ function updateInspector() {
     const format=new Intl.NumberFormat('fr-FR',{maximumSignificantDigits:6});
     $('terrain-cell-size').textContent=format.format(piece.w/terrain.detail)+' × '+format.format(piece.d/terrain.detail)+
       ' m par case · '+format.format(triangles)+' triangles (2 par case) · '+format.format(triangles/area)+' triangles/m²';
-    $('terrain-texture-effective').textContent=format.format(terrain.textureDensity/(piece.uvScale??1)**2)+' motifs/m²';
+    $('terrain-texture-effective').textContent=format.format(terrain.textureDensity/(piece.uvScale??1)**2)+' motifs/m² à l’écran avec l’échelle enregistrée';
     renderTerrainRules(piece);
     const neighbor=$('terrain-neighbor'),previous=neighbor.value;
     const options=map.pieces.flatMap((other,index)=>terrainSeam(piece,other)?[new Option(other.name,String(index))]:[]);
@@ -1111,8 +1128,9 @@ function applyEnvironmentPreview(){
   const show=Boolean(map.arenaBase||map.environment);
   sun.visible=ambient.visible=!show;
   for(const light of previewArena.lighting)light.visible=show;
-  const halo=previewArena.lighting.at(-1);
-  halo.visible=show&&(map.environment?.sunPower??3)>0;
+  const {sunDisk,sunHalo}=previewArena;
+  sunDisk.visible=show&&(map.environment?.sunPower??3)>0;
+  sunHalo.visible=sunDisk.visible&&(map.environment?.sunHalo??1)>0;
   scene.background=show?referenceScene.background:neutralBackground;
   scene.backgroundRotation.copy(referenceScene.backgroundRotation);
   scene.fog=show&&$('environment-fog-preview').checked?referenceScene.fog:null;
@@ -2042,6 +2060,15 @@ $('terrain-grassTexture-clear').onclick=()=>{
   if(!current()?.terrain)return;
   remember();current().terrain.grassTexture=null;
   sync();
+};
+$('terrain-triangulation').onchange=event=>{
+  const piece=current();if(!piece?.terrain)return;
+  remember();piece.terrain=normalizeTerrain({...piece.terrain,triangulation:event.target.value},piece.w*piece.d);sync();
+};
+$('adaptive-editor-view').onchange=queueRender;
+$('spawn-gizmo').onclick=()=>{
+  setTool('spawn');
+  notice('Tire la flèche verte Y pour monter le point de départ.');
 };
 for(const key of terrainFields)$('terrain-'+key).onchange=event=>{
   const piece=current();if(!piece?.terrain)return;

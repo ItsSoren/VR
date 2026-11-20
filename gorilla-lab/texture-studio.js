@@ -217,6 +217,7 @@ export function openTextureStudio({initial=null,tint='#687a86',name='Texture',pa
           </div>
           <button data-cmd="add-shape">+ Ajouter le dessin comme forme</button>
           <output data-shape-count>0 forme</output>
+          <div data-shape-list></div>
           <button data-cmd="generate">Générer le motif</button>
         </div>
         <div class="texture-section">
@@ -269,7 +270,7 @@ export function openTextureStudio({initial=null,tint='#687a86',name='Texture',pa
   const undo=[],redo=[];
   let changed=false,painting=false,dragPointer=null,tool='paint',last=null,savedTexture=null;
   find('#studio-title').textContent=name+' / SURFACE LAB';
-  let shapes=[];
+  let shapes=[],editingShape=-1;
   find('[data-field=base]').value=settings.base;
   for(const field of ['base','seed','resolution','ink','size','opacity','hardness']){
     find('[data-field='+field+']').addEventListener('input',event=>{
@@ -287,10 +288,10 @@ export function openTextureStudio({initial=null,tint='#687a86',name='Texture',pa
     for(let y=0;y<2;y++)for(let x=0;x<4;x++)t.drawImage(display,x*64,y*64,64,64);
   };
   const capture=()=>({base:background.getImageData(0,0,SIZE,SIZE),
-    top:top.getImageData(0,0,SIZE,SIZE),shapes});
+    top:top.getImageData(0,0,SIZE,SIZE),shapes,editingShape});
   const restore=state=>{
     background.putImageData(state.base,0,0);
-    top.putImageData(state.top,0,0);shapes=state.shapes;updateShapeCount();composite();
+    top.putImageData(state.top,0,0);shapes=state.shapes;editingShape=state.editingShape;updateShapeCount();composite();
   };
   const remember=()=>{
     savedTexture=null;
@@ -309,6 +310,29 @@ export function openTextureStudio({initial=null,tint='#687a86',name='Texture',pa
   };
   const updateShapeCount=()=>{
     find('[data-shape-count]').textContent=shapes.length+' forme'+(shapes.length>1?'s':'');
+    find('[data-cmd=add-shape]').textContent=editingShape<0?'+ Ajouter le dessin comme forme':'Enregistrer la forme '+(editingShape+1);
+    find('[data-shape-list]').replaceChildren(...shapes.map((shape,index)=>{
+      const row=document.createElement('div');
+      row.className='texture-setting-row';
+      const preview=document.createElement('canvas');preview.width=48;preview.height=32;
+      const scale=Math.min(48/shape.width,32/shape.height);
+      preview.getContext('2d').drawImage(shape,0,0,shape.width*scale,shape.height*scale);
+      const edit=document.createElement('button'),remove=document.createElement('button');
+      edit.textContent='Modifier '+(index+1);remove.textContent='Supprimer '+(index+1);
+      edit.onclick=()=>{
+        remember();editingShape=index;
+        top.clearRect(0,0,SIZE,SIZE);
+        top.drawImage(shape,(SIZE-shape.width)/2,(SIZE-shape.height)/2);
+        updateShapeCount();composite();
+      };
+      remove.onclick=()=>{
+        remember();shapes=shapes.filter((_,i)=>i!==index);
+        if(editingShape===index){editingShape=-1;top.clearRect(0,0,SIZE,SIZE);}
+        else if(editingShape>index)editingShape--;
+        updateShapeCount();composite();
+      };
+      row.append(preview,edit,remove);return row;
+    }));
   };
   find('[data-cmd=add-shape]').onclick=()=>{
     const pixels=top.getImageData(0,0,SIZE,SIZE).data;
@@ -321,7 +345,9 @@ export function openTextureStudio({initial=null,tint='#687a86',name='Texture',pa
     const shape=document.createElement('canvas');
     shape.width=x1-x0+1;shape.height=y1-y0+1;
     shape.getContext('2d').drawImage(overlay,x0,y0,shape.width,shape.height,0,0,shape.width,shape.height);
-    remember();shapes=[...shapes,shape];top.clearRect(0,0,SIZE,SIZE);
+    remember();
+    shapes=editingShape<0?[...shapes,shape]:shapes.map((value,index)=>index===editingShape?shape:value);
+    editingShape=-1;top.clearRect(0,0,SIZE,SIZE);
     updateShapeCount();composite();setStatus('Forme ajoutée. Dessine la suivante ou génère ton motif.');
   };
   const generate=()=>{

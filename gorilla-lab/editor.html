@@ -476,6 +476,7 @@
           <summary>Maillage et relief</summary>
           <h3>Maillage déformable</h3>
           <div class="fields">
+            <label>Diagonales du maillage<select id="terrain-triangulation"><option value="regular">Régulières</option><option value="varied">Variées (graine du terrain)</option></select></label>
             <label>Cases de maillage par axe<input id="terrain-detail" type="number" min="1" max="512" step="1"></label>
             <label>Dimensions et densité du maillage <output id="terrain-cell-size" style="color:var(--text)">—</output></label>
           </div>
@@ -483,7 +484,7 @@
           <div class="fields">
             <label>Graine<input id="terrain-seed" type="number" min="0" max="2147483647"></label>
             <label>Hauteur du bruit (m)<input id="terrain-amplitude" type="number" min="0" max="10000" step="any"></label>
-            <label>Fréquence de base (cycles/m)<input id="terrain-frequency" type="number" min=".00001" max="100" step="any"></label>
+            <label>Fréquence de base (cycles/m)<input id="terrain-frequency" type="number" min="0" max="100" step=".005" title="Flèches : pas de 0,005 cycle/m. Tu peux saisir une valeur plus précise."></label>
             <label>Couches de bruit<input id="terrain-octaves" type="number" min="1" max="20" step="1" title="Chaque couche double la fréquence"></label>
             <label>Rugosité (0–1)<input id="terrain-roughness" type="number" min="0" max="1" step=".01" title="Poids des couches fines"></label>
             <label>Crêtes (0–1)<input id="terrain-ridge" type="number" min="0" max="1" step=".01" title="Transforme les bosses en crêtes"></label>
@@ -540,7 +541,7 @@
               <label>Texture de terrain (motifs/m²)<input id="terrain-textureDensity" type="number" min=".0001" max="10000" step="any"></label>
               <label>Densité après échelle UV <output id="terrain-texture-effective">–</output></label>
             </div>
-            <label>Échelle de la texture<input id="p-uvScale" type="number" min=".05" max="100" step=".05" title="1 = densité standard ; 2 = motifs deux fois plus grands"></label>
+            <label id="texture-scale-label">Échelle de la texture<input id="p-uvScale" type="number" min=".05" max="100" step=".05" title="1 = densité standard ; 2 = motifs deux fois plus grands"></label>
             <label>Rotation de texture (°)<input id="p-uvRotation" type="number" min="-360" max="360" step="5"></label>
             <label>Décalage texture X<input id="p-uvOffsetX" type="number" min="-100" max="100" step=".1"></label>
             <label>Décalage texture Y<input id="p-uvOffsetY" type="number" min="-100" max="100" step=".1"></label>
@@ -568,6 +569,7 @@
           <output class="wide" id="environment-status" aria-live="polite"></output>
           <h3 class="wide">Brouillard</h3>
           <label class="compact"><input data-env="fog" type="checkbox"> En jeu</label>
+          <label class="compact"><input id="adaptive-editor-view" type="checkbox" checked> Portée adaptative dans l’atelier</label>
           <label class="compact"><input id="environment-fog-preview" type="checkbox"> Aperçu dans l'atelier</label>
           <label>Couleur<input data-env="fogColor" type="color"></label>
           <label>Début (m)<input data-env="fogNear" type="number" min="0" max="4095"></label>
@@ -577,6 +579,9 @@
           <label>Direction du soleil (°)<input data-env="azimuth" type="number" min="-360" max="360" step="1"></label>
           <label>Hauteur du soleil (°)<input data-env="elevation" type="number" min="-89" max="89" step="1"></label>
           <label>Couleur du soleil<input data-env="sunColor" type="color"></label>
+          <label>Diamètre apparent du soleil (°)<input data-env="sunDiameter" type="number" min=".1" max="12" step=".1"></label>
+          <label>Portée des ombres (m, 0 = auto)<input data-env="shadowRange" type="number" min="0" max="160" step="1"></label>
+          <label>Halo du soleil<input data-env="sunHalo" type="number" min="0" max="4" step=".1"></label>
           <label>Intensité du soleil<input data-env="sunPower" type="number" min="0" max="12" step=".05"></label>
           <label>Lumière ambiante du ciel<input data-env="ambientColor" type="color"></label>
           <label>Lumière du sol<input data-env="groundColor" type="color"></label>
@@ -604,6 +609,7 @@
           <label>Z<input id="spawn-z" type="number" step=".25"></label>
           <label>Direction (°)<input id="spawn-yaw" type="number" step=".25"></label>
           <button class="wide" id="spawn-here">Au-dessus de la pièce</button>
+          <button id="spawn-gizmo" class="wide">Déplacer le départ en 3D</button>
         </div>
       </details>
     </aside>

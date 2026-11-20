@@ -30,7 +30,7 @@ function makeOrb(){
   }};
 }
 
-function makeAvatar(){
+function makeAvatar(localColor){
   const model=new T.Group(),toolRoot=new T.Group();
   const style=createAvatarStyle(0),head=style.createHead();
   const hands=['left','right'].map(side=>{
@@ -63,7 +63,8 @@ function makeAvatar(){
     const stretch=Math.max(.38,data.armSpan*(2/3)/.82);
     body.position.set(0,-.25-.24*stretch,.24*lean);body.rotation.x=-.5*lean;
     torsoRelative.copy(body.quaternion).invert();
-    style.setColor(data.color??0);
+    const color=data.color??0;
+    style.setColor(color===localColor?(color===1?2:1):color);
     for(let i=0;i<hands.length;i++){
       const h=hands[i],state=data.hands[i];
       handPoses[i]=state?h:null;
@@ -111,8 +112,12 @@ function disposeArt(root){
   for(const material of materials)material.dispose();
 }
 
-export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,onAction,onShot,onStatus,onRoomMap,restoreRoomMap,roomMapSource}){
+export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,applyLight,onAction,onShot,onStatus,onRoomMap,restoreRoomMap,roomMapSource}){
   const peers=new Map(),replicas=new Map(),feed=createObjectFeed();
+  function removePeer(id,entry){
+    if(entry.art){disposeArt(entry.art.model);disposeArt(entry.art.toolRoot);entry.art.dispose?.();}
+    peers.delete(id);
+  }
   let replicaHost=0,replicaMap=-1,replicaLight=-1;
   let cachedMap='',cachedId=0;
   function localMap(){
@@ -222,8 +227,7 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     onPeer(pose,previous){
       if(!pose){
         const entry=peers.get(previous.id);
-        if(entry?.art){disposeArt(entry.art.model);disposeArt(entry.art.toolRoot);entry.art.dispose?.();}
-        peers.delete(previous.id);
+        if(entry)entry.inactive=true;
         return;
       }
       let entry=peers.get(pose.id);
@@ -242,7 +246,7 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
           }
         }
       }
-      entry.pose=pose;
+      entry.pose=pose;entry.inactive=false;
     },
     onAction,onShot,
   });
@@ -255,7 +259,8 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     new URLSearchParams(location.search).get('roomMap');
   let roomMapPending=false,visit=0,lastMapAttempt=null,telemetryAt=-Infinity;
   function leave(){
-    visit++;roomMapPending=false;lastMapAttempt=null;client.leave();restoreRoomMap?.();refreshRoomActions();
+    visit++;roomMapPending=false;lastMapAttempt=null;client.leave();
+    for(const [id,entry] of peers)removePeer(id,entry);restoreRoomMap?.();refreshRoomActions();
     const output=$('#cloud-telemetry');
     if(output)output.textContent='';
   }
@@ -285,6 +290,11 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
   }
   $('#cloud-leave').onclick=()=>{copyUntil=0;leave();};
   $('#cloud-copy').onclick=async()=>{
+    if(copyButton.disabled)return;
+    copyButton.disabled=true;
+    const label=copyButton.textContent;
+    copyButton.textContent='Préparation…';
+    try{
     const url=new URL(location.href);
     url.hash='';
     url.searchParams.delete('roomMap');
@@ -297,14 +307,16 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
       try{source=await roomMapSource?.();}catch{}
       if(client.role!=='vr'||client.code!==code)return;
       if(!source){
-        status.textContent='Carte trop volumineuse pour ce lien. Dans Carte, charge son JSON depuis une URL HTTPS partageable, puis relance le salon.';
-        copyUntil=performance.now()+5500;return;
+        try{await navigator.clipboard.writeText(url.href);}catch{window.prompt('Copie le lien du salon',url.href);}
+        status.textContent='Lien du salon prêt. La carte est trop lourde : l’invité doit importer le même JSON avant de rejoindre.';
+        copyUntil=performance.now()+12000;return;
       }
       url.hash=new URLSearchParams({roomMap:source}).toString();
     }
     try{await navigator.clipboard.writeText(url.href);status.textContent='Invitation copiée. Envoie le lien complet à ton invité.';}
-    catch{status.textContent=url.href;}
-    copyUntil=performance.now()+2500;
+    catch{window.prompt('Copie le lien d’invitation',url.href);}
+    copyUntil=performance.now()+3500;
+    }finally{copyButton.disabled=false;copyButton.textContent=label;}
   };
   addEventListener('pagehide',()=>client.leave());
   function showInvitation(){
@@ -329,24 +341,27 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     position.copy(rig.position);
   }
   function renderPeers(ready,time,dt,now){
-    for(const entry of peers.values()){
+    for(const [id,entry] of peers){
       const pose=entry.pose;
+      if(entry.inactive&&now-pose.arrival>=60000){removePeer(id,entry);continue;}
       const visible=ready&&readyHere(pose);
       if(!visible){
         if(entry.art){entry.art.model.visible=false;if(entry.art.toolRoot)entry.art.toolRoot.visible=false;}
         continue;
       }
       if(!entry.art){
-        entry.art=pose.role==='pc'?makeOrb():makeAvatar();
+        entry.art=pose.role==='pc'?makeOrb():makeAvatar(localColor);
         scene.add(entry.art.model);entry.art.model.visible=false;
         if(entry.art.toolRoot)scene.add(entry.art.toolRoot);
       }
       const {model,toolRoot}=entry.art;
+      if(entry.inactive){model.visible=true;if(toolRoot)toolRoot.visible=false;continue;}
       const prediction=Math.min(.12,Math.max(0,(now-pose.arrival)/1000+.025));
       target.copy(pose).addScaledVector(entry.motion,prediction);
       if(!model.visible||model.position.distanceToSquared(target)>64)model.position.copy(target);
       else model.position.lerp(target,1-Math.exp(-dt*34));
-      model.rotation.y=pose.yaw;
+      const turn=pose.yaw-model.rotation.y;
+      model.rotation.y=model.visible?model.rotation.y+Math.atan2(Math.sin(turn),Math.cos(turn))*(1-Math.exp(-dt*18)):pose.yaw;
       model.visible=true;if(toolRoot)toolRoot.visible=true;
       entry.art.draw(pose,time,dt);
     }

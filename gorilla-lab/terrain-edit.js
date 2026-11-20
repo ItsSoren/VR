@@ -95,6 +95,7 @@ export function normalizeTerrain(value = {},area=1) {
   const heights = value?.heights;
   return {
     detail,
+    ...(value?.triangulation==='varied'?{triangulation:'varied'}:{}),
     seed: Math.round(bounded(value?.seed, 0, 2147483647, 1)),
     amplitude: bounded(value?.amplitude, 0, 10_000, 0),
     frequency: bounded(value?.frequency, .00001, 100, .12),
@@ -113,12 +114,16 @@ export function normalizeTerrain(value = {},area=1) {
 }
 
 // The brush, physics, and vegetation all sample the mesh's triangle split.
-function sampleGrid(heights, detail, x, z) {
+function alternateDiagonal(col,row,seed){return seed!==undefined&&hash(col,row,seed)>.5;}
+function sampleGrid(heights, detail, x, z, diagonalSeed) {
   const gx = clamp(x, 0, detail), gz = clamp(z, 0, detail);
   const col = Math.min(detail - 1, Math.floor(gx)), row = Math.min(detail - 1, Math.floor(gz));
   const u = gx - col, v = gz - row, stride = detail + 1;
   const i = row * stride + col;
   const a = heights[i], b = heights[i + 1], c = heights[i + stride], d = heights[i + stride + 1];
+  if(alternateDiagonal(col,row,diagonalSeed)){
+    return u>=v?a+(b-a)*u+(d-b)*v:a+(d-c)*u+(c-a)*v;
+  }
   return u + v <= 1 ? a + (b - a) * u + (c - a) * v : d + (c - d) * (1 - u) + (b - d) * (1 - v);
 }
 
@@ -129,7 +134,8 @@ export function resizeTerrain(terrain, requestedDetail) {
   const stride = detail + 1;
   const ratio = terrain.detail / detail;
   const heights = Array.from({ length: stride ** 2 }, (_, i) =>
-    sampleGrid(terrain.heights, terrain.detail, (i % stride) * ratio, Math.floor(i / stride) * ratio));
+    sampleGrid(terrain.heights, terrain.detail, (i % stride) * ratio, Math.floor(i / stride) * ratio,
+      terrain.triangulation==='varied'?terrain.seed:undefined));
   return { ...terrain, detail, heights };
 }
 
@@ -152,7 +158,7 @@ function gridFor(piece) {
   const { detail, seed, amplitude, frequency, octaves, roughness, ridge, edgeFade, reliefArea, heights } = terrain;
   const cached = grids.get(piece);
   const sameNoise = cached && cached.w === w && cached.d === d && cached.detail === detail &&
-    cached.seed === seed && cached.amplitude === amplitude && cached.frequency === frequency &&
+    cached.diagonalSeed===(terrain.triangulation==='varied'?seed:undefined) && cached.seed === seed && cached.amplitude === amplitude && cached.frequency === frequency &&
     cached.octaves === octaves && cached.roughness === roughness && cached.ridge === ridge && cached.edgeFade === edgeFade && cached.reliefArea === reliefArea;
   if (sameNoise && cached.heights === heights) return cached;
 
@@ -187,14 +193,14 @@ function gridFor(piece) {
     }
   }
   const surface = heights ? procedural.map((height, i) => height + heights[i]) : procedural;
-  const grid = { w, d, detail, seed, amplitude, frequency, octaves, roughness, ridge, edgeFade, reliefArea, heights, procedural, surface };
+  const grid = { w, d, detail, seed, diagonalSeed:terrain.triangulation==='varied'?seed:undefined, amplitude, frequency, octaves, roughness, ridge, edgeFade, reliefArea, heights, procedural, surface };
   grids.set(piece, grid);
   return grid;
 }
 
 function localHeight(grid, x, z) {
   const { detail, w, d, surface } = grid;
-  return sampleGrid(surface, detail, (x / w + .5) * detail, (z / d + .5) * detail);
+  return sampleGrid(surface, detail, (x / w + .5) * detail, (z / d + .5) * detail, grid.diagonalSeed);
 }
 
 export function terrainQuarterYaw(yaw=0){
@@ -368,8 +374,14 @@ export function terrainGeometry(piece) {
       uvs[2 * vertex] = col/detail*w*repetitionsPerMetre;
       uvs[2 * vertex + 1] = (1-row/detail)*d*repetitionsPerMetre;
       if (row < detail && col < detail) {
-        index.set([vertex, vertex + stride, vertex + 1,
-          vertex + stride + 1, vertex + 1, vertex + stride], indexOffset);
+        const b=vertex+1,c=vertex+stride,d=c+1;
+        if(terrain.triangulation==='varied'&&alternateDiagonal(col,row,terrain.seed)){
+          index[indexOffset]=vertex;index[indexOffset+1]=c;index[indexOffset+2]=d;
+          index[indexOffset+3]=vertex;index[indexOffset+4]=d;index[indexOffset+5]=b;
+        }else{
+          index[indexOffset]=vertex;index[indexOffset+1]=c;index[indexOffset+2]=b;
+          index[indexOffset+3]=d;index[indexOffset+4]=b;index[indexOffset+5]=c;
+        }
         indexOffset += 6;
       }
     }
@@ -399,6 +411,12 @@ function terrainLocalNormal(grid,localX,localZ,out){
   const v=clamp((localZ/d+.5)*detail,0,detail);
   const col=Math.min(detail-1,Math.floor(u)),row=Math.min(detail-1,Math.floor(v));
   const stride=detail+1, i=row*stride+col;
+  if(alternateDiagonal(col,row,grid.diagonalSeed)){
+    const lower=u-col>=v-row;
+    const dx=lower?surface[i+1]-surface[i]:surface[i+stride+1]-surface[i+stride];
+    const dz=lower?surface[i+stride+1]-surface[i+1]:surface[i+stride]-surface[i];
+    return out.set(-dx*detail/w,1,-dz*detail/d).normalize();
+  }
   const lower=u-col+v-row<=1;
   const dx=lower?surface[i+1]-surface[i]:surface[i+stride+1]-surface[i+stride];
   const dz=lower?surface[i+stride]-surface[i]:surface[i+stride+1]-surface[i+1];
