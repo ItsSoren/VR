@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#191d23">
-<title>GORILLA / FOUNDRY · Atelier de modèles R39.1</title>
+<title>GORILLA / FOUNDRY · Atelier de modèles R39.2</title>
 <style>
 :root{color-scheme:dark;--ink:#e4e8eb;--soft:#a4adb5;--muted:#798790;--line:#39424a;
 --panel:#232a30;--panel-2:#1d252c;--bg:#151b20;--accent:#edac67;--blue:#77c7cc;
@@ -130,6 +130,7 @@ color:#aabcc4}
 .inspector[data-tab=collision] #collision-panel,
 .inspector[data-tab=settings] #settings-panel,
 .inspector[data-tab=avatar] #avatar-panel,
+.inspector[data-tab=animation] #animation-panel,
 .inspector[data-tab=publish] #publish-panel{display:block}
 .tabs{flex-wrap:wrap}
 #negative-scale-option{display:flex;align-items:center;gap:4px}
@@ -315,6 +316,7 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
       <button class="tab" data-panel="appearance" aria-pressed="false">Texturer</button>
       <button class="tab" data-panel="collision" aria-pressed="false">Collisions</button>
       <button class="tab" data-panel="settings" aria-pressed="false">Comportements</button>
+      <button class="tab" data-panel="animation" aria-pressed="false">Animation</button>
       <button class="tab" data-panel="avatar" aria-pressed="false">Avatar</button>
       <button class="tab" data-panel="publish" aria-pressed="false">Publier / Placer</button></nav>
       <div class="side-body">
@@ -492,6 +494,31 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
               <label>Rebond<input id="model-bounce" type="number" min="0" max="1.65" step=".05"></label>
             </div>
           </div>
+          <div class="panel-body" id="animation-panel">
+            <h3>Porte articulée</h3>
+            <p class="hint" id="hinge-hint">Sélectionne le panneau de la porte.</p>
+            <button id="hinge-add" type="button">Articuler la sélection</button>
+            <div id="hinge-fields" hidden>
+              <h3>Pivot vertical</h3>
+              <div class="axes">
+                <label>X (m)<input id="hinge-x" type="number" min="-6" max="6" step=".01"></label>
+                <label>Y (m)<input id="hinge-y" type="number" min="-6" max="6" step=".01"></label>
+                <label>Z (m)<input id="hinge-z" type="number" min="-6" max="6" step=".01"></label>
+              </div>
+              <h3>Poses</h3>
+              <div class="axes">
+                <label>Fermée (°)<input id="hinge-closed" type="number" min="-180" max="180" step="1"></label>
+                <label>Ouverte (°)<input id="hinge-open" type="number" min="-180" max="180" step="1"></label>
+                <label>Durée (s)<input id="hinge-seconds" type="number" min=".1" max="6" step=".1"></label>
+              </div>
+              <label>Position entre les poses<input id="hinge-preview" type="range" min="0" max="1" step=".01" value="0"></label>
+              <div class="inline-actions">
+                <button id="hinge-play" type="button">Lire</button>
+                <button id="hinge-remove" type="button">Retirer l’articulation</button>
+              </div>
+              <p class="hint">En jeu solo, vise le panneau et appuie sur E. Le volume solide suit le panneau.</p>
+            </div>
+          </div>
           <div class="panel-body" id="publish-panel">
               <h3>Enregistrer et placer</h3>
             <div class="inline-actions"><button id="publish-save" type="button">Enregistrer le modèle</button></div>
@@ -509,6 +536,6 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
   <button data-action="mirror">⥊ Miroir X</button><button data-action="ground">⤓ Poser sur la grille</button>
   <button data-action="focus">⊡ Cadrer</button><button data-action="delete">✕ Supprimer</button>
 </div>
-<script defer src="./gorilla-model-editor-r39.js?v=R39.1"></script>
+<script defer src="./gorilla-model-editor-r39.js?v=R39.2"></script>
 </body>
 </html>
