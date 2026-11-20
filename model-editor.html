@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#191d23">
-<title>GORILLA / FOUNDRY · Atelier de modèles R38.10</title>
+<title>GORILLA / FOUNDRY · Atelier de modèles R39</title>
 <style>
 :root{color-scheme:dark;--ink:#e4e8eb;--soft:#a4adb5;--muted:#798790;--line:#39424a;
 --panel:#232a30;--panel-2:#1d252c;--bg:#151b20;--accent:#edac67;--blue:#77c7cc;
@@ -420,6 +420,13 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
             <label class="check"><input id="part-collisions" type="checkbox"> Une zone par pièce du décor</label>
             <div id="part-zone-controls" hidden>
               <label>Zone de la pièce sélectionnée <select id="part-zone"></select></label>
+              <div id="trigger-notice" hidden>
+                <h3>Message du déclencheur</h3>
+                <label>Moment<select id="trigger-notice-phase"><option value="enter">À l’entrée</option><option value="exit">À la sortie</option></select></label>
+                <label>Texte<input id="trigger-notice-text" maxlength="48" placeholder="Ex. Bienvenue dans la grotte"></label>
+                <h3>Portail vers une carte</h3>
+                <label>Destination en solo<input id="trigger-portal" maxlength="700" placeholder="URL HTTPS ou arena"></label>
+              </div>
               <p class="hint">Orange pour les zones solides, cyan pour les déclencheurs. Une pièce traversable est libre de collision.</p>
             </div>
             <label class="check"><input id="hitbox-preview-toggle" type="checkbox" checked> Afficher les volumes de collision</label>
@@ -502,6 +509,6 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
   <button data-action="mirror">⥊ Miroir X</button><button data-action="ground">⤓ Poser sur la grille</button>
   <button data-action="focus">⊡ Cadrer</button><button data-action="delete">✕ Supprimer</button>
 </div>
-<script defer src="./gorilla-model-editor-r38.js?v=R38.10"></script>
+<script defer src="./gorilla-model-editor-r39.js?v=R39"></script>
 </body>
 </html>
