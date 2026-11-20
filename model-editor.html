@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#191d23">
-<title>GORILLA / FOUNDRY · Atelier de modèles R39.5</title>
+<title>GORILLA / FOUNDRY · Atelier de modèles R39.6</title>
 <style>
 :root{color-scheme:dark;--ink:#e4e8eb;--soft:#a4adb5;--muted:#798790;--line:#39424a;
 --panel:#232a30;--panel-2:#1d252c;--bg:#151b20;--accent:#edac67;--blue:#77c7cc;
@@ -133,6 +133,10 @@ color:#aabcc4}
 .inspector[data-tab=animation] #animation-panel,
 .inspector[data-tab=publish] #publish-panel{display:block}
 .tabs{flex-wrap:wrap}
+#effect-actions[hidden]{display:none}
+#effect-fields details{margin:.55rem 0;padding:.45rem;border:1px solid #455660;border-radius:5px}
+#effect-fields summary{cursor:pointer}
+#effect-fields .axes{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:.5rem}
 #negative-scale-option{display:flex;align-items:center;gap:4px}
 #negative-scale-option[hidden]{display:none}
 #part-fields>label{margin-bottom:9px}
@@ -495,6 +499,15 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
             </div>
           </div>
           <div class="panel-body" id="animation-panel">
+            <h3>Effets visuels</h3>
+            <p id="effect-note" class="hint">Sélectionne une pièce pour composer son effet.</p>
+            <div class="inline-actions" id="effect-actions" hidden>
+              <button id="effect-new" type="button">Partir de zéro</button>
+              <button id="effect-jelly" type="button">Gelée rouge</button>
+              <button id="effect-void" type="button">Cube du Néant</button>
+              <button id="effect-remove" type="button">Retirer l’effet</button>
+            </div>
+            <div id="effect-fields" hidden></div>
             <h3>Porte articulée</h3>
             <p class="hint" id="hinge-hint">Sélectionne le panneau de la porte.</p>
             <button id="hinge-add" type="button">Articuler la sélection</button>
@@ -536,6 +549,6 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
   <button data-action="mirror">⥊ Miroir X</button><button data-action="ground">⤓ Poser sur la grille</button>
   <button data-action="focus">⊡ Cadrer</button><button data-action="delete">✕ Supprimer</button>
 </div>
-<script defer src="./gorilla-model-editor-r39.js?v=R39.5"></script>
+<script defer src="./gorilla-model-editor-r39.js?v=R39.6"></script>
 </body>
 </html>
