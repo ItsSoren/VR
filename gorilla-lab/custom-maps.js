@@ -138,6 +138,8 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
       }
     }
   }
+  let worldLimits=null;
+  const worldBox=new T.Box3(),pieceBox=new T.Box3();
   function rebuild(){
     for(const row of meshRows)removeRow(row);
     meshRows.length=0;
@@ -170,6 +172,17 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     }
     else arena.boxes.splice(0,arena.boxes.length,...builtBoxes);
     group.updateMatrixWorld(true);
+    worldLimits=null;
+    if(map){
+      worldBox.makeEmpty();worldBox.expandByPoint(boot);
+      for(const {mesh} of meshRows){
+        if(!mesh.geometry.boundingBox)mesh.geometry.computeBoundingBox();
+        worldBox.union(pieceBox.copy(mesh.geometry.boundingBox).applyMatrix4(mesh.matrixWorld));
+      }
+      const reach=Math.max(155,map.worldSize/2);
+      worldLimits={minX:Math.min(-reach,worldBox.min.x-16),maxX:Math.max(reach,worldBox.max.x+16),
+        minZ:Math.min(-reach,worldBox.min.z-16),maxZ:Math.max(reach,worldBox.max.z+16),minY:Math.min(-24,worldBox.min.y-24)};
+    }
     arena.setEnvironment(map?.environment??null);
     arena.bakeLightmap();
     onVisual();
@@ -244,7 +257,6 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
       const selectedPiece=map.pieces[index];
       if(click&&mode===2){selection=index;moving=index;inform('Pièce saisie. Mode Poser pour la déplacer.');}
       if(click&&mode===3){
-        if(map.pieces.length===1)return inform('Garde au moins une pièce dans la map.');
         memo();map.pieces.splice(index,1);selection=moving=-1;rebuild();inform('Pièce supprimée.');
       }
       if(click&&mode===4){
@@ -364,7 +376,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   document.querySelector('#map-load-url').onclick=()=>loadURL(url.value);
   document.querySelector('#map-export').onclick=save;
   document.querySelector('#map-reset').onclick=reset;
-  return {checkTriggers,placedModels:()=>map?.pieces.filter(p=>p.model?.kind==='prop')??[],modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,loadRoomMap,leaveRoomMap,roomMapSource,reset,blank,undo,save,edit,recenter,inform,
+  return {checkTriggers,get worldLimits(){return worldLimits;},placedModels:()=>map?.pieces.filter(p=>p.model?.kind==='prop')??[],modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,loadRoomMap,leaveRoomMap,roomMapSource,reset,blank,undo,save,edit,recenter,inform,
     mirrors:()=>mirrorRows,
     get usesBuiltInMirror(){return !map||map.arenaBase&&!map.editableArena&&!map.pieces.some(piece=>piece.sceneryId==='lab-mirror');},
     clearGhost(){ghost.visible=false;},get active(){return Boolean(map);},get builtIn(){return !map||map.arenaBase===true;},get assetLayer(){return map?.assetLayer===true;},

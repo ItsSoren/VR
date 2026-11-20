@@ -832,7 +832,7 @@ test('terrain quarter turns preserve height, normals, sculpting, props and the n
  disposeVegetation(group);
 });
 
-test('props retain up to ten palette stops and render ten thousand models per rule',()=>{
+test('props retain ten palette stops and scale visual count with terrain area',()=>{
  const colors=['#110000','#220000','#330000','#440000','#550000','#660000','#770000','#880000','#990000','#aa0000'];
  assert.deepEqual(normalizeTerrainRule({colorA:'#110000',colorB:'#220000'}).colors,colors.slice(0,2));
  assert.deepEqual(normalizeTerrainRule({colors:[...colors,'#bb0000']}).colors,colors);
@@ -843,11 +843,11 @@ test('props retain up to ten palette stops and render ten thousand models per ru
   {kind:'model',model,colors,density:20000,size:100,variation:5},
   {kind:'shrub',density:10000,collidable:true},
  ]});
- Object.assign(map.pieces[0],{w:2,d:2,terrain});
+ Object.assign(map.pieces[0],{w:25,d:25,terrain});
  const piece=parseMap(JSON.stringify(map)).pieces[0];
  assert.deepEqual(piece.terrain.rules[0].colors,colors);
  const props=terrainVegetation(piece);
- assert.deepEqual(props.children.map(row=>row.count),[10000,10000]);
+ assert.deepEqual(props.children.map(row=>row.count),[12500,12500]);
  assert.equal(terrainInstanceBoxes(piece,props).length,10000);
  disposeVegetation(props);
 });
@@ -945,7 +945,7 @@ test('terrain prop filters honor area, slope, altitude, and orientation across J
  ]}});
  const saved=parseMap(map),piece=saved.pieces[0],loaded=parseMap(JSON.stringify(saved)).pieces[0];
  const first=terrainVegetation(piece),second=terrainVegetation(loaded);
- assert.deepEqual(first.userData.distribution,[{requested:50,count:50,area:100},{requested:0,count:0,area:0}]);
+ assert.deepEqual(first.userData.distribution,[{requested:50,count:50,area:100,collisions:0},{requested:0,count:0,area:0,collisions:0}]);
  assert.deepEqual(first.children[0].instanceMatrix.array,second.children[0].instanceMatrix.array);
  const matrix=new T.Matrix4(),position=new T.Vector3(),rotation=new T.Quaternion(),scale=new T.Vector3();
  for(let index=0;index<first.children[0].count;index++){
@@ -1059,4 +1059,13 @@ test('a small custom map can be carried in a room invitation with bounded decodi
  assert.deepEqual(JSON.parse(await decodeRoomMapLink(packed,100_000)),map);
  await assert.rejects(decodeRoomMapLink(packed,20),/trop lourde/);
  await assert.rejects(decodeRoomMapLink('gzip:invalid+',100_000),/invalide/);
+});
+
+test('R39 accepts empty maps and retains a 350 m relief across export',()=>{
+ const map=exampleMap();
+ assert.deepEqual(parseMap({...map,pieces:[]}).pieces,[]);
+ const terrain=normalizeTerrain({detail:300,amplitude:350,frequency:.003,octaves:14,roughness:1});
+ const saved=parseMap(JSON.stringify({...map,pieces:[{...map.pieces[0],terrain}],spawn:{...map.spawn,y:400}}));
+ assert.equal(saved.spawn.y,400);
+ for(const name of ['detail','amplitude','frequency','octaves','roughness']) assert.equal(saved.pieces[0].terrain[name],terrain[name]);
 });

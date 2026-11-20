@@ -1,7 +1,7 @@
 import * as T from 'three';
 import {normalizeModelPack,createModelUnitGeometry,createModelMaterial,disposeModelMaterial,modelDimensions} from './model-pack.js';
 
-export const maxTerrainDetail=256;
+export const maxTerrainDetail=512;
 export const defaultTerrainTextureDensity=1/2.6**2;
 export const maxTerrainRules=10000;
 export const maxTerrainDensity=20;
@@ -10,9 +10,9 @@ export const maxTerrainPropSize=10_000;
 export const maxTerrainColliders=10_000;
 export const maxTerrainRuleColors=10;
 export const maxTerrainSizeVariation=10;
-const maxTextureDensity=256;
+const maxTextureDensity=10_000;
 const defaultDetail = 16;
-const maxSculptHeight = 24;
+const maxSculptHeight = 10_000;
 const grids = new WeakMap();
 const clamp = T.MathUtils.clamp;
 const lerp = T.MathUtils.lerp;
@@ -44,7 +44,7 @@ const distributionKinds=['grass','shrub','model'];
 const fitModes=['keep','fit','stretch'];
 const colorPattern=/^#[a-f\d]{6}$/i;
 
-export const maxTerrainOctaves=10;
+export const maxTerrainOctaves=20;
 function normalizeTerrainScatter(raw={}){
   const ordered=(a,b)=>a<=b?[a,b]:[b,a];
   const [minHeight,maxHeight]=ordered(bounded(raw.minHeight,-300,300,-300),bounded(raw.maxHeight,-300,300,300));
@@ -96,10 +96,10 @@ export function normalizeTerrain(value = {},area=1) {
   return {
     detail,
     seed: Math.round(bounded(value?.seed, 0, 2147483647, 1)),
-    amplitude: bounded(value?.amplitude, 0, 12, 0),
-    frequency: bounded(value?.frequency, .015, 2, .12),
+    amplitude: bounded(value?.amplitude, 0, 10_000, 0),
+    frequency: bounded(value?.frequency, .00001, 100, .12),
     octaves:Math.round(bounded(value?.octaves,1,maxTerrainOctaves,3)),
-    roughness:bounded(value?.roughness,.15,.95,.42),
+    roughness:bounded(value?.roughness,0,1,.42),
     ridge:bounded(value?.ridge,0,1,0),
     edgeFade:bounded(value?.edgeFade,0,1,0),
     ...(value?.reliefArea?{reliefArea:normalizeReliefArea(value.reliefArea)}:{}),

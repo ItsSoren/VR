@@ -476,16 +476,16 @@
           <summary>Maillage et relief</summary>
           <h3>Maillage déformable</h3>
           <div class="fields">
-            <label>Cases de maillage par axe<input id="terrain-detail" type="number" min="1" max="256" step="1"></label>
+            <label>Cases de maillage par axe<input id="terrain-detail" type="number" min="1" max="512" step="1"></label>
             <label>Dimensions et densité du maillage <output id="terrain-cell-size" style="color:var(--text)">—</output></label>
           </div>
           <h3>Génération du relief</h3>
           <div class="fields">
             <label>Graine<input id="terrain-seed" type="number" min="0" max="2147483647"></label>
-            <label>Hauteur du bruit (m)<input id="terrain-amplitude" type="number" min="0" max="12" step=".1"></label>
-            <label>Fréquence de base (cycles/m)<input id="terrain-frequency" type="number" min=".015" max="2" step=".015"></label>
-            <label>Couches de bruit<input id="terrain-octaves" type="number" min="1" max="10" step="1" title="Chaque couche double la fréquence"></label>
-            <label>Rugosité (0,15–0,95)<input id="terrain-roughness" type="number" min=".15" max=".95" step=".01" title="Poids des couches fines"></label>
+            <label>Hauteur du bruit (m)<input id="terrain-amplitude" type="number" min="0" max="10000" step="any"></label>
+            <label>Fréquence de base (cycles/m)<input id="terrain-frequency" type="number" min=".00001" max="100" step="any"></label>
+            <label>Couches de bruit<input id="terrain-octaves" type="number" min="1" max="20" step="1" title="Chaque couche double la fréquence"></label>
+            <label>Rugosité (0–1)<input id="terrain-roughness" type="number" min="0" max="1" step=".01" title="Poids des couches fines"></label>
             <label>Crêtes (0–1)<input id="terrain-ridge" type="number" min="0" max="1" step=".01" title="Transforme les bosses en crêtes"></label>
             <label>Adoucissement des bords (0–1)<input id="terrain-edgeFade" type="number" min="0" max="1" step=".01"></label>
             <label class="wide check"><input id="terrain-relief-local" type="checkbox"> Limiter le relief à une zone</label>
@@ -537,7 +537,7 @@
             <button id="texture-paint" class="wide">Créer une texture · motifs et pinceaux</button>
             <h3 class="wide">Projection et répétition</h3>
           <div class="wide fields" id="terrain-texture-density-fields" hidden>
-              <label>Texture de terrain (motifs/m²)<input id="terrain-textureDensity" type="number" min=".0001" max="256" step="any"></label>
+              <label>Texture de terrain (motifs/m²)<input id="terrain-textureDensity" type="number" min=".0001" max="10000" step="any"></label>
               <label>Densité après échelle UV <output id="terrain-texture-effective">–</output></label>
             </div>
             <label>Échelle de la texture<input id="p-uvScale" type="number" min=".05" max="100" step=".05" title="1 = densité standard ; 2 = motifs deux fois plus grands"></label>
@@ -618,7 +618,7 @@
     <button data-context-action="focus">Cadrer</button>
     <button data-context-action="delete">Supprimer</button>
   </div>
-  <script defer src="./gorilla-editor-r38.js"></script>
+  <script defer src="./gorilla-editor-r39.js"></script>
 </body>
 </html>
 

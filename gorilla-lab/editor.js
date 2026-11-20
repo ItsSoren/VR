@@ -16,7 +16,7 @@ import {resizedCenter,scaleHandleSigns} from './editor-scale.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   parseMap, arenaMap, exampleMap, makePiece, mapMaterials, materialColors, surfacePresets,
-  maxPieces, maxWorldReach, maxObjectSize, snapPlacement, downloadMap, storageKey,
+  maxPieces, maxWorldReach, maxWorldHeight, maxObjectSize, snapPlacement, downloadMap, storageKey,
 } from './map-format.js';
 
 const $ = id => document.getElementById(id);
@@ -755,7 +755,7 @@ function syncScaleAnchor(){
   const next=resizedCenter(original,piece,ctrlScaleHeld,beforeTransform?.scaleSides);
   const limit=(map.worldSize??240)/2;
   piece.x=T.MathUtils.clamp(next.x,-limit,limit);
-  piece.y=T.MathUtils.clamp(next.y,-256,256);
+  piece.y=T.MathUtils.clamp(next.y,-maxWorldHeight,maxWorldHeight);
   piece.z=T.MathUtils.clamp(next.z,-limit,limit);
   mesh.position.set(piece.x,piece.y,piece.z);
   selectionBox?.update();
@@ -788,7 +788,7 @@ gizmo.addEventListener('objectChange',()=>{
     const limit=(map.worldSize??240)/2;
     const clamp=T.MathUtils.clamp;
     map.spawn.x=clamp(spawn.position.x,-limit,limit);
-    map.spawn.y=clamp(spawn.position.y-spawnOffset,-256,256);
+    map.spawn.y=clamp(spawn.position.y-spawnOffset,-maxWorldHeight,maxWorldHeight);
     map.spawn.z=clamp(spawn.position.z,-limit,limit);
     spawn.position.set(map.spawn.x,map.spawn.y+spawnOffset,map.spawn.z);
     for(const key of ['x','y','z'])$('spawn-'+key).value=map.spawn[key].toFixed(2);
@@ -802,7 +802,7 @@ gizmo.addEventListener('objectChange',()=>{
     const next=alignTranslation(piece,{x:mesh.position.x,y:mesh.position.y,z:mesh.position.z},axes,altHeld);
     const limit=(map.worldSize??240)/2;
     piece.x=clamp(next.x,-limit,limit);
-    piece.y=clamp(next.y,-256,256);
+    piece.y=clamp(next.y,-maxWorldHeight,maxWorldHeight);
     piece.z=clamp(next.z,-limit,limit);
     mesh.position.set(piece.x,piece.y,piece.z);
   }else if(tool==='rotate'){
@@ -1058,7 +1058,7 @@ function updateInspector() {
     else input.value = piece?.[key] ?? (key === 'color' ? '#ffffff' : '');
   }
   for (const id of ['rotate', 'duplicate', 'texture-file', 'surface', 'spawn-here']) $(id).disabled = !piece;
-  $('delete').disabled = !piece || map.pieces.length === 1;
+  $('delete').disabled = !piece;
   $('delete').title=piece?.model
     ?'Retirer cet exemplaire de la carte (le modèle restera dans la bibliothèque)'
     :'Supprimer cette pièce de la carte';
@@ -1083,9 +1083,9 @@ function updateInspector() {
     $('terrain-generation-stats').textContent=Number.isFinite(generationMs)
       ?'Calcul du relief · '+generationMs.toFixed(1)+' ms · '+((terrain.detail+1)**2).toLocaleString('fr-FR')+' sommets. Collision par champ de hauteur.':'';
     const area=piece.w*piece.d,triangles=2*terrain.detail**2;
-    const format=new Intl.NumberFormat('fr-FR',{maximumFractionDigits:2});
+    const format=new Intl.NumberFormat('fr-FR',{maximumSignificantDigits:6});
     $('terrain-cell-size').textContent=format.format(piece.w/terrain.detail)+' × '+format.format(piece.d/terrain.detail)+
-      ' m par case · '+format.format(triangles)+' triangles · '+format.format(triangles/area)+' triangles/m²';
+      ' m par case · '+format.format(triangles)+' triangles (2 par case) · '+format.format(triangles/area)+' triangles/m²';
     $('terrain-texture-effective').textContent=format.format(terrain.textureDensity/(piece.uvScale??1)**2)+' motifs/m²';
     renderTerrainRules(piece);
     const neighbor=$('terrain-neighbor'),previous=neighbor.value;
@@ -1225,7 +1225,7 @@ function addPiece(piece) {
 
 // Retire la pièce active et garde une sélection valide.
 function removePiece() {
-  if (!current() || map.pieces.length === 1) return;
+  if (!current()) return;
   const name = current().name;
   remember();
   map.pieces.splice(selected, 1);
@@ -2141,7 +2141,7 @@ function geometryStats(root){
 }
 function formatMeshStats(stats){
   const number=value=>Math.round(value).toLocaleString('fr-FR');
-  return number(stats.triangles)+' triangles · '+number(stats.vertices)+' sommets stockés'+
+  return number(stats.triangles)+' triangles (2 par case) · '+number(stats.vertices)+' sommets stockés'+
     (stats.instances?' · '+number(stats.instances)+' instances':'');
 }
 function collectMeshStats(){

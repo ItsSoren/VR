@@ -1555,7 +1555,7 @@ function character(frame,space,pose,dt,inputDt=dt){
     if(result.contacts)contactFrames++;
     if(result.launched){launchCount++;lastLaunch={handSpeed:result.launchSpeed,velocity:velocity.toArray(),t:performance.now()};}
   }
-  if(maps.active?(rig.position.y<-24||Math.abs(rig.position.x)>155||Math.abs(rig.position.z)>155):(rig.position.y<-9||Math.abs(rig.position.x)>33||rig.position.z<-57||rig.position.z>13)){
+  if(maps.active?outsideObjectWorld(rig.position,maps.worldLimits??true):(rig.position.y<-9||Math.abs(rig.position.x)>33||rig.position.z<-57||rig.position.z>13)){
     resetPlayer();worldHead.copy(head).applyAxisAngle(up,yaw).add(rig.position);
   }
   previousHead.copy(worldHead);hasPreviousHead=true;
@@ -1704,7 +1704,7 @@ renderer.setAnimationLoop((time,frame)=>{
   for(const object of objects){
     object.mesh.visible=settings.objects&&!remoteWorld;
     const {x,y,z}=object.mesh.position;
-    const outOfMap=outsideObjectWorld(object.mesh.position,maps.active);
+    const outOfMap=outsideObjectWorld(object.mesh.position,maps.worldLimits??false);
     if(outOfMap){
       if(!object.owner)restoreObject(object);
     }
