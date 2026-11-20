@@ -1,5 +1,5 @@
 import * as T from 'three';
-import {effectChannels,effectPresets,normalizeModelEffect,setModelEffectTime} from './model-effect.js';
+import {effectChannels,normalizeModelEffect,setModelEffectTime} from './model-effect.js';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {TransformControls} from 'three/addons/controls/TransformControls.js';
 import {GLTFExporter} from 'three/addons/exporters/GLTFExporter.js';
@@ -550,8 +550,6 @@ function chooseEffect(raw){
   markDirty();updateEffectInspector();updatePreview();
 }
 $('effect-new').onclick=()=>chooseEffect({});
-$('effect-jelly').onclick=()=>chooseEffect(effectPresets.jelly);
-$('effect-void').onclick=()=>chooseEffect(effectPresets.void);
 $('effect-remove').onclick=()=>chooseEffect(null);
 function previewEffectFrame(now){
   effectFrame=0;

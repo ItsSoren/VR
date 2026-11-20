@@ -6,12 +6,6 @@ export const effectChannels={
   glow:{label:'Émission lumineuse',max:2,defaultSpeed:.6,defaultScale:19},
 };
 
-export const effectPresets={
-  jelly:{label:'Gelée rouge',deform:{strength:.16,speed:2.3,scale:10},tint:{color:'#ff2748',strength:.32,speed:1.7,scale:8}},
-  void:{label:'Cube du Néant',tint:{color:'#4d1292',strength:.84,speed:.45,scale:22,signal:'triangle'},
-    glow:{color:'#951dea',strength:1.15,speed:.65,scale:30,signal:'stars'}},
-};
-
 const effectsByMaterial=new WeakMap();
 const time={value:0};
 const signals=['sine','triangle','pulse','stars'];

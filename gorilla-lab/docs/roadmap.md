@@ -39,6 +39,6 @@ La partie 1 (R39.3) a été validée sur PC. La partie 2 (R39.4) ajoute le charg
 
 ## R39.6 — Effets visuels dans FOUNDRY
 
-Dans **Animation**, sélectionner une pièce et choisir **Partir de zéro**, **Gelée rouge** ou **Cube du Néant**. Combiner déformation, couleur et émission lumineuse. Chaque canal possède sa propre intensité, sa vitesse, sa variation spatiale et sa forme. La couleur et l’émission peuvent utiliser un motif d’étoiles. L’émission éclaircit la surface du modèle. Les effets sont visuels et la collision suit la forme de base.
+Dans **Animation**, sélectionner une pièce et choisir **Partir de zéro**. Combiner déformation, couleur et émission lumineuse. Chaque canal possède sa propre intensité, sa vitesse, sa variation spatiale et sa forme. La couleur et l’émission peuvent utiliser un motif d’étoiles. L’émission éclaircit la surface du modèle. Les effets sont visuels et la collision suit la forme de base.
 
 Vérifier l’aperçu, l’export JSON, le chargement du modèle sur une carte et son rendu en jeu. Les comportements d’entités et l’audio de la partie 3 restent ouverts.
