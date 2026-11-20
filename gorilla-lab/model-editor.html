@@ -506,6 +506,20 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
               <button id="effect-remove" type="button">Retirer l’effet</button>
             </div>
             <div id="effect-fields" hidden></div>
+            <h3>Déclencheur et actions</h3>
+            <p class="hint" id="reaction-note"></p>
+            <div id="reaction-fields" hidden>
+              <label>Déclencheur <select id="reaction-phase"></select></label>
+              <div class="axes">
+                <label>Porte <select id="reaction-door"></select></label>
+                <label>Mouvement <select id="reaction-doorState"><option value="open">Ouvrir</option><option value="close">Fermer</option><option value="toggle">Inverser</option></select></label>
+                <label>Voyant <select id="reaction-light"></select></label>
+                <label>État <select id="reaction-lightState"><option value="on">Allumer</option><option value="off">Éteindre</option><option value="toggle">Inverser</option></select></label>
+                <label>Couleur du voyant <input id="reaction-lightColor" type="color" value="#ffbd54"></label>
+                <label>Son <select id="reaction-sound"></select></label>
+                <label>Volume du son <input id="reaction-soundVolume" type="number" min="0" max="1" step=".05" value=".6"></label>
+              </div>
+            </div>
             <h3>Porte articulée</h3>
             <p class="hint" id="hinge-hint">Sélectionne le panneau de la porte.</p>
             <button id="hinge-add" type="button">Articuler la sélection</button>

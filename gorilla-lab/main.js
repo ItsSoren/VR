@@ -1675,6 +1675,19 @@ function captureNetworkAvatar(){
     tool:toolState.mode?toolState:null,gun:blaster.gun,
   };
 }
+const cueOffset=new T.Vector3(),cueRight=new T.Vector3(),cueRotation=new T.Quaternion();
+function notifyMapTrigger(event){
+  diagnostics.record('map-trigger',event);
+  window.dispatchEvent(new CustomEvent('gorilla-model-trigger',{detail:event}));
+  const cue=event.cue;
+  if(!cue)return;
+  camera.getWorldQuaternion(cueRotation);
+  cueRight.set(1,0,0).applyQuaternion(cueRotation);
+  cueOffset.fromArray(cue.at).sub(worldHead);
+  const distance=cueOffset.length();
+  steps.playCue(cue.name,cue.volume,distance,cueOffset.dot(cueRight)/Math.max(.001,distance));
+}
+
 // Une image enchaîne les entrées, la simulation locale, la réception des états distants et le rendu.
 let wasGuestActive=false,portalInProgress=false,portalCooldown=0;
 renderer.setAnimationLoop((time,frame)=>{
@@ -1706,9 +1719,9 @@ renderer.setAnimationLoop((time,frame)=>{
     for(const h of hands)h.mesh.visible=false;
   }else character(frame,space,pose,dt,inputDt);
   const spectating=!inVR&&spectator.role==='pc';
-  if(!inVR&&!spectating)for(const event of maps.checkTriggers(worldHead)){
-    diagnostics.record('map-trigger',event);
-    window.dispatchEvent(new CustomEvent('gorilla-model-trigger',{detail:event}));
+  const ownsReactionDoors=!spectator.role||spectator.role==='vr';
+  if(!inVR&&!spectating)for(const event of maps.checkTriggers(worldHead,ownsReactionDoors)){
+    notifyMapTrigger(event);
     if(event.message||event.phase==='enter')showGameHint(event.message??'Déclencheur · '+event.part);
     if(event.portal&&!spectator.role&&!portalInProgress&&time>=portalCooldown){
       portalInProgress=true;
@@ -1767,9 +1780,13 @@ renderer.setAnimationLoop((time,frame)=>{
     else if(interact){
       const hosting=spectator.role==='vr';
       const request=spectator.guestActive?id=>spectator.sendAction({type:'hinge',objectId:id}):null;
-      const door=maps.interactHinge(raySource,forward,!spectator.role||hosting,request,hosting);
-      if(door)showGameHint(door);
-      else if(!grabFlat(raySource,forward))fixtureRay(raySource,forward,true);
+      const reaction=maps.interactReaction(raySource,forward,ownsReactionDoors);
+      if(reaction)notifyMapTrigger(reaction);
+      else {
+        const door=maps.interactHinge(raySource,forward,ownsReactionDoors,request,hosting);
+        if(door)showGameHint(door);
+        else if(!grabFlat(raySource,forward))fixtureRay(raySource,forward,true);
+      }
     }
     else if(!interact&&!remoteWorld)fixtureRay(raySource,forward,false);
     if(actions.delete('KeyF')){settings.objects=true;requestSpawn(spawnTypes[0]);}

@@ -42,3 +42,9 @@ La partie 1 (R39.3) a été validée sur PC. La partie 2 (R39.4) ajoute le charg
 Dans **Animation**, sélectionner une pièce et choisir **Partir de zéro**. Combiner déformation, couleur et émission lumineuse. Chaque canal possède sa propre intensité, sa vitesse, sa variation spatiale et sa forme. La couleur et l’émission peuvent utiliser un motif d’étoiles. L’émission éclaircit la surface du modèle. Les effets sont visuels et la collision suit la forme de base.
 
 Vérifier l’aperçu, l’export JSON, le chargement du modèle sur une carte et son rendu en jeu. Les comportements d’entités et l’audio de la partie 3 restent ouverts.
+
+## R39.8 — Déclencheurs et actions de décor sur PC
+
+Dans FOUNDRY, sélectionner une pièce d’un décor, puis ouvrir **Animation → Déclencheur et actions**. Une pièce de décor réagit avec **E**. Dans **Collision**, activer les volumes par pièce et choisir **Déclencheur** pour configurer l’entrée ou la sortie d’une zone. Depuis une même règle, choisir une porte articulée, une pièce à faire briller et un son parmi carillon, alerte et déclic. Les actions s’appliquent aux pièces de la même instance du décor. Le son s’atténue avec la distance et change selon sa direction. Le voyant utilise l’émission du matériau.
+
+Les sons et voyants réagissent localement. En salon, une règle ne commande la porte partagée que lorsqu’elle se déclenche chez l’hôte. Les entités mobiles restent ouvertes.

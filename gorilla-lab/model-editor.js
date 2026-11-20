@@ -1,3 +1,4 @@
+import {actionSounds,normalizePartReaction} from './model-pack.js';
 import * as T from 'three';
 import {effectChannels,normalizeModelEffect,setModelEffectTime} from './model-effect.js';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
@@ -337,6 +338,7 @@ function updateInspector(){
   updateAvatarInspector();
   updateHingeInspector();
   updateEffectInspector();
+  updateReactionInspector();
 }
 // The visual preview uses Foundry's uncentred model coordinates.
 // When exported, physics recentres the geometry and applies the same offset.
@@ -441,6 +443,48 @@ function stopHingePreview(){
   cancelAnimationFrame(hingeFrame);hingeFrame=0;$('hinge-preview').value=0;
   $('hinge-play').textContent='Lire';
 }
+const reactionFields=['phase','door','doorState','light','lightState','lightColor','sound','soundVolume'];
+function updateReactionInspector(){
+  const model=currentModel(),part=currentPart();
+  const eligible=part&&model.kind==='structure'&&(part.zone!=='trigger'||model.partCollisions&&model.properties.collidable);
+  $('reaction-fields').hidden=!eligible;
+  $('reaction-note').textContent=eligible?'Les cibles appartiennent à la même instance du décor.':
+    'Sélectionne une pièce d’un décor. Pour une zone, active les volumes de collision par pièce.';
+  if(!eligible)return;
+  const reaction=part.reaction??{};
+  const options=(id,filter)=>{
+    const entries=model.parts.flatMap((value,index)=>filter(value)?[[String(index),value.name+' · '+(index+1)]]:[]);
+    const selected=model.parts.findIndex(value=>value.actionId&&value.actionId===reaction[id]);
+    setOptions($('reaction-'+id),[['','Aucun'],...entries],selected<0?'':String(selected));
+  };
+  setOptions($('reaction-phase'),part.zone==='trigger'?[['enter','Entrée dans la zone'],['exit','Sortie de la zone']]:
+    [['use','Interaction avec E']],reaction.phase??(part.zone==='trigger'?'enter':'use'));
+  options('door',value=>Boolean(value.hinge));
+  options('light',value=>value.zone!=='trigger');
+  setOptions($('reaction-sound'),[['','Aucun'],...Object.entries(actionSounds)],reaction.sound??'');
+  $('reaction-doorState').value=reaction.doorState??'open';
+  $('reaction-lightState').value=reaction.lightState??'on';
+  $('reaction-lightColor').value=reaction.lightColor??'#ffbd54';
+  $('reaction-soundVolume').value=reaction.soundVolume??.6;
+}
+for(const field of reactionFields)$('reaction-'+field).onchange=()=>{
+  const model=currentModel(),part=currentPart();
+  if(!part||model.kind!=='structure')return;
+  remember();
+  const value=Object.fromEntries(reactionFields.map(key=>[key,$('reaction-'+key).value]));
+  for(const key of ['door','light']){
+    if(value[key]==='')continue;
+    const target=model.parts[Number(value[key])];
+    if(!target){value[key]='';continue;}
+    target.actionId??=crypto.randomUUID();
+    value[key]=target.actionId;
+  }
+  value.soundVolume=$('reaction-soundVolume').valueAsNumber;
+  const reaction=normalizePartReaction(value,part.zone);
+  if(reaction)part.reaction=reaction;
+  else delete part.reaction;
+  markDirty();
+};
 function updateHingeInspector(){
   const part=currentPart(),model=currentModel(),hinge=model?.kind==='structure'&&part?.zone!=='trigger'?part?.hinge:null;
   const eligible=part&&part.zone!=='trigger'&&model.kind!=='avatar';
@@ -1079,6 +1123,7 @@ function duplicatePart(){
   const first=model.parts.length;
   for(const original of source){
     const copy=structuredClone(original);
+    delete copy.actionId;
     copy.name=original.name.slice(0,40)+' copie';
     copy.position[0]+=dx;
     if(copy.group){
@@ -1109,6 +1154,7 @@ function mirrorPart(){
   if(!part||model.parts.length>=modelLimits.parts)return;
   remember();
   const copy=structuredClone(part);
+  delete copy.actionId;
   copy.name=part.name.slice(0,36)+' · miroir';
   delete copy.group;
   copy.position[0]=-copy.position[0];
@@ -1525,7 +1571,10 @@ $('part-collisions').onchange=event=>{
 };
 $('part-zone').onchange=event=>{
   const part=currentPart();if(!part)return;
-  remember();part.zone=event.target.value;markDirty();updateHitboxControls();updateHitboxPreview();
+  remember();part.zone=event.target.value;
+  const changed=normalizePartReaction(part.reaction&&{...part.reaction,phase:part.zone==='trigger'?'enter':'use'},part.zone);
+  if(changed)part.reaction=changed;else delete part.reaction;
+  markDirty();updateHitboxControls();updateReactionInspector();updateHitboxPreview();
 };
 $('part-finish').onchange=event=>{
   const part=currentPart();if(!part)return;

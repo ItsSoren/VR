@@ -1224,3 +1224,37 @@ test('a firm downstroke on thin terrain launches at the default jump setting',()
     assert.ok(rig.velocity.y>3);
   }
 });
+
+test('entry opens its instance door and turns its lamp on while exit does not repeat it',()=>{
+ const original=globalThis.document;
+ globalThis.document={querySelector:()=>({})};
+ try{
+  const scene=new T.Scene(),arena={boxes:[],bakeLightmap(){},setEnvironment(){}};
+  const maps=connectMaps({scene,arena,boot:new T.Vector3(),onReset(){},onVisual(){},getLevel:()=>0,defaultObjects:[]});
+  const model={id:'custom-model-reaction',kind:'structure',partCollisions:true,parts:[
+    {name:'Zone',shape:'box',zone:'trigger',position:[0,0,0],scale:[1,1,1],
+      reaction:{phase:'enter',door:'door-1',doorState:'open',light:'light-1',lightColor:'#55ffff',sound:'chime',soundVolume:.4}},
+    {name:'Porte',shape:'box',actionId:'door-1',position:[1,0,0],scale:[1,1,.2],hinge:{pivot:[.5,0,0],open:90,seconds:.2}},
+    {name:'Voyant',shape:'box',actionId:'light-1',position:[-1,0,0],scale:[.4,.4,.2],
+      reaction:{phase:'use',door:'door-1',doorState:'close',light:'light-1',lightState:'off'}},
+  ]};
+  const piece={...exampleMap().pieces[0],name:'Décor',x:0,y:1,z:0,w:3,h:1,d:1,model};
+  const map=parseMap(JSON.stringify({...exampleMap(),pieces:[piece,{...piece,x:10}]}));
+  assert.equal(map.pieces[0].model.parts[0].reaction.lightState,'on');
+  maps.load(map);
+  const event=maps.checkTriggers(new T.Vector3(0,1,0))[0];
+  assert.equal(event?.phase,'enter');assert.equal(event.cue.name,'chime');
+  assert.equal(event.cue.volume,.4);
+  assert.deepEqual(maps.checkTriggers(new T.Vector3(0,1,0)),[]);
+  maps.updateHinges(1,true);
+  assert.deepEqual(maps.hingeSnapshot(),[{id:2,progress:1}]);
+  const lamps=[];scene.traverse(mesh=>{if(mesh.isMesh&&mesh.material?.emissive?.getHexString()==='55ffff')lamps.push(mesh)});
+  assert.equal(lamps.length,1);
+  const lampPosition=lamps[0].geometry.boundingBox?.getCenter(new T.Vector3())??new T.Vector3();
+  lamps[0].geometry.computeBoundingBox();lamps[0].geometry.boundingBox.getCenter(lampPosition);
+  lamps[0].localToWorld(lampPosition);lampPosition.z+=2;
+  assert.equal(maps.interactReaction(lampPosition,new T.Vector3(0,0,-1),true)?.phase,'use');
+  maps.updateHinges(1,true);assert.equal(maps.hingeSnapshot().length,0);
+  assert.equal(lamps[0].material.emissive.getHexString(),'000000');
+ }finally{globalThis.document=original;}
+});

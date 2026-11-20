@@ -7,6 +7,21 @@ import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
 import {normalizeSketch,createSketchGeometry} from './custom-shape.js';
 import {getBuiltinAsset,isBuiltinAsset,isRetiredArenaAsset,isRetiredArenaModel} from './model-assets.js';
 
+const actionIdPattern=/^[a-z0-9-]{1,40}$/i;
+export const actionSounds={chime:'Carillon',alert:'Alerte',click:'Déclic'};
+export function normalizePartReaction(value,zone){
+  if(!value)return null;
+  const phase=zone==='trigger'?(value.phase==='exit'?'exit':'enter'):value.phase==='use'?'use':null;
+  if(!phase)return null;
+  const door=typeof value.door==='string'&&actionIdPattern.test(value.door)?value.door:null;
+  const light=typeof value.light==='string'&&actionIdPattern.test(value.light)?value.light:null;
+  const sound=Object.hasOwn(actionSounds,value.sound)?value.sound:null;
+  if(!(door||light||sound))return null;
+  return {phase,...(door?{door,doorState:['open','close','toggle'].includes(value.doorState)?value.doorState:'open'}:{}),
+    ...(light?{light,lightState:['on','off','toggle'].includes(value.lightState)?value.lightState:'on',
+      lightColor:colorPattern.test(value.lightColor??'')?value.lightColor:'#ffbd54'}:{}),
+    ...(sound?{sound,soundVolume:number(value.soundVolume,0,1,.6)}:{})};
+}
 export const modelStorageKey = 'gorilla-lab-models-v1';
 export const modelLimits = Object.freeze({ models: 24, parts: 64, fileBytes: 2_500_000, textureBytes: 160_000 });
 const texturePattern=/^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=\r\n]+$/i;
@@ -73,6 +88,7 @@ export function normalizeModelPack(input) {
       throw new Error('Un modèle comporte un identifiant ou une liste de pièces invalide.');
     }
     ids.add(raw.id);
+    const actionIds=new Set();
     return {
       id: raw.id,
       name: label(raw.name, 'Modèle sans nom'),
@@ -88,11 +104,16 @@ export function normalizeModelPack(input) {
       ...(raw.partCollisions===true?{partCollisions:true}:{}),
       parts: raw.parts.filter(part=>!isRetiredArenaAsset(part?.assetId)).map((part, index) => {
         const effect=normalizeModelEffect(part?.effect);
+        const actionId=typeof part?.actionId==='string'&&actionIdPattern.test(part.actionId)&&!actionIds.has(part.actionId)?part.actionId:null;
+        if(actionId)actionIds.add(actionId);
+        const reaction=raw.kind==='structure'?normalizePartReaction(part?.reaction,part?.zone):null;
         const hinge=raw.kind==='structure'&&part?.zone!=='trigger'?normalizeHinge(part?.hinge):null;
         return {
         name: label(part?.name, `Pièce ${index + 1}`),
         ...(hinge?{hinge}:{}),
         ...(effect?{effect}:{}),
+        ...(actionId?{actionId}:{}),
+        ...(reaction?{reaction}:{}),
         ...(Object.hasOwn(avatarJoints,part?.avatarJoint)?{avatarJoint:part.avatarJoint}:{}),
         ...(Number.isInteger(part?.group)&&part.group>0&&part.group<=modelLimits.parts?{group:part.group}:{}),
         shape: part?.shape==='asset'&&isBuiltinAsset(part?.assetId)?'asset':Object.hasOwn(modelShapes, part?.shape)&&part.shape!=='asset'?part.shape:'box',

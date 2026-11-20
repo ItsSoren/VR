@@ -99,8 +99,10 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     group.add(root);
     const bounds=modelBounds(model),center=bounds.getCenter(new T.Vector3());
     const ratio=dimensions.clone().divide(bounds.getSize(new T.Vector3()).max(new T.Vector3(.00001,.00001,.00001)));
-    const row={mesh:root,hinges:[],colliders:[],model:true};
-    const zones=modelCollisionZones({...model,partCollisions:true},dimensions);
+    const row={mesh:root,hinges:[],colliders:[],model:true,targets:new Map()};
+    const articulated=model.parts.some(part=>part.hinge);
+    const zones=modelCollisionZones(articulated?{...model,partCollisions:true}:model,dimensions);
+    if(zones===null)row.colliders.push(globalModelCollider(piece,dimensions,root));
     let zoneIndex=0;
     root.updateMatrixWorld(true);
     for(const [partIndex,part] of model.parts.entries()){
@@ -112,7 +114,11 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
       geometry.translate(-center.x,-center.y,-center.z).scale(ratio.x,ratio.y,ratio.z);
       const mesh=new T.Mesh(geometry,createModelPartMaterial(part));
       mesh.userData.mapIndex=index;mesh.castShadow=mesh.receiveShadow=true;root.add(mesh);
-      const zone=zones.length&&part.zone!=='pass'?zones[zoneIndex++]:null;
+      if(part.actionId)row.targets.set(part.actionId,{mesh,hinge:null,lightOn:false,
+        originalEmission:mesh.material.emissive?.clone()});
+      if(part.reaction?.phase==='use')mesh.userData.reaction={row,part};
+      if(part.zone==='trigger')mesh.userData.triggerVolume=true;
+      const zone=zones?.length&&part.zone!=='pass'?zones[zoneIndex++]:null;
       let collider=null;
       if(zone){
         const half=zone.size.clone().multiplyScalar(.5);
@@ -120,7 +126,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
         const quaternion=root.quaternion.clone();
         if(zone.mode==='trigger'){
           triggerRows.push({name:zone.name,model:piece.name,position,notice:zone.notice,portal:zone.portal,
-            inverse:quaternion.invert(),bounds:new T.Box3(half.clone().negate(),half)});
+            reaction:part.reaction,sourceRow:row,inverse:quaternion.invert(),bounds:new T.Box3(half.clone().negate(),half)});
         }else{
           collider={position,quaternion,half,min:half.clone().negate(),shape:boxCollider(half),
             friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:true,type:piece.material};
@@ -132,6 +138,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
         const id=index*100+partIndex+1;
         const hinge={id,mesh,pivot,collider,center:zone?.center,config:part.hinge,progress:0,target:0,remoteProgress:0};
         row.hinges.push(hinge);hingeById.set(id,hinge);mesh.userData.hingeId=id;
+        if(part.actionId)row.targets.get(part.actionId).hinge=hinge;
       }
     }
     moveHinges(row);
@@ -157,12 +164,33 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
       if(moved)moveHinges(row);
     }
   }
-  function pickHinge(origin,direction){
-    if(!hingeRows.length)return null;
+  function pickPiece(origin,direction){
     const rowTargets=meshRows.filter(row=>row.mesh.visible);
     trace.set(origin,direction);trace.far=3.5;
-    const hit=trace.intersectObjects(rowTargets.flatMap(row=>row.hinges?row.mesh.children:[row.mesh]),false)[0];
-    return hingeById.get(hit?.object.userData.hingeId);
+    const hit=trace.intersectObjects(rowTargets.flatMap(row=>row.hinges?row.mesh.children.filter(mesh=>!mesh.userData.triggerVolume):[row.mesh]),false)[0];
+    return hit;
+  }
+  function pickHinge(origin,direction){
+    return hingeRows.length?hingeById.get(pickPiece(origin,direction)?.object.userData.hingeId):null;
+  }
+  let hasUseReaction=false;
+  function performReaction(row,reaction,position,ownsDoors){
+    const door=row.targets.get(reaction.door)?.hinge;
+    if(door&&ownsDoors)door.target=reaction.doorState==='toggle'?1-door.target:Number(reaction.doorState==='open');
+    const light=row.targets.get(reaction.light);
+    if(light?.originalEmission){
+      light.lightOn=reaction.lightState==='toggle'?!light.lightOn:reaction.lightState==='on';
+      const color=light.mesh.material.emissive;
+      if(light.lightOn)color.set(reaction.lightColor);
+      else color.copy(light.originalEmission);
+    }
+    return reaction.sound?{cue:{name:reaction.sound,volume:reaction.soundVolume,at:position.toArray()}}:{};
+  }
+  function interactReaction(origin,direction,ownsDoors){
+    if(!hasUseReaction)return null;
+    const hit=pickPiece(origin,direction),source=hit?.object.userData.reaction;
+    if(!source)return null;
+    return {phase:'use',part:source.part.name,...performReaction(source.row,source.part.reaction,hit.point,ownsDoors)};
   }
   function toggleHinge(hinge,online){
     if(online&&hingeById.size>maxSyncedHinges)return 'Trop de portes à synchroniser sur cette carte.';
@@ -202,10 +230,20 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
       if(initial)moveHinges(row);
     }
   }
+  function globalModelCollider(piece,dimensions,mesh){
+    const collisionGeometry=modelCollisionGeometry(piece.model,dimensions);
+    collisionGeometry.computeBoundingBox();const bounds=collisionGeometry.boundingBox;
+    const half=new T.Vector3(Math.max(Math.abs(bounds.min.x),Math.abs(bounds.max.x)),
+      Math.max(Math.abs(bounds.min.y),Math.abs(bounds.max.y)),Math.max(Math.abs(bounds.min.z),Math.abs(bounds.max.z)));
+    const shape=colliderFor(collisionGeometry);collisionGeometry.dispose();
+    return {mesh,position:mesh.position,quaternion:mesh.quaternion,half,min:half.clone().negate(),
+      shape,radius:shape.radius,friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:true,type:piece.material};
+  }
   function makeRow(piece,index){
     if(piece.model){
       const dimensions=new T.Vector3(piece.w,piece.h,piece.d);
-      if(piece.model.parts.some(part=>part.hinge))return makeHingedRow(piece,index,dimensions);
+      if(piece.model.parts.some(part=>part.reaction?.phase==='use'))hasUseReaction=true;
+      if(piece.model.parts.some(part=>part.hinge||part.reaction))return makeHingedRow(piece,index,dimensions);
       const geometry=createModelUnitGeometry(piece.model,dimensions);
       geometry.scale(piece.w,piece.h,piece.d);
       const material=createModelMaterial(piece.model);
@@ -231,13 +269,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
         }
         return {mesh,colliders,custom:true,model:true};
       }
-      const collisionGeometry=modelCollisionGeometry(piece.model,dimensions);
-      collisionGeometry.computeBoundingBox();const bounds=collisionGeometry.boundingBox;
-      const half=new T.Vector3(Math.max(Math.abs(bounds.min.x),Math.abs(bounds.max.x)),
-        Math.max(Math.abs(bounds.min.y),Math.abs(bounds.max.y)),Math.max(Math.abs(bounds.min.z),Math.abs(bounds.max.z)));
-      const shape=colliderFor(collisionGeometry);collisionGeometry.dispose();
-      const collider={mesh,position:mesh.position,quaternion:mesh.quaternion,half,min:half.clone().negate(),
-        shape,radius:shape.radius,friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:true,type:piece.material};
+      const collider=globalModelCollider(piece,dimensions,mesh);
       return {mesh,collider,custom:true,model:true};
     }
     let {material,custom,ownTexture}=card(piece);
@@ -284,7 +316,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   function rebuild(){
     for(const row of meshRows)removeRow(row);
     meshRows.length=hingeRows.length=0;hingeById.clear();
-    mirrorRows.length=0;triggerRows.length=0;insideTriggers.clear();
+    mirrorRows.length=0;triggerRows.length=0;insideTriggers.clear();hasUseReaction=false;
     const nodes=map?.pieces??[];
     signature=map?'custom-'+mapCode(JSON.stringify(map)):'';
     // Asset-backed map pieces replace their matching built-in fixture instead of stacking on it.
@@ -511,7 +543,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     return packed;
   }
   const triggerRay=new T.Ray(),triggerEnd=new T.Vector3(),triggerHit=new T.Vector3();
-  function checkTriggers(head){
+  function checkTriggers(head,ownsDoors=true){
     if(!triggerRows.length)return [];
     const events=[],inside=new Set();
     for(const row of triggerRows){
@@ -522,16 +554,19 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
       if(row.bounds.containsPoint(triggerRay.origin)||row.bounds.containsPoint(triggerEnd)||
         hit&&triggerHit.distanceToSquared(triggerRay.origin)<=1.45**2){
         inside.add(row);
-        if(!insideTriggers.has(row))events.push({phase:'enter',part:row.name,model:row.model,...(row.notice?.phase==='enter'?{message:row.notice.text}:{}),...(row.portal?{portal:row.portal}:{})});
-      }else if(insideTriggers.has(row))events.push({phase:'exit',part:row.name,model:row.model,...(row.notice?.phase==='exit'?{message:row.notice.text}:{})});
+        if(!insideTriggers.has(row))events.push({phase:'enter',part:row.name,model:row.model,...(row.notice?.phase==='enter'?{message:row.notice.text}:{}),...(row.portal?{portal:row.portal}:{}),...zoneReaction(row,'enter',ownsDoors)});
+      }else if(insideTriggers.has(row))events.push({phase:'exit',part:row.name,model:row.model,...(row.notice?.phase==='exit'?{message:row.notice.text}:{}),...zoneReaction(row,'exit',ownsDoors)});
     }
     insideTriggers=inside;
     return events;
   }
+  function zoneReaction(row,phase,ownsDoors){
+    return row.reaction?.phase===phase?performReaction(row.sourceRow,row.reaction,row.position,ownsDoors):{};
+  }
   document.querySelector('#map-load-url').onclick=()=>loadURL(url.value);
   document.querySelector('#map-export').onclick=save;
   document.querySelector('#map-reset').onclick=reset;
-  return {checkTriggers,updateHinges,interactHinge,receiveHingeRequest,hingeSnapshot,receiveHinges,get worldLimits(){return worldLimits;},placedModels:()=>map?.pieces.filter(p=>p.model?.kind==='prop')??[],modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,loadRoomMap,leaveRoomMap,roomMapSource,reset,blank,undo,save,edit,recenter,inform,
+  return {checkTriggers,interactReaction,updateHinges,interactHinge,receiveHingeRequest,hingeSnapshot,receiveHinges,get worldLimits(){return worldLimits;},placedModels:()=>map?.pieces.filter(p=>p.model?.kind==='prop')??[],modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,loadRoomMap,leaveRoomMap,roomMapSource,reset,blank,undo,save,edit,recenter,inform,
     mirrors:()=>mirrorRows,
     get usesBuiltInMirror(){return !map||map.arenaBase&&!map.editableArena&&!map.pieces.some(piece=>piece.sceneryId==='lab-mirror');},
     clearGhost(){ghost.visible=false;},get active(){return Boolean(map);},get builtIn(){return !map||map.arenaBase===true;},get assetLayer(){return map?.assetLayer===true;},
