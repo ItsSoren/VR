@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#191d23">
-<title>GORILLA / FOUNDRY · Atelier de modèles R39.7</title>
+<title>GORILLA / FOUNDRY · Atelier de modèles R39.8</title>
 <style>
 :root{color-scheme:dark;--ink:#e4e8eb;--soft:#a4adb5;--muted:#798790;--line:#39424a;
 --panel:#232a30;--panel-2:#1d252c;--bg:#151b20;--accent:#edac67;--blue:#77c7cc;
@@ -506,6 +506,20 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
               <button id="effect-remove" type="button">Retirer l’effet</button>
             </div>
             <div id="effect-fields" hidden></div>
+            <h3>Déclencheur et actions</h3>
+            <p class="hint" id="reaction-note"></p>
+            <div id="reaction-fields" hidden>
+              <label>Déclencheur <select id="reaction-phase"></select></label>
+              <div class="axes">
+                <label>Porte <select id="reaction-door"></select></label>
+                <label>Mouvement <select id="reaction-doorState"><option value="open">Ouvrir</option><option value="close">Fermer</option><option value="toggle">Inverser</option></select></label>
+                <label>Voyant <select id="reaction-light"></select></label>
+                <label>État <select id="reaction-lightState"><option value="on">Allumer</option><option value="off">Éteindre</option><option value="toggle">Inverser</option></select></label>
+                <label>Couleur du voyant <input id="reaction-lightColor" type="color" value="#ffbd54"></label>
+                <label>Son <select id="reaction-sound"></select></label>
+                <label>Volume du son <input id="reaction-soundVolume" type="number" min="0" max="1" step=".05" value=".6"></label>
+              </div>
+            </div>
             <h3>Porte articulée</h3>
             <p class="hint" id="hinge-hint">Sélectionne le panneau de la porte.</p>
             <button id="hinge-add" type="button">Articuler la sélection</button>
@@ -547,6 +561,6 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
   <button data-action="mirror">⥊ Miroir X</button><button data-action="ground">⤓ Poser sur la grille</button>
   <button data-action="focus">⊡ Cadrer</button><button data-action="delete">✕ Supprimer</button>
 </div>
-<script defer src="./gorilla-model-editor-r39.js?v=R39.7"></script>
+<script defer src="./gorilla-model-editor-r39.js?v=R39.8"></script>
 </body>
 </html>
