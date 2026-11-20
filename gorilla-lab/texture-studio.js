@@ -179,7 +179,7 @@ async function loadImage(src,canvas){
   ctx.clearRect(0,0,SIZE,SIZE);
   ctx.drawImage(image,0,0,SIZE,SIZE);
 }
-export function openTextureStudio({initial=null,tint='#687a86',name='Texture',pattern='grain',maxDataBytes=750000,onApply=()=>{}}={}){
+export function openTextureStudio({initial=null,tint='#687a86',name='Texture',pattern='solid',maxDataBytes=750000,onApply=()=>{}}={}){
   addStyles();
   const backdrop=document.createElement('div');
   backdrop.className='texture-backdrop';
@@ -199,16 +199,25 @@ export function openTextureStudio({initial=null,tint='#687a86',name='Texture',pa
       <div class="texture-settings">
         <div class="texture-section">
           <strong>MOTIF DE BASE</strong>
-          <label>Générateur<select data-field="pattern"></select></label>
           <div class="texture-setting-row">
             <label>Couleur de fond<input type="color" data-field="base" value="#687a86"></label>
-            <label>Répétition<input type="range" min=".5" max="5" value="1" step=".25" data-field="scale"></label>
+            <label>Formes par tuile<input type="number" min="1" max="1000" value="32" data-field="density"></label>
           </div>
           <div class="texture-setting-row">
             <label>Graine<input type="number" min="0" max="2147483647" step="1" data-field="seed" value="23"></label>
             <label>Résolution à l’application<select data-field="resolution"><option value="128">128 × 128</option><option value="256">256 × 256</option><option value="512" selected>512 × 512</option></select></label>
           </div>
-          <button data-cmd="generate">Générer l’aperçu</button>
+          <div class="texture-setting-row">
+            <label>Taille min. (%)<input type="number" min="1" max="200" value="12" data-field="minScale"></label>
+            <label>Taille max. (%)<input type="number" min="1" max="200" value="28" data-field="maxScale"></label>
+          </div>
+          <div class="texture-setting-row">
+            <label>Rotation max. (°)<input type="number" min="0" max="360" value="360" data-field="rotation"></label>
+            <label>Miroir aléatoire<input type="checkbox" data-field="mirror"></label>
+          </div>
+          <button data-cmd="add-shape">+ Ajouter le dessin comme forme</button>
+          <output data-shape-count>0 forme</output>
+          <button data-cmd="generate">Générer le motif</button>
         </div>
         <div class="texture-section">
           <strong>PEINDRE LE MOTIF</strong>
@@ -260,10 +269,9 @@ export function openTextureStudio({initial=null,tint='#687a86',name='Texture',pa
   const undo=[],redo=[];
   let changed=false,painting=false,dragPointer=null,tool='paint',last=null,savedTexture=null;
   find('#studio-title').textContent=name+' / SURFACE LAB';
-  find('[data-field=pattern]').replaceChildren(...patterns.map(([key,value])=>new Option(value,key)));
+  let shapes=[];
   find('[data-field=base]').value=settings.base;
-  find('[data-field=pattern]').value=settings.pattern;
-  for(const field of ['pattern','base','scale','seed','resolution','ink','size','opacity','hardness']){
+  for(const field of ['base','seed','resolution','ink','size','opacity','hardness']){
     find('[data-field='+field+']').addEventListener('input',event=>{
       const value=event.target.value;
       settings[field]=field==='seed'?Math.trunc(limit(Number(value)||0,0,2147483647)):
@@ -279,10 +287,10 @@ export function openTextureStudio({initial=null,tint='#687a86',name='Texture',pa
     for(let y=0;y<2;y++)for(let x=0;x<4;x++)t.drawImage(display,x*64,y*64,64,64);
   };
   const capture=()=>({base:background.getImageData(0,0,SIZE,SIZE),
-    top:top.getImageData(0,0,SIZE,SIZE)});
+    top:top.getImageData(0,0,SIZE,SIZE),shapes});
   const restore=state=>{
     background.putImageData(state.base,0,0);
-    top.putImageData(state.top,0,0);composite();
+    top.putImageData(state.top,0,0);shapes=state.shapes;updateShapeCount();composite();
   };
   const remember=()=>{
     savedTexture=null;
@@ -299,11 +307,46 @@ export function openTextureStudio({initial=null,tint='#687a86',name='Texture',pa
     find('[data-cmd=redo]').disabled=!redo.length;
     changed=true;
   };
+  const updateShapeCount=()=>{
+    find('[data-shape-count]').textContent=shapes.length+' forme'+(shapes.length>1?'s':'');
+  };
+  find('[data-cmd=add-shape]').onclick=()=>{
+    const pixels=top.getImageData(0,0,SIZE,SIZE).data;
+    let x0=SIZE,y0=SIZE,x1=-1,y1=-1;
+    for(let y=0;y<SIZE;y++)for(let x=0;x<SIZE;x++){
+      if(!pixels[4*(y*SIZE+x)+3])continue;
+      x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x);y1=Math.max(y1,y);
+    }
+    if(x1<0){setStatus('Dessine une forme au pinceau avant de l’ajouter.');return;}
+    const shape=document.createElement('canvas');
+    shape.width=x1-x0+1;shape.height=y1-y0+1;
+    shape.getContext('2d').drawImage(overlay,x0,y0,shape.width,shape.height,0,0,shape.width,shape.height);
+    remember();shapes=[...shapes,shape];top.clearRect(0,0,SIZE,SIZE);
+    updateShapeCount();composite();setStatus('Forme ajoutée. Dessine la suivante ou génère ton motif.');
+  };
   const generate=()=>{
-    if(changed&&!confirm('Remplacer le motif et les coups de pinceau actuels ?'))return;
+    const value=(name,min,max)=>limit(Number(find('[data-field='+name+']').value)||0,min,max);
+    const density=Math.round(value('density',1,1000));
+    const minScale=value('minScale',1,200)/100;
+    const maxScale=Math.max(minScale,value('maxScale',1,200)/100);
+    const rotation=value('rotation',0,360)*Math.PI/180;
+    const mirror=find('[data-field=mirror]').checked;
+    const random=seededRandom(settings.seed);
     remember();
-    paintPattern(base,settings);top.clearRect(0,0,SIZE,SIZE);composite();
-    setStatus('Motif régénéré. Ajoute des marques avec le pinceau.');
+    settings.pattern='solid';
+    paintPattern(base,settings);
+    for(let i=0;i<density&&shapes.length;i++){
+      const shape=shapes[Math.floor(random()*shapes.length)];
+      const x=random()*SIZE,y=random()*SIZE,angle=random()*rotation;
+      const scale=SIZE*(minScale+random()*(maxScale-minScale))/Math.max(shape.width,shape.height);
+      const flip=mirror&&random()<.5?-1:1;
+      clipDraw(background,ink=>{
+        ink.translate(x,y);ink.rotate(angle);ink.scale(flip*scale,scale);
+        ink.drawImage(shape,-shape.width/2,-shape.height/2);
+      });
+    }
+    composite();
+    setStatus(shapes.length?'Motif généré à partir de tes formes.':'Fond uni. Dessine et ajoute une forme pour la répéter.');
   };
   const locate=event=>{
     const rect=display.getBoundingClientRect();
@@ -464,7 +507,7 @@ export function openTextureStudio({initial=null,tint='#687a86',name='Texture',pa
       top.clearRect(0,0,SIZE,SIZE);
       Object.assign(settings,entry.recipe);
       savedTexture=entry;
-      for(const key of ['pattern','base','scale','seed','resolution'])find('[data-field='+key+']').value=settings[key];
+      for(const key of ['base','seed','resolution'])find('[data-field='+key+']').value=settings[key];
       composite();setStatus('Texture chargée. Applique-la à l’objet sélectionné.');
     }catch(error){setStatus(error.message);}
   };
@@ -485,7 +528,7 @@ export function openTextureStudio({initial=null,tint='#687a86',name='Texture',pa
   find('[data-cmd=undo]').disabled=true;find('[data-cmd=redo]').disabled=true;
   paintPattern(base,settings);composite();
   if(initial)loadImage(initial,base).then(composite).catch(()=>setStatus('Image introuvable : motif généré disponible.'));
-  find('[data-field=pattern]').focus({preventScroll:true});
+  find('[data-field=base]').focus({preventScroll:true});
   return {close:()=>close(false)};
 }
 

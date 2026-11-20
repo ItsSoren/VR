@@ -28,6 +28,7 @@ import {createStepSound} from './step-sound.js';
 import {createDebugView} from './debug-view.js';
 import { createBodySkin } from './body-skin.js';
 import { labMirror,labSpawn } from './lab-layout.js';
+import { readLocalMap } from './map-storage.js';
 import { connectMaps } from './custom-maps.js';
 import { arenaMap, makePiece, mapMaterials, surfacePresets, storageKey, materialColors } from './map-format.js';
 import { createVrEffects, addRayProbe } from './vr-effects.js';
@@ -1641,7 +1642,7 @@ applyVisual();
 const mapQuery=new URLSearchParams(location.search);
 if(mapQuery.has('map'))maps.loadURL(mapQuery.get('map'));
 else{
-  try{const saved=localStorage.getItem(storageKey);if(saved)maps.load(saved);}catch(error){maps.inform(error.message);}
+  readLocalMap(storageKey).then(saved=>{if(saved&&!maps.active)maps.load(saved);}).catch(error=>maps.inform(error.message));
 }
 function captureNetworkAvatar(){
   const inVR=renderer.xr.isPresenting;

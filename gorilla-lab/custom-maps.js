@@ -1,5 +1,6 @@
 import {encodeRoomMapLink,decodeRoomMapLink,isEncodedRoomMap} from './room-map-link.js';
 
+import {clearLocalMap,writeLocalMap} from './map-storage.js';
 import * as T from 'three';
 import {shouldKeepArenaAsset} from './arena-map-pieces.js';
 import {tiledBox,transformUVs,decorPrimitiveGeometry,rampGeometry} from './texture-geometry.js';
@@ -173,10 +174,8 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     arena.bakeLightmap();
     onVisual();
     if(!roomBase){
-      try{
-        if(map)localStorage.setItem(storageKey,JSON.stringify(map));
-        else localStorage.removeItem(storageKey);
-      }catch{}
+      const write=map?writeLocalMap(storageKey,JSON.stringify(map)):clearLocalMap(storageKey);
+      write.catch(()=>inform('Sauvegarde locale indisponible. Exporte la carte pour la conserver.'));
     }
   }
   function applyMap(value){

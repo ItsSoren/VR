@@ -19,3 +19,15 @@
 ## Décision de test
 
 Maintenir les vérifications automatiques par changement. Regrouper à la fin les vérifications Quest portant sur les appuis rapides, la prise, la posture et la netteté. Conserver séparément la mesure casque et la vérification réelle des salons.
+
+## Retours du décor lunaire et du salon privé
+
+| Essai PC | Manipulation | Résultat attendu |
+| --- | --- | --- |
+| Invitation | Sur deux profils de navigateur à la même version, héberger une petite carte modifiée avec **En ligne → Héberger ma carte**, puis utiliser **Copier l’invitation**. Ouvrir le lien dans l’autre profil et cliquer sur **Rejoindre la partie invitée**. | L’invité voit la carte de l’hôte. **Quitter** restaure sa carte locale. Pour une carte lourde, charger son JSON depuis une URL HTTPS partageable avant d’héberger. |
+| Panorama | Dans **Atelier des cartes → Scène → Importer un ciel 360°**, choisir un JPEG, PNG ou WebP de format 2:1 jusqu’à 5 Mo. Recharger l’atelier puis utiliser **Jouer cette map**. | Le brouillon et le jeu conservent le panorama complet. Un fichier de plus de 5 Mo est refusé. |
+| Terrain en surplomb | Placer un terrain surélevé au-dessus du sol et marcher dessous en entrant par le côté. Répéter la manipulation en chutant sous le bord de la carte. | La collision ne projette plus le joueur à la surface. Un saut peut heurter le plafond et une vraie chute hors de la carte déclenche toujours la réapparition. |
+| Motifs dessinés | Dans **Texturer → Créer une texture**, dessiner deux formes et cliquer sur **+ Ajouter le dessin comme forme** après chaque tracé. Régler densité, taille, rotation, miroir et graine, puis générer et appliquer. | Les deux dessins apparaissent dans la texture répétée. L’export conserve la texture calculée. |
+| Densité | Dans **Props**, choisir un terrain de 100 × 100 m, ajouter une seule règle à 2 instances/m² et couper ses collisions. | La règle demande 20 000 instances. La densité est calculée sur la surface horizontale admissible. Le compteur distingue les instances visibles, les instances demandées et les collisions. |
+
+Le transfert d’une carte volumineuse à partir du seul code du salon reste à développer. Les essais sur le relais public, l’intégration dans un navigateur et les mesures de performance restent à réaliser pour ces retouches.

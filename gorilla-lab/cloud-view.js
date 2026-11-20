@@ -202,6 +202,13 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
 
   const $=id=>document.querySelector(id);
   const status=$('#cloud-status'),room=$('#cloud-room'),modeButton=$('#cloud-camera');
+  const start=$('#cloud-private-start'),active=$('#cloud-private-active');
+  const copyButton=$('#cloud-copy'),playerButton=$('#cloud-player');
+  function refreshRoomActions(){
+    start.hidden=Boolean(client.role);
+    active.hidden=!client.role;
+    copyButton.hidden=client.role!=='vr';
+  }
   let statusAt=-Infinity,cameraMode=0,networkCaption='Hors ligne',copyUntil=0;
   function setCamera(mode){
     cameraMode=mode;
@@ -243,12 +250,12 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
   function privateCode(){
     return Array.from(crypto.getRandomValues(new Uint8Array(8)),n=>(n%36).toString(36)).join('').toUpperCase();
   }
-  room.value=/^[A-Z0-9]{5,12}$/.test(roomFromURL)?roomFromURL:privateCode();
+  room.value=/^[A-Z0-9]{5,12}$/.test(roomFromURL)?roomFromURL:'';
   const invitedMap=new URLSearchParams(location.hash.slice(1)).get('roomMap')??
     new URLSearchParams(location.search).get('roomMap');
   let roomMapPending=false,visit=0,lastMapAttempt=null,telemetryAt=-Infinity;
   function leave(){
-    visit++;roomMapPending=false;lastMapAttempt=null;client.leave();restoreRoomMap?.();
+    visit++;roomMapPending=false;lastMapAttempt=null;client.leave();restoreRoomMap?.();refreshRoomActions();
     const output=$('#cloud-telemetry');
     if(output)output.textContent='';
   }
@@ -259,19 +266,23 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
     if(client.role)leave();
     if(!client.join(code,role))return;
     room.value=code;
+    refreshRoomActions();
     if(role!=='vr')$('#game').focus();
     feed.reset();setCamera(0);
     seedArena(mapCode(code));cachedMap='';
   }
-  $('#cloud-vr').onclick=()=>connect('vr');
   $('#cloud-new').onclick=()=>connect('vr',privateCode());
   for(const [index,code] of publicRooms.entries()){
     $(`#public-join-${index}`).onclick=()=>connect('player',code);
     $(`#public-host-${index}`).onclick=()=>connect('vr',code);
   }
   $('#cloud-pc').onclick=()=>connect('pc');
-  const playerButton=$('#cloud-player');
-  if(playerButton)playerButton.onclick=()=>connect('player');
+  playerButton.onclick=()=>connect('player');
+  room.addEventListener('keydown',event=>{if(event.key==='Enter')connect('player');});
+  if(invitedMap&&room.value){
+    playerButton.textContent='Rejoindre la partie invitée';
+    queueMicrotask(showInvitation);
+  }
   $('#cloud-leave').onclick=()=>{copyUntil=0;leave();};
   $('#cloud-copy').onclick=async()=>{
     const url=new URL(location.href);
@@ -286,16 +297,19 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
       try{source=await roomMapSource?.();}catch{}
       if(client.role!=='vr'||client.code!==code)return;
       if(!source){
-        status.textContent='Carte trop volumineuse pour le lien. Charge-la depuis une URL HTTPS partageable.';
+        status.textContent='Carte trop volumineuse pour ce lien. Dans Carte, charge son JSON depuis une URL HTTPS partageable, puis relance le salon.';
         copyUntil=performance.now()+5500;return;
       }
       url.hash=new URLSearchParams({roomMap:source}).toString();
     }
-    try{await navigator.clipboard.writeText(url.href);status.textContent='Lien copié.';}
+    try{await navigator.clipboard.writeText(url.href);status.textContent='Invitation copiée. Envoie le lien complet à ton invité.';}
     catch{status.textContent=url.href;}
     copyUntil=performance.now()+2500;
   };
   addEventListener('pagehide',()=>client.leave());
+  function showInvitation(){
+    document.querySelectorAll('[data-page]')[5]?.click();
+  }
 
   const target=new T.Vector3(),followTarget=new T.Vector3(),orbitOffset=new T.Vector3(),flight=new T.Vector3();
   let jumpTime=0;
@@ -368,6 +382,7 @@ export function addSpectator({scene,currentMap,seedArena,makeReplica,applyLight,
   }
   function update(frame){
     const {inVR,time,dt,position,yaw,camera,rig,keys,avatar,bodies}=frame;
+    refreshRoomActions();
     if(!client.role){clearReplicas();return;}
     const ready=client.role!=='pc'||!inVR,now=performance.now();
     const map=localMap(),host=client.role!=='vr'?client.remote:null;

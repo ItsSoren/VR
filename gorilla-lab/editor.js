@@ -1,4 +1,5 @@
-import {environmentPreset,environmentPresets,maxSkyImageBytes,normalizeEnvironment} from './map-environment.js';
+import {environmentPreset,environmentPresets,maxSkyFileBytes,normalizeEnvironment} from './map-environment.js';
+import {readLocalMap,writeLocalMap} from './map-storage.js';
 import * as T from 'three';
 import {buildArena} from './arena.js';
 import {addLabFixtures} from './fixtures.js';
@@ -8,8 +9,7 @@ import {defaultMirrorPiece,shouldKeepArenaAsset} from './arena-map-pieces.js';
 import {tiledBox,transformUVs,decorPrimitiveGeometry,rampGeometry} from './texture-geometry.js';
 import {readModelPack,modelStorageKey,normalizeModelPack,createModelUnitGeometry,createModelMaterial,modelCollisionZones,modelCollisionGeometry,disposeModelMaterial,modelPhysics,modelDimensions,modelBounds} from './model-pack.js';
 import {createBuiltinModelTemplates,spawnAssetIds} from './model-assets.js';
-import {normalizeTerrain,normalizeTerrainRule,maxTerrainRules,maxTerrainRuleInstances,maxTerrainRuleColors,maxTerrainSizeVariation,terrainQuarterYaw,terrainSeam,stitchTerrain,resizeTerrain,sculptTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from './terrain-edit.js';
-import {texturePresets,seamlessTexture} from './seamless-texture.js';
+import {normalizeTerrain,normalizeTerrainRule,maxTerrainRules,maxTerrainDensity,maxTerrainPropSize,maxTerrainRuleColors,maxTerrainSizeVariation,terrainQuarterYaw,terrainSeam,stitchTerrain,resizeTerrain,sculptTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from './terrain-edit.js';
 import {openTextureStudio} from './texture-studio.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import {resizedCenter,scaleHandleSigns} from './editor-scale.js';
@@ -946,25 +946,26 @@ function remember() {
 }
 
 // Enregistre le brouillon local et signale les erreurs de stockage.
-function pendingSave() {
+let saveGeneration=0;
+async function pendingSave() {
+  const generation=++saveGeneration;
   try {
-    localStorage.setItem(draftKey, JSON.stringify(map));
-    $('draft-status').textContent = 'Brouillon sauvegardé sur cet appareil';
+    await writeLocalMap(draftKey, JSON.stringify(map));
+    if(generation===saveGeneration)$('draft-status').textContent = 'Brouillon sauvegardé sur cet appareil';
     return true;
   } catch {
-    $('draft-status').textContent = 'Sauvegarde locale indisponible. Exporte le JSON pour garder la carte.';
+    if(generation===saveGeneration)$('draft-status').textContent = 'Sauvegarde locale indisponible. Exporte le JSON pour garder la carte.';
     return false;
   }
 }
 
-$('model-asset-edit-link').onclick=event=>{
-  const piece=current();
-  if(!piece?.model||!pendingSave()){
-    event.preventDefault();
-    return;
-  }
+$('model-asset-edit-link').onclick=async event=>{
+  event.preventDefault();
+  const href=event.currentTarget.href,piece=current(),index=selected;
+  if(!piece?.model||!await pendingSave())return;
   try{
-    sessionStorage.setItem(modelEditKey,JSON.stringify({index:selected,piece}));
+    sessionStorage.setItem(modelEditKey,JSON.stringify({index,piece}));
+    location.href=href;
   }catch{
     event.preventDefault();
     notice('Impossible de préparer le retour à la carte.');
@@ -1097,7 +1098,6 @@ function updateInspector() {
   $('rotate').disabled=!piece;
   $('rotate').textContent=terrain?'Tourner +90°':'Tourner +45°';
   $('p-yaw').step=terrain?'90':'1';
-  $('texture-create').disabled=!piece;
   $('surface').value = '';
   $('undo').disabled = undoStack.length === 0;
   $('active-selection').textContent=piece?piece.name:'Aucune sélection';
@@ -1167,8 +1167,8 @@ $('environment-image').onchange=event=>{
   const field=event.currentTarget,file=field.files[0],editingMap=map;
   field.value='';
   if(!file)return;
-  if(file.size>Math.floor((maxSkyImageBytes-32)*.75)){
-    environmentStatus.textContent='Image trop lourde. Choisis un panorama WebP, JPG ou PNG de moins de 900 ko.';return;
+  if(file.size>maxSkyFileBytes){
+    environmentStatus.textContent='Image trop lourde. Choisis un panorama WebP, JPG ou PNG de 5 Mo maximum.';return;
   }
   const reader=new FileReader();
   reader.onload=()=>{
@@ -1899,9 +1899,9 @@ $('export-map').onclick = () => {
     notice(error.message);
   }
 };
-$('test-map').onclick = () => {
+$('test-map').onclick = async () => {
   try {
-    localStorage.setItem(storageKey, JSON.stringify(parseMap(map)));
+    await writeLocalMap(storageKey, JSON.stringify(parseMap(map)));
     location.href = './?custom=1';
   } catch {
     notice('Le stockage du navigateur est plein. Exporte le JSON et importe-le dans le jeu.');
@@ -1966,10 +1966,10 @@ function renderTerrainRules(piece){
     }
     palette.append(swatches);
     add('Palette de teintes',palette,true);
-    add('Instances / m²',numeric('density',0,maxTerrainRuleInstances,'any'));
+    add('Instances / m²',numeric('density',0,maxTerrainDensity,'any'));
     add('Graine',numeric('seed',0,2147483647,1));
     if(rule.model)add('Mode de taille',select([['Conserver les proportions','keep'],['Réduire pour tenir dans un cube','fit'],['Déformer en cube','stretch']],rule.fit,fit=>update({fit})),true);
-    add(rule.fit==='keep'?'Taille · facteur ×':'Taille · cube (m)',numeric('size',.05,maxTerrainRuleInstances,.05));
+    add(rule.fit==='keep'?'Taille · facteur ×':'Taille · cube (m)',numeric('size',.05,maxTerrainPropSize,.05));
     add('Variation de taille',numeric('variation',0,maxTerrainSizeVariation,.05));
     const collision=document.createElement('input');collision.type='checkbox';collision.checked=rule.collidable;
     collision.onchange=()=>update({collidable:collision.checked});add('Collision · boîte',collision);
@@ -1997,7 +1997,8 @@ function renderTerrainRules(piece){
     const count=document.createElement('output');
     const distribution=distributions[index]??{count:0,requested:0,area:0};
     count.textContent=distribution.count+' / '+distribution.requested+' · '+distribution.area.toFixed(1)+' m²';
-    if(distribution.requested>maxTerrainRuleInstances)count.textContent+=' · plafond '+maxTerrainRuleInstances;
+    if(distribution.requested>distribution.count)count.textContent+=' · répartition limitée';
+    if(rule.collidable)count.textContent+=' · '+format.format(distribution.collisions??0)+' collisions';
     const cell=add('Affichées / demandées',count,true);
     const remove=document.createElement('button');remove.type='button';remove.textContent='Retirer la ligne';
     remove.onclick=()=>{remember();rules.splice(index,1);sync();};
@@ -2091,14 +2092,6 @@ function applyBrush(canvas,event){
   transformUVs(mesh.geometry,piece);
   selectionBox?.update();paintPlan();queueRender();
 }
-$('texture-style').replaceChildren(...texturePresets.map((label,index)=>new Option(label,index)));
-$('texture-create').onclick=()=>{
-  const piece=current();if(!piece)return;
-  const canvas=seamlessTexture(Number($('texture-style').value),$('texture-tint').value);
-  remember();piece.texture=canvas.toDataURL('image/webp',.85);sync();
-  notice('Texture répétable 512 × 512 intégrée.');
-};
-
 $('view-top').onclick=()=>{
   const target=controls.target;
   const distance=Math.max(10,camera.position.distanceTo(target));
@@ -2217,8 +2210,9 @@ for(const canvas of [screen,plan])canvas.addEventListener('pointermove',event=>{
   const point=hit.point;
   $('debug-stats').textContent='X '+point.x.toFixed(2)+' · Y '+point.y.toFixed(2)+' · Z '+point.z.toFixed(2)+' m · '+map.pieces.length+' éléments';
 });
+async function startEditor(){
 try {
-  const draft = localStorage.getItem(draftKey);
+  const draft = await readLocalMap(draftKey);
   if (draft) {
     const saved=parseMap(draft);
     // Previously just opening the editor automatically saved the demo as a draft.
@@ -2254,3 +2248,6 @@ if(requestedModel){
 
 
 editorTrace('démarrage terminé',{version:__LAB_RELEASE__,name:map.name,pièces:map.pieces.length});
+
+}
+startEditor();

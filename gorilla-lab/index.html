@@ -11,7 +11,7 @@ button:focus-visible{outline:2px solid #ffe6a5}button:hover{background:#4d6b78}b
 #game-hint{position:fixed;top:15px;left:50%;transform:translateX(-50%);background:#243944f0;padding:.5rem .8rem;border-radius:5px;pointer-events:none}
 #crosshair{pointer-events:none;position:fixed;left:50%;top:50%;width:6px;height:6px;border-radius:50%;transform:translate(-50%,-50%);background:#fff4d1;box-shadow:0 0 4px #071219}
 #flat-actions{display:none;position:fixed;right:max(12px,env(safe-area-inset-right));bottom:max(12px,env(safe-area-inset-bottom));gap:8px;max-width:200px;flex-wrap:wrap;justify-content:flex-end}
-.cloud-card{padding:.7rem;margin:.55rem 0;background:#223844;border:1px solid #48616a;border-radius:8px}.cloud-card h3{margin:0 0 .4rem;font-size:15px}.cloud-card input{width:100%;margin:.3rem 0 .55rem;padding:.45rem;font:inherit;text-transform:uppercase}.cloud-card button{min-height:37px}.cloud-grid{display:grid;grid-template-columns:1fr 1fr;gap:.35rem}.cloud-room-row{display:grid;grid-template-columns:1fr auto auto;gap:.35rem;align-items:center;margin:.35rem 0}#cloud-status{padding:.55rem .65rem;background:#142630;border-radius:5px}
+.cloud-grid[hidden],.cloud-grid button[hidden]{display:none}.cloud-card{padding:.7rem;margin:.55rem 0;background:#223844;border:1px solid #48616a;border-radius:8px}.cloud-card h3{margin:0 0 .4rem;font-size:15px}.cloud-card input{width:100%;margin:.3rem 0 .55rem;padding:.45rem;font:inherit;text-transform:uppercase}.cloud-card button{min-height:37px}.cloud-grid{display:grid;grid-template-columns:1fr 1fr;gap:.35rem}.cloud-room-row{display:grid;grid-template-columns:1fr auto auto;gap:.35rem;align-items:center;margin:.35rem 0}#cloud-status{padding:.55rem .65rem;background:#142630;border-radius:5px}
 #flat-actions button{min-height:45px;background:#273c4bb5;touch-action:none}
 @media (any-pointer:coarse){#flat-actions{display:flex}aside{max-height:calc(100dvh - 125px)}}
 </style></head>
@@ -33,17 +33,18 @@ button:focus-visible{outline:2px solid #ffe6a5}button:hover{background:#4d6b78}b
 <p><button id="capture-report">Capturer le rapport</button> <button id="download-report" disabled>JSON</button></p><section id="cloud-access" aria-label="Salons" hidden>
 <p id="cloud-status" role="status">Hors ligne</p>
 <output id="cloud-telemetry"></output>
-<div class="cloud-card"><h3>Salons publics</h3>
+<div id="cloud-private-start" class="cloud-card">
+<button id="cloud-new">Héberger ma carte</button>
+<label>Code d’invitation <input id="cloud-room" maxlength="12" autocomplete="off" spellcheck="false"></label>
+<button id="cloud-player">Rejoindre le salon</button>
+</div>
+<div id="cloud-private-active" class="cloud-grid" hidden><button id="cloud-copy" hidden>Copier l’invitation</button><button id="cloud-leave">Quitter</button></div>
+<details class="cloud-card"><summary>Salons publics et mode spectateur</summary>
 <div class="cloud-room-row"><span>Arène 1</span><button id="public-join-0">Rejoindre</button><button id="public-host-0">Héberger</button></div>
 <div class="cloud-room-row"><span>Arène 2</span><button id="public-join-1">Rejoindre</button><button id="public-host-1">Héberger</button></div>
 <div class="cloud-room-row"><span>Arène 3</span><button id="public-join-2">Rejoindre</button><button id="public-host-2">Héberger</button></div>
-</div>
-<div class="cloud-card"><h3>Salon privé</h3>
-<label>Code d’invitation <input id="cloud-room" maxlength="12" autocomplete="off" spellcheck="false"></label>
-<div class="cloud-grid"><button id="cloud-new">Créer un salon</button><button id="cloud-player">Rejoindre</button><button id="cloud-vr">Héberger ce code</button><button id="cloud-copy">Copier le lien</button></div>
-</div>
-<div class="cloud-grid"><button id="cloud-pc">Spectateur</button><button id="cloud-camera">Caméra : Libre</button><button id="cloud-leave">Déconnecter</button></div>
-<p><small>PC, mobile et VR peuvent héberger et jouer ensemble. Le salon transmet les poses et les interactions via TurboWarp.</small></p>
+<div class="cloud-grid"><button id="cloud-pc">Spectateur</button><button id="cloud-camera">Caméra : Libre</button></div>
+</details>
 </section><details id="map-access"><summary>Cartes et éditeur</summary><p><a href="./editor.html">Ouvrir l’atelier PC / mobile</a></p><label>Importer un fichier <input id="map-file" type="file" accept=".json,application/json"></label><label>URL de map <input id="map-url" type="url" placeholder="https://…/map.gorilla.json"></label><button id="map-load-url">Charger URL</button> <button id="map-export">Exporter JSON</button> <button id="map-reset">Arène</button><p id="map-note" role="status"></p></details><p><small>La résolution XR s’applique à la prochaine entrée en VR.</small></p>
 </aside><script defer src="./game-lab-r38.js"></script></body></html>
 

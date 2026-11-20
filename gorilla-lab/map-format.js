@@ -9,7 +9,7 @@ import {normalizeTerrain,terrainQuarterYaw} from './terrain-edit.js';
 export const mapMaterials=['Ardoise','Nacre','Brique','Sable','Marbre','Bois','Cuivre','Chrome','Carreaux','Béton','Verre bleu','Verre ambre','Glace','Caoutchouc','Émail','Mosaïque','Benchmark'];
 export const materialColors=['#555e6a','#537586','#855443','#a28e61','#bbb8b0','#664527','#794a36','#758291','#293e4b','#626664','#94cfdd','#d1a053','#7cb0cf','#45404b','#40468c','#455d62','#141414'];
 export const surfacePresets={normal:{grip:.8,gravity:1,bounce:1},ice:{grip:.035,gravity:1,bounce:1},rubber:{grip:1.15,gravity:1,bounce:1.52},moon:{grip:.8,gravity:.28,bounce:1}};
-export const maxMapBytes=8_000_000;
+export const maxMapBytes=16_000_000;
 export const maxPieces=512;
 export const maxWorldReach=1024;
 export const maxObjectSize=512;
@@ -17,7 +17,7 @@ const number=(value,min,max,fallback)=>typeof value==='number'&&Number.isFinite(
 const text=(value,length,fallback)=>typeof value==='string'&&value.trim()?value.trim().slice(0,length):fallback;
 export function parseMap(input){
   if(typeof input==='string'){
-    if(input.length>maxMapBytes)throw Error('Cette map dépasse 3 Mo.');
+    if(new TextEncoder().encode(input).length>maxMapBytes)throw Error('Cette map dépasse 16 Mo.');
     input=JSON.parse(input);
   }
   if(input?.format!=='gorilla-lab-map'||input.version!==1||!Array.isArray(input.pieces)||input.pieces.length<1||input.pieces.length>maxPieces) {

@@ -658,7 +658,9 @@ function heightContact(p,radius,field,out) {
     const dz=(field.height(p.x,p.z+eps)-field.height(p.x,p.z-eps))/(2*eps);
     out.set(-dx,1,-dz).normalize();
   }
-  return Math.max(0,radius-(p.y-h)*out.y);
+  const distance=(p.y-h)*out.y;
+  if(distance<0)out.negate();
+  return Math.max(0,radius-Math.abs(distance));
 }
 
 const playerProbe={mesh:{position:null,quaternion:new T.Quaternion()},shape:{sphereRadius:0,normals:[],edges:[]}};

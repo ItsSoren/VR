@@ -4,7 +4,10 @@ import {normalizeModelPack,createModelUnitGeometry,createModelMaterial,disposeMo
 export const maxTerrainDetail=256;
 export const defaultTerrainTextureDensity=1/2.6**2;
 export const maxTerrainRules=10000;
-export const maxTerrainRuleInstances=10000;
+export const maxTerrainDensity=20;
+export const maxTerrainRuleInstances=1_000_000;
+export const maxTerrainPropSize=10_000;
+export const maxTerrainColliders=10_000;
 export const maxTerrainRuleColors=10;
 export const maxTerrainSizeVariation=10;
 const maxTextureDensity=256;
@@ -30,11 +33,11 @@ function terrainDetail(value,fallback=defaultDetail){
 }
 
 function readVegetationDensity(value,name,area,legacyRate,legacyMax){
-  if(Number.isFinite(value[name+'Density']))return bounded(value[name+'Density'],0,maxTerrainRuleInstances,0);
+  if(Number.isFinite(value[name+'Density']))return bounded(value[name+'Density'],0,maxTerrainDensity,0);
   const legacy=bounded(value[name],0,1,0);
   if(!legacy)return 0;
   const count=Math.max(1,Math.round(Math.min(legacyMax,area*legacyRate)*legacy));
-  return bounded(count/area,0,maxTerrainRuleInstances,0);
+  return bounded(count/area,0,maxTerrainDensity,0);
 }
 
 const distributionKinds=['grass','shrub','model'];
@@ -62,10 +65,10 @@ export function normalizeTerrainRule(rule={}){
     .slice(0,maxTerrainRuleColors).map(value=>colorPattern.test(value)?value:color);
   while(palette.length<2)palette.push(palette.at(-1)??color);
   return {
-    kind,model,density:bounded(rule.density,0,maxTerrainRuleInstances,1),
+    kind,model,density:bounded(rule.density,0,maxTerrainDensity,1),
     colors:palette,
     seed:Math.round(bounded(rule.seed,0,2147483647,1)),
-    size:bounded(rule.size,.05,maxTerrainRuleInstances,1),
+    size:bounded(rule.size,.05,maxTerrainPropSize,1),
     fit:fitModes.includes(rule.fit)?rule.fit:'keep',
     collidable:rule.collidable===true,
     variation:bounded(rule.variation,0,maxTerrainSizeVariation,0),
@@ -448,7 +451,7 @@ export function terrainRuleDimensions(dimensions,fit,size){
 }
 
 // Density is based on the horizontal footprint. Altitude and slope are measured on the actual mesh.
-function scatterPlan(piece,rule,grid){
+function scatterPlan(piece,rule,grid,budget){
   const filter=rule.scatter;
   if(!filter)return {requested:Math.round(piece.w*piece.d*rule.density),positions:null,area:piece.w*piece.d};
   const x0=(filter.minX/100-.5)*piece.w,x1=(filter.maxX/100-.5)*piece.w;
@@ -472,8 +475,8 @@ function scatterPlan(piece,rule,grid){
       if(accept(lerp(x0,x1,(col+.5)/resolution),lerp(z0,z1,(row+.5)/resolution)))passed++;
     eligible=passed/resolution**2;
   }
-  const requested=Math.round(area*eligible*rule.density),target=Math.min(requested,maxTerrainRuleInstances);
-  const attempts=slopeActive||altitudeActive?Math.min(120000,Math.ceil(target/Math.max(eligible,.001))*3):target;
+  const requested=Math.round(area*eligible*rule.density),target=Math.min(requested,budget);
+  const attempts=slopeActive||altitudeActive?Math.min(budget*4,Math.ceil(target/Math.max(eligible,.001))*3):target;
   for(let i=0;i<attempts&&positions.length<target;i++){
     const x=lerp(x0,x1,hash(i,27,rule.seed)),z=lerp(z0,z1,hash(i,27,rule.seed+1));
     if(accept(x,z))positions.push([x,z]);
@@ -484,10 +487,14 @@ function scatterPlan(piece,rule,grid){
 export function terrainVegetation(piece) {
   const group=new T.Group(),grid=gridFor(piece);
   group.userData.distribution=[];
+  let remaining=maxTerrainRuleInstances,remainingColliders=maxTerrainColliders;
   for(const [index,rule] of (piece.terrain.rules??[]).entries()){
-    const {requested,positions,area}=scatterPlan(piece,rule,grid);
-    const count=positions?positions.length:Math.min(requested,maxTerrainRuleInstances);
-    group.userData.distribution[index]={requested,count,area};
+    const {requested,positions,area}=scatterPlan(piece,rule,grid,remaining);
+    const count=positions?positions.length:Math.min(requested,remaining);
+    const collisions=rule.collidable?Math.min(count,remainingColliders):0;
+    remaining-=count;
+    remainingColliders-=collisions;
+    group.userData.distribution[index]={requested,count,area,collisions};
     if(!count)continue;
     const grass=rule.kind==='grass';
     const dimensions=rule.model?terrainRuleDimensions(modelDimensions(rule.model),rule.fit,rule.size):null;
@@ -505,7 +512,7 @@ export function terrainVegetation(piece) {
     }
     const plants=new T.InstancedMesh(geometry,material,count);
     plants.name=rule.kind;
-    plants.userData={ruleIndex:index,seed:rule.seed,variation:rule.variation,collidable:rule.collidable,requestedCount:requested,positions,scatter:rule.scatter};
+    plants.userData={ruleIndex:index,seed:rule.seed,variation:rule.variation,collidable:rule.collidable,collisionCount:collisions,requestedCount:requested,positions,scatter:rule.scatter};
     plants.instanceMatrix.setUsage(T.DynamicDrawUsage);
     plants.receiveShadow=true;
     const colors=rule.colors.map(value=>new T.Color(value)),tint=new T.Color();
@@ -546,7 +553,7 @@ export function terrainInstanceBoxes(piece,group){
     const bounds=mesh.geometry.boundingBox;
     const center=bounds.getCenter(new T.Vector3());
     const half=bounds.getSize(new T.Vector3()).multiplyScalar(.5);
-    for(let i=0;i<mesh.count;i++){
+    for(let i=0;i<mesh.userData.collisionCount;i++){
       mesh.getMatrixAt(i,matrix);
       const position=new T.Vector3(),quaternion=new T.Quaternion();
       matrix.decompose(position,quaternion,scale);
