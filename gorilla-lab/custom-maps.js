@@ -4,7 +4,7 @@ import {clearLocalMap,writeLocalMap} from './map-storage.js';
 import * as T from 'three';
 import {shouldKeepArenaAsset} from './arena-map-pieces.js';
 import {tiledBox,transformUVs,decorPrimitiveGeometry,rampGeometry} from './texture-geometry.js';
-import {terrainGeometry,terrainCollider,terrainVegetation,terrainInstanceBoxes,disposeVegetation,sculptTerrain,normalizeTerrain,resizeTerrain} from './terrain-edit.js';
+import {terrainGeometry,applyTerrainProjection,terrainCollider,terrainVegetation,terrainInstanceBoxes,disposeVegetation,sculptTerrain,normalizeTerrain,resizeTerrain} from './terrain-edit.js';
 import {applyHinge,hingeAngle} from './model-hinge.js';
 import {boxCollider,colliderFor} from './physics.js';
 import {createModelUnitGeometry,createModelMaterial,modelCollisionZones,modelCollisionGeometry,disposeModelMaterial,createModelPartGeometry,createModelPartMaterial,modelBounds} from './model-pack.js';
@@ -206,6 +206,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
         material.customProgramCacheKey=base.customProgramCacheKey;custom=true;
       }
       material.side=T.DoubleSide;
+      applyTerrainProjection(material,piece);
     }
     const geometry=piece.terrain?terrainGeometry(piece):piece.primitive==='ramp'?rampGeometry(piece.w,piece.h,piece.d):piece.primitive&&piece.primitive!=='box'
       ?decorPrimitiveGeometry(piece.primitive).scale(piece.w,piece.h,piece.d)

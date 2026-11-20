@@ -476,7 +476,8 @@
           <summary>Maillage et relief</summary>
           <h3>Maillage déformable</h3>
           <div class="fields">
-            <label>Diagonales du maillage<select id="terrain-triangulation"><option value="regular">Régulières</option><option value="varied">Variées (graine du terrain)</option></select></label>
+            <label>Forme des triangles<select id="terrain-triangulation"><option value="regular">Rectangles découpés</option><option value="varied">Diagonales alternées</option><option value="staggered">Triangles en quinconce</option><option value="irregular">Triangles irréguliers (graine)</option></select></label>
+            <label>Épaisseur (m)<input id="terrain-thickness" type="number" min="0" max="100" step=".25" value="0" title="0 crée une surface fine. Une épaisseur positive ferme le terrain sur les côtés et par-dessous."></label>
             <label>Cases de maillage par axe<input id="terrain-detail" type="number" min="1" max="512" step="1"></label>
             <label>Dimensions et densité du maillage <output id="terrain-cell-size" style="color:var(--text)">—</output></label>
           </div>
@@ -538,6 +539,7 @@
             <button id="texture-paint" class="wide">Créer une texture · motifs et pinceaux</button>
             <h3 class="wide">Projection et répétition</h3>
           <div class="wide fields" id="terrain-texture-density-fields" hidden>
+              <label>Projection du relief<select id="terrain-projection"><option value="flat">Vue de dessus</option><option value="triplanar">Sur les pentes et parois</option></select></label>
               <label>Texture de terrain (motifs/m²)<input id="terrain-textureDensity" type="number" min=".0001" max="10000" step="any"></label>
               <label>Densité après échelle UV <output id="terrain-texture-effective">–</output></label>
             </div>

@@ -211,6 +211,10 @@ export function buildArena(scene,renderer) {
       ctx.restore();
   }
   const detailedTiles=new Set([0,2,4,5,8,15,16]);
+  const terrainShadowChunk=T.ShaderChunk.shadowmap_pars_fragment.replace(
+    'return mix( 1.0, shadow, shadowIntensity );',
+    'vec2 edge = min(shadowCoord.xy, 1.0 - shadowCoord.xy); return mix(1.0, shadow, shadowIntensity * smoothstep(0.0, 0.14, min(edge.x, edge.y)));'
+  );
   const tiles=palette.map(([name,color,accent,roughness,metalness,opacity],index)=>{
     const size=detailedTiles.has(index)?512:256;
     const tex=canvasTexture(size,size,ctx=>drawTile(ctx,index,size));
@@ -245,6 +249,7 @@ export function buildArena(scene,renderer) {
   }
   for(const material of [...tiles,...alt]) {
     material.onBeforeCompile=shader=>{
+      shader.fragmentShader=shader.fragmentShader.replace('#include <shadowmap_pars_fragment>',terrainShadowChunk);
       shader.uniforms.uFocusAmount=focusAmount;
       shader.uniforms.uFocusRadius=focusRadius;
       shader.uniforms.uLabLightmap=lightmap;
@@ -265,7 +270,7 @@ export function buildArena(scene,renderer) {
         }
       `);
     };
-    material.customProgramCacheKey=()=> 'gorilla-lab-focus-lightmap-v2';
+    material.customProgramCacheKey=()=> 'gorilla-lab-focus-lightmap-v3';
   }
   const boxes=[], props=[];
   function box(name,x,y,z,w,h,d,type=0,angle=0,friction=1,gravity=1,showTexture=false) {

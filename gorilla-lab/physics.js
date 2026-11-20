@@ -647,6 +647,7 @@ export function solveObjects(objects,boxes,dt,gravity,rebound,surfaceAt) {
 }
 
 function heightContact(p,radius,field,out) {
+  if(field.thickness>0)return volumeHeightContact(p,radius,field,out);
   if(p.x<field.xMin||p.x>field.xMax||p.z<field.zMin||p.z>field.zMax)return 0;
   const h=field.height(p.x,p.z);
   // Test signed distance to the supporting triangle, not vertical distance.
@@ -661,6 +662,33 @@ function heightContact(p,radius,field,out) {
   const distance=(p.y-h)*out.y;
   if(distance<0)out.negate();
   return Math.max(0,radius-Math.abs(distance));
+}
+
+function volumeHeightContact(p,radius,field,out){
+  const x=T.MathUtils.clamp(p.x,field.xMin,field.xMax),z=T.MathUtils.clamp(p.z,field.zMin,field.zMax);
+  const dx=p.x-x,dz=p.z-z;
+  if(dx*dx+dz*dz>=radius*radius)return 0;
+  const top=field.height(x,z),bottom=top-field.thickness;
+  if(dx||dz){
+    const dy=p.y-T.MathUtils.clamp(p.y,bottom,top);
+    const distance=Math.hypot(dx,dy,dz);
+    if(distance>=radius)return 0;
+    out.set(dx/distance,dy/distance,dz/distance);
+    return radius-distance;
+  }
+  field.normalAt(x,z,out);
+  const roof=(p.y-top)*out.y,floor=(bottom-p.y)*out.y;
+  const west=x-field.xMin,east=field.xMax-x,north=z-field.zMin,south=field.zMax-z;
+  const wall=Math.min(west,east,north,south);
+  const distance=Math.max(roof,floor,-wall);
+  if(distance===floor)out.negate();
+  else if(distance===-wall){
+    if(wall===west)out.set(-1,0,0);
+    else if(wall===east)out.set(1,0,0);
+    else if(wall===north)out.set(0,0,-1);
+    else out.set(0,0,1);
+  }
+  return Math.max(0,radius-distance);
 }
 
 const playerProbe={mesh:{position:null,quaternion:new T.Quaternion()},shape:{sphereRadius:0,normals:[],edges:[]}};

@@ -9,7 +9,7 @@ import {defaultMirrorPiece,shouldKeepArenaAsset} from './arena-map-pieces.js';
 import {tiledBox,transformUVs,decorPrimitiveGeometry,rampGeometry} from './texture-geometry.js';
 import {readModelPack,modelStorageKey,normalizeModelPack,createModelUnitGeometry,createModelMaterial,modelCollisionZones,modelCollisionGeometry,disposeModelMaterial,modelPhysics,modelDimensions,modelBounds} from './model-pack.js';
 import {createBuiltinModelTemplates,spawnAssetIds} from './model-assets.js';
-import {normalizeTerrain,normalizeTerrainRule,maxTerrainRules,maxTerrainDensity,maxTerrainPropSize,maxTerrainRuleColors,maxTerrainSizeVariation,terrainQuarterYaw,terrainSeam,stitchTerrain,resizeTerrain,sculptTerrain,terrainGeometry,terrainVegetation,disposeVegetation} from './terrain-edit.js';
+import {normalizeTerrain,normalizeTerrainRule,maxTerrainRules,maxTerrainDensity,maxTerrainPropSize,maxTerrainRuleColors,maxTerrainSizeVariation,terrainQuarterYaw,terrainSeam,stitchTerrain,resizeTerrain,sculptTerrain,terrainGeometry,updateTerrainGeometry,applyTerrainProjection,terrainVegetation,disposeVegetation} from './terrain-edit.js';
 import {openTextureStudio} from './texture-studio.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import {resizedCenter,scaleHandleSigns} from './editor-scale.js';
@@ -924,6 +924,7 @@ function rebuildScene() {
       material.map.wrapS = material.map.wrapT = T.RepeatWrapping;
       material.color.set(piece.color);
     }
+    if(piece.terrain)applyTerrainProjection(material,piece);
     const generationStarted=piece.terrain?performance.now():0;
     const geometry=piece.terrain?terrainGeometry(piece):
       piece.primitive==='ramp'?rampGeometry(piece.w,piece.h,piece.d).scale(1/piece.w,1/piece.h,1/piece.d):
@@ -1091,7 +1092,8 @@ function updateInspector() {
   $('texture-scale-label').hidden=Boolean(terrain);
   if(terrain){
     $('terrain-triangulation').value=terrain.triangulation??'regular';
-    for(const key of terrainFields)$('terrain-'+key).value=terrain[key];
+    $('terrain-projection').value=terrain.projection??'flat';
+    for(const key of terrainFields)$('terrain-'+key).value=terrain[key]??0;
     const reliefArea=terrain.reliefArea??defaultReliefArea(piece);
     $('terrain-relief-local').checked=Boolean(terrain.reliefArea);
     $('terrain-relief-fields').hidden=!terrain.reliefArea;
@@ -1100,9 +1102,10 @@ function updateInspector() {
     $('terrain-generation-stats').textContent=Number.isFinite(generationMs)
       ?'Calcul du relief · '+generationMs.toFixed(1)+' ms · '+((terrain.detail+1)**2).toLocaleString('fr-FR')+' sommets. Collision par champ de hauteur.':'';
     const area=piece.w*piece.d,triangles=2*terrain.detail**2;
+    const total=group.children[selected]?.geometry.index.count/3||triangles;
     const format=new Intl.NumberFormat('fr-FR',{maximumSignificantDigits:6});
     $('terrain-cell-size').textContent=format.format(piece.w/terrain.detail)+' × '+format.format(piece.d/terrain.detail)+
-      ' m par case · '+format.format(triangles)+' triangles (2 par case) · '+format.format(triangles/area)+' triangles/m²';
+      ' m de pas moyen · '+format.format(total)+' triangles au total · '+format.format(triangles/area)+' triangles/m² au sol';
     $('terrain-texture-effective').textContent=format.format(terrain.textureDensity/(piece.uvScale??1)**2)+' motifs/m² à l’écran avec l’échelle enregistrée';
     renderTerrainRules(piece);
     const neighbor=$('terrain-neighbor'),previous=neighbor.value;
@@ -1417,11 +1420,19 @@ function pointUnderPointer(canvas, event) {
 
 // Cherche une surface solide sous le futur point d’apparition.
 function spawnOnTop(x, z, yaw, selectedMesh = null) {
-  raycaster.set(new T.Vector3(x, 80, z), new T.Vector3(0, -1, 0));
+  const surfaces=selectedMesh?[selectedMesh]:group.children;
+  let highest=0;
+  for(const mesh of surfaces){
+    if(!mesh.geometry.boundingBox)mesh.geometry.computeBoundingBox();
+    const top=new T.Box3().copy(mesh.geometry.boundingBox).applyMatrix4(mesh.matrixWorld).max.y;
+    highest=Math.max(highest,top);
+  }
+  if(previewHill.visible&&map.arenaBase)highest=Math.max(highest,80);
+  raycaster.set(new T.Vector3(x, highest+1, z), new T.Vector3(0, -1, 0));
   const ground = selectedMesh ? raycaster.intersectObject(selectedMesh, false)[0]
     : raycaster.intersectObjects(previewHill.visible&&map.arenaBase?[...group.children,previewHill]:group.children, false).find(hit => hit.object===previewHill||map.pieces[group.children.indexOf(hit.object)]?.solid);
-  if (!ground || ground.point.y > 29.9) return null;
-  return { x, y: Math.max(-10, ground.point.y + .08), z, yaw };
+  if(!ground||Math.abs(ground.point.y+.08)>maxWorldHeight)return null;
+  return {x,y:ground.point.y+.08,z,yaw};
 }
 
 // Calcule une pose valide selon l’outil, le rayon et la normale touchée.
@@ -1926,7 +1937,7 @@ $('test-map').onclick = async () => {
   }
 };
 
-const terrainFields=['detail','seed','amplitude','frequency','octaves','roughness','ridge','edgeFade','textureDensity'];
+const terrainFields=['detail','thickness','seed','amplitude','frequency','octaves','roughness','ridge','edgeFade','textureDensity'];
 
 function renderTerrainRules(piece){
   const rules=piece.terrain.rules;
@@ -2061,9 +2072,9 @@ $('terrain-grassTexture-clear').onclick=()=>{
   remember();current().terrain.grassTexture=null;
   sync();
 };
-$('terrain-triangulation').onchange=event=>{
+for(const key of ['triangulation','projection'])$('terrain-'+key).onchange=event=>{
   const piece=current();if(!piece?.terrain)return;
-  remember();piece.terrain=normalizeTerrain({...piece.terrain,triangulation:event.target.value},piece.w*piece.d);sync();
+  remember();piece.terrain=normalizeTerrain({...piece.terrain,[key]:event.target.value},piece.w*piece.d);sync();
 };
 $('adaptive-editor-view').onchange=queueRender;
 $('spawn-gizmo').onclick=()=>{
@@ -2074,7 +2085,7 @@ for(const key of terrainFields)$('terrain-'+key).onchange=event=>{
   const piece=current();if(!piece?.terrain)return;
   remember();
   piece.terrain=key==='detail'?resizeTerrain(piece.terrain,Number(event.target.value)):
-    normalizeTerrain({...piece.terrain,[key]:Number(event.target.value)});
+    normalizeTerrain({...piece.terrain,[key]:Number(event.target.value)},piece.w*piece.d);
   sync();
 };
 function defaultReliefArea(piece){
@@ -2115,8 +2126,7 @@ function applyBrush(canvas,event){
   const brush={mode:$('terrain-brush').value,radius:Number($('brush-radius').value),strength:Number($('brush-strength').value),target:gesture.flattenY};
   if(!sculptTerrain(piece,hit.point.x,hit.point.z,brush))return;
   const mesh=group.children[index];
-  mesh.geometry.dispose();mesh.geometry=terrainGeometry(piece);
-  transformUVs(mesh.geometry,piece);
+  updateTerrainGeometry(mesh.geometry,piece);
   selectionBox?.update();paintPlan();queueRender();
 }
 $('view-top').onclick=()=>{

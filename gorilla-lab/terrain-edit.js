@@ -95,7 +95,8 @@ export function normalizeTerrain(value = {},area=1) {
   const heights = value?.heights;
   return {
     detail,
-    ...(value?.triangulation==='varied'?{triangulation:'varied'}:{}),
+    ...(['varied','irregular','staggered'].includes(value?.triangulation)?{triangulation:value.triangulation}:{}),
+    ...(value?.thickness>0?{thickness:bounded(value.thickness,0,100,0)}:{}),
     seed: Math.round(bounded(value?.seed, 0, 2147483647, 1)),
     amplitude: bounded(value?.amplitude, 0, 10_000, 0),
     frequency: bounded(value?.frequency, .00001, 100, .12),
@@ -105,6 +106,7 @@ export function normalizeTerrain(value = {},area=1) {
     edgeFade:bounded(value?.edgeFade,0,1,0),
     ...(value?.reliefArea?{reliefArea:normalizeReliefArea(value.reliefArea)}:{}),
     rules:readTerrainRules(value??{},area),
+    ...(value?.projection==='triplanar'?{projection:'triplanar'}:{}),
     textureDensity:bounded(value?.textureDensity,.0001,maxTextureDensity,defaultTerrainTextureDensity),
     grassTexture:typeof value?.grassTexture==='string'&&value.grassTexture.length<500000&&texturePattern.test(value.grassTexture)?value.grassTexture:null,
     heights: Array.isArray(heights) && heights.length === (detail + 1) ** 2
@@ -115,8 +117,61 @@ export function normalizeTerrain(value = {},area=1) {
 
 // The brush, physics, and vegetation all sample the mesh's triangle split.
 function alternateDiagonal(col,row,seed){return seed!==undefined&&hash(col,row,seed)>.5;}
-function sampleGrid(heights, detail, x, z, diagonalSeed) {
+function terrainLayout(terrain,detail=terrain.detail){
+  const {triangulation,seed}=terrain;
+  if(triangulation!=='irregular'&&triangulation!=='staggered')return null;
+  const stride=detail+1,size=stride**2;
+  const x=new Float32Array(size),z=new Float32Array(size);
+  for(let row=0;row<=detail;row++)for(let col=0;col<=detail;col++){
+    const i=row*stride+col;
+    const inside=row>0&&row<detail&&col>0&&col<detail;
+    const spread=inside&&triangulation==='irregular';
+    x[i]=col+(spread?(2*hash(col,row,seed)-1)*.20:inside ? .25*(row%2?1:-1) : 0);
+    z[i]=row+(spread?(2*hash(col,row,seed+417)-1)*.20:0);
+  }
+  return {x,z,staggered:triangulation==='staggered'};
+}
+
+function flippedCell(col,row,seed,layout){
+  return layout?.staggered?row%2===1:alternateDiagonal(col,row,seed);
+}
+
+const triangleHit={a:0,b:0,c:0,u:0,v:0};
+function hitTriangle(x,z,layout,a,b,c){
+  const dx=x-layout.x[a],dz=z-layout.z[a];
+  const bx=layout.x[b]-layout.x[a],bz=layout.z[b]-layout.z[a];
+  const cx=layout.x[c]-layout.x[a],cz=layout.z[c]-layout.z[a];
+  const inv=1/(bx*cz-bz*cx);
+  const u=(dx*cz-dz*cx)*inv,v=(bx*dz-bz*dx)*inv;
+  if(u< -1e-6||v< -1e-6||u+v>1+1e-6)return false;
+  triangleHit.a=a;triangleHit.b=b;triangleHit.c=c;triangleHit.u=u;triangleHit.v=v;
+  return true;
+}
+
+function hitCell(x,z,layout,stride,col,row,seed){
+  const a=row*stride+col,b=a+1,c=a+stride,d=c+1;
+  return flippedCell(col,row,seed,layout)
+    ? hitTriangle(x,z,layout,a,c,d)||hitTriangle(x,z,layout,a,d,b)
+    : hitTriangle(x,z,layout,a,c,b)||hitTriangle(x,z,layout,d,b,c);
+}
+
+function findTriangle(x,z,detail,seed,layout){
+  const stride=detail+1,col=Math.min(detail-1,Math.floor(x)),row=Math.min(detail-1,Math.floor(z));
+  if(hitCell(x,z,layout,stride,col,row,seed))return true;
+  for(let r=Math.max(0,row-1);r<=Math.min(detail-1,row+1);r++){
+    for(let c=Math.max(0,col-1);c<=Math.min(detail-1,col+1);c++){
+      if((c!==col||r!==row)&&hitCell(x,z,layout,stride,c,r,seed))return true;
+    }
+  }
+  return false;
+}
+
+function sampleGrid(heights, detail, x, z, diagonalSeed, layout) {
   const gx = clamp(x, 0, detail), gz = clamp(z, 0, detail);
+  if(layout&&findTriangle(gx,gz,detail,diagonalSeed,layout)){
+    const {a,b,c,u,v}=triangleHit;
+    return heights[a]+(heights[b]-heights[a])*u+(heights[c]-heights[a])*v;
+  }
   const col = Math.min(detail - 1, Math.floor(gx)), row = Math.min(detail - 1, Math.floor(gz));
   const u = gx - col, v = gz - row, stride = detail + 1;
   const i = row * stride + col;
@@ -133,9 +188,10 @@ export function resizeTerrain(terrain, requestedDetail) {
   if (!terrain.heights) return { ...terrain, detail, heights: null };
   const stride = detail + 1;
   const ratio = terrain.detail / detail;
+  const previous=terrainLayout(terrain),next=terrainLayout(terrain,detail);
+  const seed=terrain.triangulation?terrain.seed:undefined;
   const heights = Array.from({ length: stride ** 2 }, (_, i) =>
-    sampleGrid(terrain.heights, terrain.detail, (i % stride) * ratio, Math.floor(i / stride) * ratio,
-      terrain.triangulation==='varied'?terrain.seed:undefined));
+    sampleGrid(terrain.heights,terrain.detail,(next?.x[i]??i%stride)*ratio,(next?.z[i]??Math.floor(i/stride))*ratio,seed,previous));
   return { ...terrain, detail, heights };
 }
 
@@ -158,16 +214,18 @@ function gridFor(piece) {
   const { detail, seed, amplitude, frequency, octaves, roughness, ridge, edgeFade, reliefArea, heights } = terrain;
   const cached = grids.get(piece);
   const sameNoise = cached && cached.w === w && cached.d === d && cached.detail === detail &&
-    cached.diagonalSeed===(terrain.triangulation==='varied'?seed:undefined) && cached.seed === seed && cached.amplitude === amplitude && cached.frequency === frequency &&
+    cached.triangulation===terrain.triangulation && cached.seed === seed && cached.amplitude === amplitude && cached.frequency === frequency &&
     cached.octaves === octaves && cached.roughness === roughness && cached.ridge === ridge && cached.edgeFade === edgeFade && cached.reliefArea === reliefArea;
   if (sameNoise && cached.heights === heights) return cached;
 
   const stride = detail + 1;
+  const layout=sameNoise?cached.layout:terrainLayout(terrain);
   const procedural = sameNoise ? cached.procedural : new Float64Array(stride ** 2);
   if (!sameNoise && amplitude) {
     for (let row = 0; row <= detail; row++) {
       for (let col = 0; col <= detail; col++) {
-        const localX=(col/detail-.5)*w,localZ=(row/detail-.5)*d;
+        const i=row*stride+col;
+        const localX=((layout?.x[i]??col)/detail-.5)*w,localZ=((layout?.z[i]??row)/detail-.5)*d;
         let mask=1;
         if(reliefArea){
           const distance=Math.hypot(localX-reliefArea.x,localZ-reliefArea.z);
@@ -193,14 +251,14 @@ function gridFor(piece) {
     }
   }
   const surface = heights ? procedural.map((height, i) => height + heights[i]) : procedural;
-  const grid = { w, d, detail, seed, diagonalSeed:terrain.triangulation==='varied'?seed:undefined, amplitude, frequency, octaves, roughness, ridge, edgeFade, reliefArea, heights, procedural, surface };
+  const grid = { w, d, detail, seed, layout, triangulation:terrain.triangulation, diagonalSeed:terrain.triangulation?seed:undefined, amplitude, frequency, octaves, roughness, ridge, edgeFade, reliefArea, heights, procedural, surface };
   grids.set(piece, grid);
   return grid;
 }
 
 function localHeight(grid, x, z) {
   const { detail, w, d, surface } = grid;
-  return sampleGrid(surface, detail, (x / w + .5) * detail, (z / d + .5) * detail, grid.diagonalSeed);
+  return sampleGrid(surface, detail, (x / w + .5) * detail, (z / d + .5) * detail, grid.diagonalSeed,grid.layout);
 }
 
 export function terrainQuarterYaw(yaw=0){
@@ -255,19 +313,19 @@ export function stitchTerrain(piece,neighbor,width=1.5){
     if(aligned<=maxTerrainDetail)terrain=resizeTerrain(terrain,aligned);
   }
   const placed={...piece,[axis]:piece[axis]+delta,terrain};
-  const {detail,procedural,heights,surface}=gridFor(placed);
+  const {detail,procedural,heights,surface,layout}=gridFor(placed);
   const offsets=heights?.slice()??Array((detail+1)**2).fill(0);
   const band=Math.max(width,terrainWorldSize(placed)[length]/detail);
   const {cos,sin}=terrainAxes(placed);
   let clipped=false;
   for(let row=0;row<=detail;row++)for(let col=0;col<=detail;col++){
-    const dx=(col/detail-.5)*placed.w,dz=(row/detail-.5)*placed.d;
+    const i=row*(detail+1)+col;
+    const dx=((layout?.x[i]??col)/detail-.5)*placed.w,dz=((layout?.z[i]??row)/detail-.5)*placed.d;
     const x=placed.x+cos*dx+sin*dz,z=placed.z-sin*dx+cos*dz;
     const alongValue=along==='x'?x:z;
     if(alongValue<lo-1e-6||alongValue>hi+1e-6)continue;
     const distance=Math.max(0,side*(edge-(axis==='x'?x:z)));
     if(distance>band)continue;
-    const i=row*(detail+1)+col;
     const reference=axis==='x'?terrainHeight(neighbor,edge,z):terrainHeight(neighbor,x,edge);
     const target=lerp(surface[i],reference-placed.y,smooth(1-distance/band))-procedural[i];
     offsets[i]=clamp(target,-maxSculptHeight,maxSculptHeight);
@@ -297,15 +355,15 @@ export function sculptTerrain(piece, x, z, { mode, radius, strength, target } = 
       ![x, z, radius, strength].every(Number.isFinite) || radius <= 0 || strength <= 0) return false;
 
   const grid = gridFor(piece);
-  const { detail, w, d, surface, procedural } = grid;
+  const { detail, w, d, surface, procedural,layout } = grid;
   const [localX,localZ]=terrainLocalXZ(piece,x,z);
   const nearestX = clamp(localX, -w / 2, w / 2), nearestZ = clamp(localZ, -d / 2, d / 2);
   if ((localX - nearestX) ** 2 + (localZ - nearestZ) ** 2 >= radius ** 2) return false;
 
   const gx = (localX / w + .5) * detail, gz = (localZ / d + .5) * detail;
   const dx = w / detail, dz = d / detail;
-  const x0 = Math.max(0, Math.ceil(gx - radius / dx)), x1 = Math.min(detail, Math.floor(gx + radius / dx));
-  const z0 = Math.max(0, Math.ceil(gz - radius / dz)), z1 = Math.min(detail, Math.floor(gz + radius / dz));
+  const x0 = Math.max(0, Math.ceil(gx - radius / dx-(layout ? .25 : 0))), x1 = Math.min(detail, Math.floor(gx + radius / dx+(layout ? .25 : 0)));
+  const z0 = Math.max(0, Math.ceil(gz - radius / dz-(layout ? .25 : 0))), z1 = Math.min(detail, Math.floor(gz + radius / dz+(layout ? .25 : 0)));
   const flat = Number.isFinite(target) ? target - piece.y : localHeight(grid, localX, localZ);
   const stride = detail + 1;
   const offsets = grid.heights?.slice() ?? new Array(stride ** 2).fill(0);
@@ -330,7 +388,8 @@ export function sculptTerrain(piece, x, z, { mode, radius, strength, target } = 
 
   for (let row = z0; row <= z1; row++) {
     for (let col = x0; col <= x1; col++) {
-      const r = Math.hypot((col - gx) * dx, (row - gz) * dz) / radius;
+      const i=row*stride+col;
+      const r = Math.hypot(((layout?.x[i]??col)-gx)*dx,((layout?.z[i]??row)-gz)*dz) / radius;
       if (r < 1) stamp(col, row, smooth(1 - r));
     }
   }
@@ -339,6 +398,11 @@ export function sculptTerrain(piece, x, z, { mode, radius, strength, target } = 
     const x = clamp(gx, 0, detail), z = clamp(gz, 0, detail);
     const col = Math.min(detail - 1, Math.floor(x)), row = Math.min(detail - 1, Math.floor(z));
     const u = x - col, v = z - row;
+    if(layout&&findTriangle(x,z,detail,grid.diagonalSeed,layout)){
+      const {a,b,c,u,v}=triangleHit;
+      const i=1-u-v>=Math.max(u,v)?a:u>=v?b:c;
+      stamp(i%stride,Math.floor(i/stride),1);
+    }else{
     const onFirstTriangle = u + v <= 1;
     const diagonal = onFirstTriangle ? 1 - u - v : u + v - 1;
     const right = onFirstTriangle ? u : 1 - v;
@@ -351,64 +415,142 @@ export function sculptTerrain(piece, x, z, { mode, radius, strength, target } = 
     } else {
       stamp(col, row + 1, 1);
     }
+    }
   }
   if (changed) piece.terrain.heights = offsets;
   return changed;
 }
 
-export function terrainGeometry(piece) {
-  const { w, d, terrain } = piece;
-  const { detail } = terrain;
-  const stride = detail + 1;
-  const positions = new Float32Array(stride ** 2 * 3);
-  const uvs = new Float32Array(stride ** 2 * 2);
-  const IndexArray=stride**2>65536?Uint32Array:Uint16Array;
-  const index=new IndexArray(detail**2*6);
-  const repetitionsPerMetre=Math.sqrt(terrain.textureDensity??defaultTerrainTextureDensity);
-  let indexOffset = 0;
-  for (let row = 0; row <= detail; row++) {
-    for (let col = 0; col <= detail; col++) {
-      const vertex = row * stride + col;
-      positions[3 * vertex] = (col / detail - .5) * w;
-      positions[3 * vertex + 2] = (row / detail - .5) * d;
-      uvs[2 * vertex] = col/detail*w*repetitionsPerMetre;
-      uvs[2 * vertex + 1] = (1-row/detail)*d*repetitionsPerMetre;
-      if (row < detail && col < detail) {
-        const b=vertex+1,c=vertex+stride,d=c+1;
-        if(terrain.triangulation==='varied'&&alternateDiagonal(col,row,terrain.seed)){
-          index[indexOffset]=vertex;index[indexOffset+1]=c;index[indexOffset+2]=d;
-          index[indexOffset+3]=vertex;index[indexOffset+4]=d;index[indexOffset+5]=b;
-        }else{
-          index[indexOffset]=vertex;index[indexOffset+1]=c;index[indexOffset+2]=b;
-          index[indexOffset+3]=d;index[indexOffset+4]=b;index[indexOffset+5]=c;
-        }
-        indexOffset += 6;
+export function applyTerrainProjection(material,piece){
+  if(piece.terrain?.projection!=='triplanar')return;
+  const transform=material.onBeforeCompile,previousKey=material.customProgramCacheKey();
+  const angle=T.MathUtils.degToRad(piece.uvRotation??0);
+  const repeats=Math.sqrt(piece.terrain.textureDensity??defaultTerrainTextureDensity)/(piece.uvScale??1);
+  material.onBeforeCompile=function(shader,renderer){
+    transform.call(this,shader,renderer);
+    Object.assign(shader.uniforms,{
+      terrainRepeat:{value:repeats},
+      terrainUvBasis:{value:new T.Vector2(Math.cos(angle),Math.sin(angle))},
+      terrainUvOffset:{value:new T.Vector2(piece.uvOffsetX??0,piece.uvOffsetY??0)},
+      terrainHalfSize:{value:new T.Vector2(piece.w/2,piece.d/2)},
+    });
+    const varyings='varying vec3 terrainPoint; varying vec3 terrainNormal;\n';
+    shader.vertexShader=varyings+shader.vertexShader.replace('#include <begin_vertex>',
+      '#include <begin_vertex>\nterrainPoint=position; terrainNormal=normal;');
+    shader.fragmentShader=varyings+`
+      uniform float terrainRepeat;
+      uniform vec2 terrainUvBasis,terrainUvOffset,terrainHalfSize;
+      vec2 terrainUv(vec2 value){
+        vec2 r=terrainUvBasis;
+        return mat2(r.x,r.y,-r.y,r.x)*value*terrainRepeat+terrainUvOffset;
       }
+    `+shader.fragmentShader.replace('#include <map_fragment>',`
+      #ifdef USE_MAP
+        vec3 weight=pow(abs(normalize(terrainNormal)),vec3(4.0));
+        weight/=max(.0001,weight.x+weight.y+weight.z);
+        vec3 p=terrainPoint;
+        vec4 xSample=texture2D(map,terrainUv(vec2(p.z+terrainHalfSize.y,p.y)));
+        vec4 ySample=texture2D(map,terrainUv(vec2(p.x+terrainHalfSize.x,terrainHalfSize.y-p.z)));
+        vec4 zSample=texture2D(map,terrainUv(vec2(p.x+terrainHalfSize.x,p.y)));
+        diffuseColor*=xSample*weight.x+ySample*weight.y+zSample*weight.z;
+      #endif
+    `);
+  };
+  material.customProgramCacheKey=()=>previousKey+'|terrain-triplanar';
+}
+
+export function terrainGeometry(piece) {
+  const {w,d,terrain}=piece;
+  const {detail,layout,diagonalSeed}=gridFor(piece);
+  const stride=detail+1,topCount=stride**2;
+  const thickness=terrain.thickness??0,sideCount=thickness?4*detail:0;
+  const count=topCount*(thickness?2:1)+4*sideCount;
+  const positions=new Float32Array(count*3),uvs=new Float32Array(count*2);
+  const IndexArray=count>65536?Uint32Array:Uint16Array;
+  const topIndices=detail**2*6;
+  const index=new IndexArray(topIndices*(thickness?2:1)+sideCount*6);
+  const repeats=Math.sqrt(terrain.textureDensity??defaultTerrainTextureDensity);
+  let cursor=0;
+  for(let row=0;row<=detail;row++)for(let col=0;col<=detail;col++){
+    const a=row*stride+col;
+    const x=(layout?.x[a]??col)/detail,z=(layout?.z[a]??row)/detail;
+    positions[3*a]=(x-.5)*w;positions[3*a+2]=(z-.5)*d;
+    uvs[2*a]=x*w*repeats;uvs[2*a+1]=(1-z)*d*repeats;
+    if(row>=detail||col>=detail)continue;
+    const b=a+1,c=a+stride,opposite=c+1;
+    if(flippedCell(col,row,diagonalSeed,layout)){
+      index[cursor++]=a;index[cursor++]=c;index[cursor++]=opposite;
+      index[cursor++]=a;index[cursor++]=opposite;index[cursor++]=b;
+    }else{
+      index[cursor++]=a;index[cursor++]=c;index[cursor++]=b;
+      index[cursor++]=opposite;index[cursor++]=b;index[cursor++]=c;
     }
   }
-  const geometry = new T.BufferGeometry();
-  geometry.setAttribute('position', new T.BufferAttribute(positions, 3).setUsage(T.DynamicDrawUsage));
-  geometry.setAttribute('uv', new T.BufferAttribute(uvs, 2));
-  geometry.setIndex(new T.BufferAttribute(index, 1));
-  updateTerrainGeometry(geometry, piece);
+  const sides=[];
+  if(thickness){
+    positions.copyWithin(topCount*3,0,topCount*3);
+    uvs.copyWithin(topCount*2,0,topCount*2);
+    for(let i=0;i<topIndices;i+=3){
+      index[cursor++]=topCount+index[i];
+      index[cursor++]=topCount+index[i+2];
+      index[cursor++]=topCount+index[i+1];
+    }
+    const edge=(start,step)=>{
+      for(let i=0;i<detail;i++){
+        const a=start+i*step,b=a+step,k=topCount*2+sides.length*4;
+        sides.push([a,b]);
+        for(let j=0;j<4;j++){
+          const e=j%2?b:a;
+          positions[3*(k+j)]=positions[3*e];
+          positions[3*(k+j)+2]=positions[3*e+2];
+          const length=Math.abs(step)===1?w:d;
+          uvs[2*(k+j)]=(i+j%2)/detail*length*repeats;
+          uvs[2*(k+j)+1]=j<2?thickness*repeats:0;
+        }
+        index.set([k,k+1,k+2,k+1,k+3,k+2],cursor);
+        cursor+=6;
+      }
+    };
+    edge(0,1);edge(detail,stride);edge(topCount-1,-1);edge(topCount-stride,-stride);
+  }
+  const geometry=new T.BufferGeometry();
+  geometry.setAttribute('position',new T.BufferAttribute(positions,3).setUsage(T.DynamicDrawUsage));
+  geometry.setAttribute('uv',new T.BufferAttribute(uvs,2));
+  geometry.setIndex(new T.BufferAttribute(index,1));
+  geometry.userData.terrainSides=sides;
+  updateTerrainGeometry(geometry,piece);
   return geometry;
 }
 
 export function updateTerrainGeometry(geometry, piece) {
-  const { surface } = gridFor(piece);
-  const { position } = geometry.attributes;
-  for (let i = 0; i < surface.length; i++) position.setY(i, surface[i]);
-  position.needsUpdate = true;
+  const {surface}=gridFor(piece),{position}=geometry.attributes;
+  const thickness=piece.terrain.thickness??0,topCount=surface.length;
+  for(let i=0;i<topCount;i++){
+    position.setY(i,surface[i]);
+    if(thickness)position.setY(topCount+i,surface[i]-thickness);
+  }
+  geometry.userData.terrainSides.forEach(([a,b],i)=>{
+    const k=topCount*2+i*4;
+    position.setY(k,surface[a]);position.setY(k+1,surface[b]);
+    position.setY(k+2,surface[a]-thickness);position.setY(k+3,surface[b]-thickness);
+  });
+  position.needsUpdate=true;
   geometry.computeVertexNormals();
   geometry.computeBoundingSphere();
-  if (geometry.boundingBox) geometry.computeBoundingBox();
+  if(geometry.boundingBox)geometry.computeBoundingBox();
 }
 
 // Matches the diagonal and vertices written by terrainGeometry(), including at steep crests.
 function terrainLocalNormal(grid,localX,localZ,out){
-  const {detail,w,d,surface}=grid;
+  const {detail,w,d,surface,layout}=grid;
   const u=clamp((localX/w+.5)*detail,0,detail);
   const v=clamp((localZ/d+.5)*detail,0,detail);
+  if(layout&&findTriangle(u,v,detail,grid.diagonalSeed,layout)){
+    const {a,b,c}=triangleHit;
+    const bx=(layout.x[b]-layout.x[a])*w/detail,bz=(layout.z[b]-layout.z[a])*d/detail,by=surface[b]-surface[a];
+    const cx=(layout.x[c]-layout.x[a])*w/detail,cz=(layout.z[c]-layout.z[a])*d/detail,cy=surface[c]-surface[a];
+    return out.set(by*cz-bz*cy,bz*cx-bx*cz,bx*cy-by*cx).normalize();
+  }
   const col=Math.min(detail-1,Math.floor(u)),row=Math.min(detail-1,Math.floor(v));
   const stride=detail+1, i=row*stride+col;
   if(alternateDiagonal(col,row,grid.diagonalSeed)){
@@ -433,7 +575,7 @@ function terrainNormal(piece,x,z,out){
 export function terrainCollider(piece, mesh) {
   const {w,d}=terrainWorldSize(piece);
   return {
-    mesh, heightfield: true,
+    mesh, heightfield: true, thickness:piece.terrain.thickness??0,
     xMin:piece.x-w/2,xMax:piece.x+w/2,
     zMin:piece.z-d/2,zMax:piece.z+d/2,
     height: (x, z) => terrainHeight(piece, x, z),

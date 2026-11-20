@@ -1099,3 +1099,49 @@ test('Foundry door preserves its hinge in a map and its collider follows both po
   assert.equal(penetration(open,.08,door,normal),0);
  }finally{globalThis.document=original;}
 });
+
+test('irregular and staggered terrain heights match the rendered faces and retain straight seams',()=>{
+ for(const triangulation of ['irregular','staggered']){
+  const terrain=normalizeTerrain({detail:5,seed:3,amplitude:1.5,frequency:.6,triangulation});
+  const piece={x:0,y:0,z:0,w:10,d:10,terrain};
+  const geometry=terrainGeometry(piece);
+  const mesh=new T.Mesh(geometry,new T.MeshBasicMaterial());
+  const ray=new T.Raycaster(new T.Vector3(),new T.Vector3(0,-1,0));
+  const field=terrainCollider(piece,mesh),normal=new T.Vector3();
+  const points=geometry.attributes.position;
+  assert.equal(points.getX(0),-5);
+  assert.equal(points.getZ(points.count-1),5);
+  assert.notEqual(points.getX(7),-3);
+  assert.equal(geometry.index.count,5*5*6);
+  for(let i=0;i<40;i++){
+   const x=((i*37)%97)/10-4.8,z=((i*13)%97)/10-4.8;
+   ray.ray.origin.set(x,10,z);
+   const hits=ray.intersectObject(mesh),[hit]=hits;
+   assert.ok(hit);
+   assert.ok(Math.abs(terrainHeight(piece,x,z)-hit.point.y)<2e-6);
+   field.normalAt(x,z,normal);
+   assert.ok(hits.some(face=>Math.abs(face.point.y-hit.point.y)<2e-6&&face.face.normal.dot(normal)>.99999));
+  }
+  geometry.dispose();mesh.material.dispose();
+ }
+});
+
+test('thick terrain is closed and collides on top, bottom and side',()=>{
+ const model=exampleMap(),terrain=normalizeTerrain({detail:4,thickness:2,triangulation:'irregular',projection:'triplanar'});
+ const piece=parseMap({...model,pieces:[{...model.pieces[0],x:0,y:3,z:0,w:8,d:8,terrain}]}).pieces[0];
+ assert.equal(piece.terrain.thickness,2);
+ assert.equal(piece.terrain.projection,'triplanar');
+ const geometry=terrainGeometry(piece);
+ geometry.computeBoundingBox();
+ assert.equal(geometry.boundingBox.min.y,-2);
+ assert.equal(geometry.index.count,(4*4*4+8*4)*3);
+ const field=terrainCollider(piece),normal=new T.Vector3();
+ for(const [probe,expected] of [
+  [[0,3.1,0],[0,1,0]],[[0,.9,0],[0,-1,0]],[[4.1,2,0],[1,0,0]],[[3.9,2,0],[1,0,0]],
+ ]){
+  assert.ok(penetration(new T.Vector3(...probe),.2,field,normal)>.09);
+  assert.ok(normal.dot(new T.Vector3(...expected))>.999);
+ }
+ assert.equal(penetration(new T.Vector3(0,.7,0),.2,field,normal),0);
+ geometry.dispose();
+});

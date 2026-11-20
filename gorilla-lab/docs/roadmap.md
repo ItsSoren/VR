@@ -17,3 +17,13 @@ Terminer les points PC et éditeurs et valider leurs parcours de test. Signaler 
 ## Lot 18 — Qualité visuelle VR
 
 À traiter après le lot 17. Utiliser les mêmes scènes et le même trajet en casque pour comparer l’éclairage, les ombres, les textures à distance, l’aliasing, les reflets et la lisibilité du HUD. Mesurer la cadence et le temps par image en jeu, notamment en présence de props. Comparer au réglage actuel du miroir « Fin », validé visuellement sur PC, puis fixer les profils VR à partir des mesures sur casque.
+
+## Trois parties PC restantes
+
+| Partie | Lots | Résultat |
+|---|---|---|
+| 1 | 8–9 | Relief, maillages et grottes, départ, textures et environnement |
+| 2 | 11–12 | Salons, partage de cartes, état initial des invités et synchronisation |
+| 3 | 13–17 | Comportements, animation visuelle et outils de création, entités, audio et validation |
+
+La porte de FOUNDRY en R39.2 est validée. La demande d’animation vise les effets visuels déjà illustrés par la Gelée rouge (déformation) et le Cube du Néant (matière animée). Leur réutilisation dans les créations de FOUNDRY relève de la partie 3. Les essais sur casque suivent les trois parties PC.
