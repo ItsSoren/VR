@@ -1,4 +1,5 @@
 import * as T from 'three';
+import {applyModelEffect,getModelEffect} from './model-effect.js';
 
 const animatedShaders = new WeakMap();
 
@@ -14,7 +15,7 @@ export function clonePropMaterial(material) {
   const clone = material.clone();
   const configure = animatedShaders.get(material);
   // The game's color grading is attached separately after cloning.
-  return configure ? applyAnimatedShader(clone, configure) : clone;
+  return configure ? applyAnimatedShader(clone, configure) : applyModelEffect(clone,getModelEffect(material));
 }
 
 function redSlime(time) {

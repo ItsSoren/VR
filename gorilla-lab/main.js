@@ -20,6 +20,7 @@ import { avatarPalettes,createAvatarStyle } from './avatar-style.js';
 import {createArenaObjectSpecs,forEachStartupObject} from './arena-objects.js';
 import {spawnAssetIds} from './model-assets.js';
 import { makeAnimatedProps,clonePropMaterial } from './animated-props.js';
+import {setModelEffectTime} from './model-effect.js';
 import {readModelPack,createModelPropDefinitions,createModelAvatarHead,createModelUnitGeometry,createModelMaterial,createModelPartGeometry,createModelPartMaterial,disposeModelMaterial,modelPhysics,modelCollisionGeometry,modelBounds,normalizeModelPack,modelLimits,modelStorageKey} from './model-pack.js';
 import {mapCode,publicRooms} from './cloud-link.js';
 import { createHandSkin,palmCenter } from './hand-skin.js';
@@ -1692,6 +1693,7 @@ renderer.setAnimationLoop((time,frame)=>{
   if(guestActive&&!wasGuestActive)releaseAll();
   wasGuestActive=guestActive;
   animateProps(time*.001);
+  setModelEffectTime(time*.001);
   maps.updateHinges(dt,!spectator.role||spectator.role==='vr',spectator.role==='player'||spectator.role==='pc');
   if(hintUntil&&time>hintUntil){hint.hidden=true;hintUntil=0;vrHint='';}
   cursor.visible=false;toolVisual.hide();toolState.mode=0;

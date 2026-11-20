@@ -1,4 +1,5 @@
 import * as T from 'three';
+import {effectChannels,effectPresets,normalizeModelEffect,setModelEffectTime} from './model-effect.js';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {TransformControls} from 'three/addons/controls/TransformControls.js';
 import {GLTFExporter} from 'three/addons/exporters/GLTFExporter.js';
@@ -335,6 +336,7 @@ function updateInspector(){
   $('avatar-copy').disabled=!model?.parts.length||model.kind==='avatar'||$('avatar-new').disabled;
   updateAvatarInspector();
   updateHingeInspector();
+  updateEffectInspector();
 }
 // The visual preview uses Foundry's uncentred model coordinates.
 // When exported, physics recentres the geometry and applies the same offset.
@@ -497,6 +499,65 @@ $('hinge-play').onclick=()=>{
   hingeFrame=requestAnimationFrame(frame);
 };
 
+let effectFrame=0,previousEffectFrame=-Infinity;
+const effectInputs={};
+for(const [key,channel] of Object.entries(effectChannels)){
+  const group=document.createElement('details'),label=document.createElement('summary'),row=document.createElement('div');
+  label.textContent=channel.label;row.className='axes';
+  const controls=effectInputs[key]={};
+  for(const [field,caption,min,max,step] of [
+    ['strength','Intensité',0,channel.max,.01],['speed','Vitesse (Hz)',0,8,.05],['scale','Variation spatiale',0,48,.5],
+    ['signal','Forme'],...(key==='deform'?[]:[['color','Couleur']]),
+  ]){
+    const wrapper=document.createElement('label');wrapper.textContent=caption;
+    const input=document.createElement(field==='signal'?'select':'input');
+    input.id='effect-'+key+'-'+field;
+    if(field==='signal'){
+      for(const [value,name] of [['sine','Sinus'],['triangle','Triangle'],['pulse','Impulsion'],...(key==='deform'?[]:[['stars','Étoiles']])])
+        input.add(new Option(name,value));
+    }else{
+      input.type=field==='color'?'color':'number';
+      if(input.type==='number'){input.min=min;input.max=max;input.step=step;}
+    }
+    input.onchange=()=>{
+      const part=currentPart();
+      if(!part?.effect)return;
+      remember();
+      part.effect=normalizeModelEffect({...part.effect,[key]:{...part.effect[key],
+        [field]:input.type==='number'?input.valueAsNumber:input.value}});
+      markDirty();updateEffectInspector();updatePreview();
+    };
+    controls[field]=input;wrapper.append(input);row.append(wrapper);
+  }
+  group.append(label,row);$('effect-fields').append(group);
+}
+function updateEffectInspector(){
+  const part=currentPart(),eligible=Boolean(part&&part.zone!=='trigger'),effect=eligible?part.effect:null;
+  $('effect-actions').hidden=!eligible;
+  $('effect-fields').hidden=!effect;
+  $('effect-remove').hidden=!effect;
+  $('effect-note').hidden=eligible;
+  if(!effect)return;
+  for(const [key,controls] of Object.entries(effectInputs))
+    for(const [field,input] of Object.entries(controls))input.value=effect[key][field];
+}
+function chooseEffect(raw){
+  const part=currentPart();
+  if(!part||part.zone==='trigger')return;
+  remember();
+  if(raw===null)delete part.effect;
+  else part.effect=normalizeModelEffect(raw);
+  markDirty();updateEffectInspector();updatePreview();
+}
+$('effect-new').onclick=()=>chooseEffect({});
+$('effect-jelly').onclick=()=>chooseEffect(effectPresets.jelly);
+$('effect-void').onclick=()=>chooseEffect(effectPresets.void);
+$('effect-remove').onclick=()=>chooseEffect(null);
+function previewEffectFrame(now){
+  effectFrame=0;
+  if(now-previousEffectFrame>=32){previousEffectFrame=now;render();}
+  else if($('model-inspector').dataset.tab==='animation')effectFrame=requestAnimationFrame(previewEffectFrame);
+}
 function render(){
   const model=currentModel(),parts=model?.parts??[];
   const animate=$('model-inspector').dataset.tab==='animation'&&model?.kind==='structure';
@@ -510,7 +571,11 @@ function render(){
     applyHinge(mesh,pivot,position,rotation,animate?hingeAngle(part.hinge,index===partIndex?+$('hinge-preview').value:0):0);
   }
   updateSkeletonGuide();
+  setModelEffectTime(performance.now()*.001);
   renderer?.render(scene,camera);
+  const playing=$('model-inspector').dataset.tab==='animation'&&parts.some(part=>part.effect&&Object.values(part.effect).some(channel=>channel.strength>0&&channel.speed>0));
+  if(playing&&!effectFrame)effectFrame=requestAnimationFrame(previewEffectFrame);
+  if(!playing&&effectFrame){cancelAnimationFrame(effectFrame);effectFrame=0;}
 }
 try{
   renderer=new T.WebGLRenderer({canvas,antialias:true,preserveDrawingBuffer:true});
@@ -1622,4 +1687,3 @@ if(requestedAsset)contextModel=importBuiltinAsset(requestedAsset,true)?.id;
 refreshModel();
 if(editorParams.get('tab')==='avatar')setPanel('avatar');
 if(dirty)status('Brouillon récupéré automatiquement');
-
