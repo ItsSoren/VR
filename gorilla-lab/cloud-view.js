@@ -112,7 +112,7 @@ function disposeArt(root){
   for(const material of materials)material.dispose();
 }
 
-export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,applyLight,onAction,onShot,onStatus,onRoomMap,restoreRoomMap,roomMapSource,hingeSnapshot,applyHinges}){
+export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,applyLight,onAction,onShot,onStatus,onRoomMap,restoreRoomMap,exportRoomMap,roomMapSource,hingeSnapshot,applyHinges}){
   const peers=new Map(),replicas=new Map(),feed=createObjectFeed();
   function removePeer(id,entry){
     if(entry.art){disposeArt(entry.art.model);disposeArt(entry.art.toolRoot);entry.art.dispose?.();}
@@ -214,10 +214,15 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
   const status=$('#cloud-status'),room=$('#cloud-room'),modeButton=$('#cloud-camera');
   const start=$('#cloud-private-start'),active=$('#cloud-private-active');
   const copyButton=$('#cloud-copy'),playerButton=$('#cloud-player');
+  const importButton=$('#cloud-import'),fileInput=$('#cloud-map-file'),exportButton=$('#cloud-export');
+  let mapLoadError='';
   function refreshRoomActions(){
     start.hidden=Boolean(client.role);
     active.hidden=!client.role;
     copyButton.hidden=client.role!=='vr';
+    const host=client.remote;
+    importButton.hidden=client.role!=='player'&&client.role!=='pc'||!host?.ready||host.map===localMap()||roomMapPending;
+    exportButton.hidden=client.role!=='vr'||sharedSource!=='file';
   }
   let statusAt=-Infinity,cameraMode=0,networkCaption='Hors ligne',copyUntil=0;
   function setCamera(mode){
@@ -266,7 +271,7 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
     new URLSearchParams(location.search).get('roomMap');
   let roomMapPending=false,visit=0,lastMapAttempt=null,telemetryAt=-Infinity;
   function leave(){
-    visit++;roomMapPending=false;lastMapAttempt=null;client.leave();
+    visit++;roomMapPending=false;lastMapAttempt=null;mapLoadError='';client.leave();
     sharedSourceMap=-1;sharedSource=null;sourceAt=-Infinity;
     for(const [id,entry] of peers)removePeer(id,entry);restoreRoomMap?.();refreshRoomActions();
     const output=$('#cloud-telemetry');
@@ -297,6 +302,26 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
     queueMicrotask(showInvitation);
   }
   $('#cloud-leave').onclick=()=>{copyUntil=0;leave();};
+  exportButton.onclick=()=>exportRoomMap?.();
+  importButton.onclick=()=>fileInput.click();
+  fileInput.onchange=()=>{
+    const file=fileInput.files[0],host=client.remote;
+    fileInput.value='';
+    if(file&&client.role&&client.role!=='vr'&&host?.ready&&host.map!==localMap())loadRoomSource(file,host,true);
+  };
+  async function loadRoomSource(source,host,manual=false){
+    const attempt=++visit;
+    roomMapPending=true;
+    mapLoadError='';
+    try{
+      const ok=await onRoomMap(source,host.map,()=>attempt===visit&&client.remote?.id===host.id&&client.remote?.map===host.map);
+      if(attempt===visit&&!ok&&source!=='arena')mapLoadError=manual?
+        'Ce fichier ne correspond pas à la carte du salon ou son import a échoué. Demande à l’hôte le JSON actuel.':
+        'Carte inaccessible ou différente. Récupère le JSON actuel auprès de l’hôte.';
+    }finally{
+      if(attempt===visit)roomMapPending=false;
+    }
+  }
   $('#cloud-copy').onclick=async()=>{
     if(copyButton.disabled)return;
     copyButton.disabled=true;
@@ -314,9 +339,9 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
       let source;
       try{source=await roomMapSource?.();}catch{}
       if(client.role!=='vr'||client.code!==code)return;
-      if(!source){
+      if(!source||source==='file'){
         try{await navigator.clipboard.writeText(url.href);}catch{window.prompt('Copie le lien du salon',url.href);}
-        status.textContent='Lien copié. Pour cette grande carte, charge le JSON depuis une URL HTTPS partageable ou envoie le fichier à l’invité.';
+        status.textContent='Lien copié. Exporte aussi la carte du salon et envoie le fichier JSON à l’invité.';
         copyUntil=performance.now()+12000;return;
       }
       url.hash=new URLSearchParams({roomMap:source}).toString();
@@ -384,9 +409,11 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
       if(roomMapPending)caption=prefix+'chargement de la carte du salon';
       else if(!localReady)caption=prefix+'quitte la session VR pour utiliser le mode spectateur';
       else if(client.role!=='vr'&&host&&host.map!==localMap()){
-        const hasInvitation=client.code===roomFromURL&&invitedMap;
-        caption=prefix+(hasInvitation?'le lien ne correspond pas à la carte actuelle ou la carte est inaccessible. Demande un nouveau lien.':
-          'carte différente. Attends son chargement ou demande le lien d’invitation ou le fichier JSON.');
+        const advertised=peers.get(host.id)?.source;
+        const requiresFile=advertised?.map===host.map&&advertised.value==='file';
+        caption=prefix+(mapLoadError||(requiresFile?
+          'carte trop volumineuse pour cet envoi. Demande le JSON à l’hôte puis charge-le ici.':
+          'carte différente. En attente de sa source. Tu peux aussi charger le JSON de l’hôte.'));
       }
       else if(client.role!=='vr'&&host&&!host.ready)caption=prefix+'hôte connecté · partie en préparation';
       else if(client.role==='player'&&host&&host.protocol<5)caption=prefix+'mets à jour le jeu chez l’hôte pour synchroniser la partie';
@@ -398,7 +425,8 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
         const watcher=local.some(p=>p.role==='pc');
         caption=prefix+'tu héberges · '+(count+1)+' joueur'+(count?'s':'');
         if(watcher)caption+=' · spectateur connecté';
-        if(!count&&readyPeers.some(p=>!readyHere(p)))caption+=' · carte différente chez un invité';
+        if(readyPeers.some(p=>!readyHere(p)))caption+=sharedSource==='file'?
+          ' · exporte la carte et envoie le JSON à tes invités':' · un invité charge la carte';
       }
     }
     if(status.textContent!==caption){status.textContent=caption;onStatus?.();}
@@ -409,16 +437,15 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
     if(!client.role){clearReplicas();return;}
     const ready=client.role!=='pc'||!inVR,now=performance.now();
     const map=localMap(),host=client.role!=='vr'?client.remote:null;
-    if(ready&&client.state==='open'&&host?.ready&&host.map!==map&&onRoomMap){
+    if(ready&&client.state==='open'&&host?.ready&&host.map!==map&&onRoomMap&&!roomMapPending){
       const advertised=peers.get(host.id)?.source;
-      const source=(advertised?.map===host.map?advertised.value:null)??(client.code===roomFromURL?invitedMap:null)??'arena';
+      const announcement=advertised?.map===host.map?advertised.value:null;
+      const invite=client.code===roomFromURL?invitedMap:null;
+      const source=announcement==='file'?(invite??'file'):(announcement??invite??'arena');
       const key=host.id+':'+host.map+':'+source;
       if(lastMapAttempt!==key){
-        const attempt=++visit;
-        lastMapAttempt=key;roomMapPending=true;
-        Promise.resolve(onRoomMap(source,host.map,()=>attempt===visit&&client.remote?.map===host.map)).finally(()=>{
-          if(attempt===visit)roomMapPending=false;
-        });
+        lastMapAttempt=key;
+        if(source!=='file')loadRoomSource(source,host);
       }
     }
     const showWorld=ready&&(client.role==='player'?guestActive():readyHere(host)&&hasInitialWorld);
@@ -447,10 +474,10 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
     if(hosting&&sharedSourceMap!==map){
       const code=client.code;
       sharedSourceMap=map;sharedSource=null;sourceAt=-Infinity;
-      Promise.resolve().then(()=>roomMapSource?.()).then(source=>{
-        if(client.role==='vr'&&client.code===code&&sharedSourceMap===map&&source?.length<=maxRoomSourceLength)
-          sharedSource=source;
-      }).catch(()=>{});
+      Promise.resolve().then(()=>roomMapSource?.()).catch(()=>null).then(source=>{
+        if(client.role==='vr'&&client.code===code&&sharedSourceMap===map)
+          sharedSource=source&&source.length<=maxRoomSourceLength?source:'file';
+      });
     }
     const share=hosting&&sharedSource&&now-sourceAt>=1800&&client.peers.some(p=>p.role!=='vr'&&p.map!==map);
     const sent=client.tick({x:position.x,y:position.y,z:position.z,yaw,map,ready,avatar:ready&&client.role!=='pc'?avatar:null,
@@ -473,4 +500,3 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
     get remoteLight(){return replicaLight===-1?null:replicaLight;},get replicaCount(){return replicas.size;},
     forEachReplica(fn){for(const r of replicas.values())if(r.mesh.visible)fn(r.mesh);}};
 }
-

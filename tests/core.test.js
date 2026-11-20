@@ -1197,3 +1197,30 @@ test('host-authoritative hinges reject distant requests and initialize a late gu
   assert.ok(penetration(closed,.08,guest.arena.boxes[0],normal)>0);
  }finally{globalThis.document=original;}
 });
+
+test('a fast palm sweep keeps contact on the entry side of a thin terrain',()=>{
+  const {Vector3:V,Quaternion:Q}=T;
+  const field={heightfield:true,xMin:-2,xMax:2,zMin:-2,zMax:2,height:()=>0};
+  const rotation=new Q().setFromAxisAngle(new V(0,0,1),.71);
+  const out=new V(),normal=new V();
+  for(const side of [-1,1]){
+    for(let i=0;i<32;i++){
+      const start=.85+.003*i;
+      assert.equal(palmContact(new V(.13,start*side,0),new V(.11,-.87*side,0),rotation,[field],out,normal),field);
+      assert.ok(normal.y*side>.99);
+      assert.ok(out.y*side>.01);
+    }
+  }
+  assert.equal(palmContact(new V(2.5,.9,0),new V(2.5,-.9,0),rotation,[field],out,normal),null);
+});
+
+test('a firm downstroke on thin terrain launches at the default jump setting',()=>{
+  const field={heightfield:true,xMin:-2,xMax:2,zMin:-2,zMax:2,height:()=>0,friction:1};
+  for(const rate of [72,90,120]){
+    const rig=handRig([field],rate);
+    assert.equal(rig.step(0,.16,0).launched,false);
+    assert.equal(rig.step(0,.07,0).launched,false);
+    assert.equal(rig.step(0,-.24,0).launched,true);
+    assert.ok(rig.velocity.y>3);
+  }
+});

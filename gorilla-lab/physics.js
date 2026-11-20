@@ -269,6 +269,36 @@ function shapeContact(body,box,outNormal,outPoint) {
 }
 const palmHull=colliderFor(new T.OctahedronGeometry(1,0).scale(...palmHalfExtent));
 const palmBody={mesh:{position:new T.Vector3(),quaternion:new T.Quaternion()},shape:palmHull,radius:palmHull.radius,precise:true};
+const palmPrevious=new T.Vector3(),palmOffset=new T.Vector3(),palmSweepPoint=new T.Vector3();
+const palmOffsets=palmHull.vertices.map(()=>new T.Vector3());
+function thinPalmCrossing(from,to,field,out,hitNormal){
+  if(Math.max(from.x,to.x)+palmHull.radius<field.xMin||Math.min(from.x,to.x)-palmHull.radius>field.xMax||
+      Math.max(from.z,to.z)+palmHull.radius<field.zMin||Math.min(from.z,to.z)-palmHull.radius>field.zMax)return false;
+  let first=Infinity,side=1;
+  for(const offset of palmOffsets){
+    const x0=from.x+offset.x,z0=from.z+offset.z,x1=to.x+offset.x,z1=to.z+offset.z;
+    if(Math.min(x0,x1)<field.xMin||Math.max(x0,x1)>field.xMax||
+        Math.min(z0,z1)<field.zMin||Math.max(z0,z1)>field.zMax)continue;
+    const start=from.y+offset.y-field.height(x0,z0),end=to.y+offset.y-field.height(x1,z1);
+    if(start*end>0||start===end)continue;
+    const approach=Math.sign(start)||-Math.sign(end);
+    let low=0,high=1;
+    for(let i=0;i<7;i++){
+      const t=(low+high)*.5;
+      palmSweepPoint.lerpVectors(from,to,t).add(offset);
+      if((palmSweepPoint.y-field.height(palmSweepPoint.x,palmSweepPoint.z))*approach>0)low=t;
+      else high=t;
+    }
+    if(high>=first)continue;
+    first=high;side=approach;palmOffset.copy(offset);
+  }
+  if(!Number.isFinite(first))return false;
+  out.lerpVectors(from,to,first);
+  palmSweepPoint.copy(out).add(palmOffset);
+  floorNormal(field,palmSweepPoint.x,palmSweepPoint.z,hitNormal).multiplyScalar(side);
+  out.addScaledVector(hitNormal,.0075);
+  return true;
+}
 export function palmContact(from,to,rotation,boxes,out,hitNormal){
   const steps=Math.min(48,Math.max(1,Math.ceil(from.distanceTo(to)/.021)));
   const r=palmHull.radius;
@@ -282,11 +312,18 @@ export function palmContact(from,to,rotation,boxes,out,hitNormal){
   }
   palmBody.mesh.quaternion.copy(rotation);
   const center=palmBody.mesh.position;
+  if(sweepCandidates.some(box=>box.heightfield&&!(box.thickness>0))){
+    for(let i=0;i<palmOffsets.length;i++)palmOffsets[i].copy(palmHull.vertices[i]).applyQuaternion(rotation);
+  }
+  palmPrevious.copy(from);
   for(let i=1;i<=steps;i++){
     center.lerpVectors(from,to,i/steps);
     for(const box of sweepCandidates){
       const object=box.objectBody;
       if(object&&(object.owner||center.distanceToSquared(object.mesh.position)>(r+object.radius)**2))continue;
+      // Retenir le côté d'où vient la paume, même si un sommet a franchi
+      // toute la surface fine entre deux échantillons.
+      if(box.heightfield&&!(box.thickness>0)&&thinPalmCrossing(palmPrevious,center,box,out,hitNormal))return box;
       const depth=object?sat(palmBody,object,normal):shapeContact(palmBody,box,normal);
       if(depth>0){
         out.copy(center).addScaledVector(normal,depth+.0005);
@@ -294,6 +331,7 @@ export function palmContact(from,to,rotation,boxes,out,hitNormal){
         return box;
       }
     }
+    palmPrevious.copy(center);
   }
   return null;
 }
@@ -652,16 +690,18 @@ function heightContact(p,radius,field,out) {
   const h=field.height(p.x,p.z);
   // Test signed distance to the supporting triangle, not vertical distance.
   // A palm can touch a steep face while sitting well above its height at the same X/Z.
-  if(field.normalAt)field.normalAt(p.x,p.z,out);
-  else{
-    const eps=.045;
-    const dx=(field.height(p.x+eps,p.z)-field.height(p.x-eps,p.z))/(2*eps);
-    const dz=(field.height(p.x,p.z+eps)-field.height(p.x,p.z-eps))/(2*eps);
-    out.set(-dx,1,-dz).normalize();
-  }
+  floorNormal(field,p.x,p.z,out);
   const distance=(p.y-h)*out.y;
   if(distance<0)out.negate();
   return Math.max(0,radius-Math.abs(distance));
+}
+
+function floorNormal(field,x,z,out){
+  if(field.normalAt){field.normalAt(x,z,out);return out;}
+  const eps=.045;
+  const dx=(field.height(x+eps,z)-field.height(x-eps,z))/(2*eps);
+  const dz=(field.height(x,z+eps)-field.height(x,z-eps))/(2*eps);
+  return out.set(-dx,1,-dz).normalize();
 }
 
 function volumeHeightContact(p,radius,field,out){
@@ -711,5 +751,3 @@ export function playerObjectContact(position,radius,object,velocity,outNormal){
   }
   return true;
 }
-
-

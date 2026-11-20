@@ -234,6 +234,12 @@ export class GorillaLocomotion {
     this.average.multiplyScalar(1 / HISTORY_SECONDS);
     if (this.settings.movement === false || (!moving && (hasContact || !this.released))) return result;
 
+    // Give a short, firm vertical push credit without increasing the speed of small steps.
+    if (moving && this.hands.some(({hand}) => hand.groundContact)) {
+      const appliedUpSpeed=sample.distance.y / Math.max(this.inputDt, .001);
+      this.average.y+=Math.max(0, appliedUpSpeed - Math.max(3, this.average.y)) * .38;
+    }
+
     // A launch cannot point back into the surfaces that produced it.
     for (let pass = 0; pass < 2; pass++) {
       for (const {hand, normal, released} of this.hands) {

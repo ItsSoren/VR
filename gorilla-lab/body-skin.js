@@ -60,7 +60,8 @@ export function createBodySkin(material,handMeshes){
   geometry.setIndex(combinations[0]);
   const rest=new T.Vector3(),base=new T.Vector3(),elbow=new T.Vector3(),wrist=new T.Vector3(),reach=new T.Vector3();
   const tangent=new T.Vector3(),bend=new T.Vector3(),point=new T.Vector3(),center=new T.Vector3();
-  const armFrame=new T.Quaternion(),targetFrame=new T.Quaternion(),blendFrame=new T.Quaternion();
+  const armFrame=new T.Quaternion(),forearmFrame=new T.Quaternion(),targetFrame=new T.Quaternion();
+  const blendFrame=new T.Quaternion(),wristTwist=new T.Quaternion(),partialTwist=new T.Quaternion();
   const forward=new T.Vector3(0,0,-1);
   const restHand=new T.Quaternion().setFromEuler(new T.Euler(-1.42,0,0));
   const lengths=[.24,.62,.94,.56];
@@ -95,10 +96,17 @@ export function createBodySkin(material,handMeshes){
       if(tracked)elbow.addScaledVector(bend,Math.sqrt(Math.max(.007,segmentLength**2-reach.lengthSq()*.25))*.72);
       armFrame.setFromUnitVectors(forward,tangent.subVectors(elbow,base).normalize());
       targetFrame.copy(hand?.quaternion??restHand);
+      forearmFrame.setFromUnitVectors(forward,tangent.subVectors(wrist,elbow).normalize());
+      // Retain wrist roll without tilting the forearm cross section into its own axis.
+      wristTwist.copy(forearmFrame).invert().multiply(targetFrame);
+      const twistLength=Math.hypot(wristTwist.z,wristTwist.w);
+      if(twistLength>.07)wristTwist.set(0,0,wristTwist.z/twistLength,wristTwist.w/twistLength);
+      else wristTwist.identity();
       for(let j=0;j<4;j++){
         const lower=j===3;
         center.lerpVectors(lower?elbow:base,lower?wrist:elbow,lengths[j]);
-        blendFrame.copy(armFrame).slerp(targetFrame,lower?.79:j*.19);
+        blendFrame.copy(armFrame).slerp(forearmFrame,lower?1:j*.24);
+        blendFrame.multiply(partialTwist.identity().slerp(wristTwist,lower?.84:j*.13));
         for(let k=0;k<6;k++){
           const ray=jointRays[k],radius=widths[j];
           point.set(ray[0]*radius,ray[1]*radius*.84,0).applyQuaternion(blendFrame).add(center);

@@ -489,6 +489,7 @@ function change(key,step){
   diagnostics.record('setting',{key,step,previous:settings[key]});
   if(key==='mirrorQuality'){
     settings.mirrorQuality=T.MathUtils.clamp(settings.mirrorQuality+step,1,3);
+    if(settings.mirrorQuality>1&&!settings.reflections){settings.reflections=true;applyVisual();}
     persistScreenRendering();
     hudDirty=true;return;
   }
@@ -595,7 +596,13 @@ function settingValue(key){
   if(key==='timeOfDay')return ['Jour','Coucher de soleil','Nuit'][spectator.remoteLight??settings.timeOfDay-1]; if(key==='mapMode')return mapToolNames[settings.mapMode-1]; if(key==='mapShape')return mapShapeNames[settings.mapShape-1]; if(key==='mapSurface')return mapSurfaceNames[settings.mapSurface-1]; if(key==='mapMaterial')return mapMaterials[settings.mapMaterial-1]; if(key==='mapTurn')return (settings.mapTurn-1)*45+'°'; if(key==='toolMode')return toolModes[settings.toolMode-1]; if(key==='preset')return Object.keys(visualPresets)[settings.preset-1]; return key==="texturePower"?[2**(settings[key]-1),2**(settings[key]-1)].join("×"):settings[key];}
 function menuGroups(){return page===2?renderGroups:page===3?spawnGroups:mapGroups;}
 function currentGroup(){return page===2?renderPage:page===3?spawnPage:mapPage;}
-function selectGroup(index){if(page===2)renderPage=index;else if(page===3)spawnPage=index;else mapPage=index;}
+function selectGroup(index){
+  if(page===2)renderPage=index;
+  else if(page===3)spawnPage=index;
+  else mapPage=index;
+  vrRowsPage=0;
+  hudDirty=true;
+}
 function actionLabel(key){
   if(key===previewLeftHaptic||key===previewRightHaptic)return 'Tester';
   if(key===captureReport)return 'Capturer';
@@ -782,6 +789,7 @@ const spectator=addSpectator({scene,localColor:avatarColor,currentMap:()=>(maps.
     return active()&&mapCode(signature+modelSignature)===expected;
   }),
   restoreRoomMap:()=>maps.leaveRoomMap(),
+  exportRoomMap:()=>maps.save(),
   hingeSnapshot:()=>maps.hingeSnapshot(),
   applyHinges:(states,initial)=>maps.receiveHinges(states,initial),
   roomMapSource:()=>maps.roomMapSource(),
@@ -1567,13 +1575,14 @@ function character(frame,space,pose,dt,inputDt=dt){
   if(inVR)camera.position.set(0,0,0);
   for(const h of hands){
     if(inVR&&h.valid){
-      h.mesh.position.copy(h.surface?h.anchor:h.held?h.target:h.locomotionTarget).addScaledVector(appliedMove,h.surface?0:1);
+      const onSurface=h.surface||h.groundContact;
+      h.mesh.position.copy(onSurface?h.anchor:h.held?h.target:h.locomotionTarget).addScaledVector(appliedMove,onSurface?0:1);
       h.gripPosition.add(appliedMove);
     }
     if(!inVR)h.mesh.visible=false;
   }
   const bodyScale=.72+settings.size*.05;
-  const torsoScale=(armSegmentLength()*2)*(2/3)/.82;
+  const torsoScale=(armSegmentLength()*2)*(2/3)/.82*(inVR?.87:1);
   monkey.visible=settings.body&&(inVR||!pcAvatar);
   avatarHead.position.copy(worldHead);
   if(inVR)avatarHead.quaternion.copy(headRotation).premultiply(spin.setFromAxisAngle(up,yaw));
@@ -1867,20 +1876,3 @@ renderer.setAnimationLoop((time,frame)=>{
     }
   }
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

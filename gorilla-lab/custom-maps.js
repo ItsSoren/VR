@@ -480,7 +480,8 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   async function loadRoomMap(value,accepts){
     const request=++loadRequest;
     try{
-      const remote=value==='arena'?null:isEncodedRoomMap(value)?
+      if(value instanceof Blob&&value.size>maxMapBytes)throw Error('Carte trop lourde.');
+      const remote=value==='arena'?null:value instanceof Blob?parseMap(await value.text()):isEncodedRoomMap(value)?
         parseMap(await decodeRoomMapLink(value,maxMapBytes)):(await fetchMap(value,true)).map;
       if(request!==loadRequest)return false;
       if(!accepts(remote))return false;
@@ -541,5 +542,3 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     get nodes(){return map?.pieces.length??0;},get name(){return map?.name??null;},get signature(){return signature;},
   };
 }
-
-
