@@ -1,3 +1,4 @@
+import {normalizeHinge} from './model-hinge.js';
 import {avatarJoints,avatarReady,normalizeAvatarRig} from './avatar-rig.js';
 import * as T from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -84,8 +85,11 @@ export function normalizeModelPack(input) {
       hitbox:normalizeHitbox(raw?.hitbox),
       ...(raw.physics?{physics:modelPhysics(raw)}:{}),
       ...(raw.partCollisions===true?{partCollisions:true}:{}),
-      parts: raw.parts.filter(part=>!isRetiredArenaAsset(part?.assetId)).map((part, index) => ({
+      parts: raw.parts.filter(part=>!isRetiredArenaAsset(part?.assetId)).map((part, index) => {
+        const hinge=raw.kind==='structure'&&part?.zone!=='trigger'?normalizeHinge(part?.hinge):null;
+        return {
         name: label(part?.name, `Pièce ${index + 1}`),
+        ...(hinge?{hinge}:{}),
         ...(Object.hasOwn(avatarJoints,part?.avatarJoint)?{avatarJoint:part.avatarJoint}:{}),
         ...(Number.isInteger(part?.group)&&part.group>0&&part.group<=modelLimits.parts?{group:part.group}:{}),
         shape: part?.shape==='asset'&&isBuiltinAsset(part?.assetId)?'asset':Object.hasOwn(modelShapes, part?.shape)&&part.shape!=='asset'?part.shape:'box',
@@ -104,7 +108,8 @@ export function normalizeModelPack(input) {
         surface: Object.hasOwn(modelSurfaces, part?.surface) ? part.surface : 'plain',
         texture:typeof part?.texture==='string'&&part.texture.length<=modelLimits.textureBytes&&texturePattern.test(part.texture)
           ?part.texture:null,
-      })),
+        };
+      }),
     };
   });
   return { version: 1, models, avatarId: typeof input.avatarId==='string'&&avatarReady(models.find(model=>model.id===input.avatarId)) ? input.avatarId : null };

@@ -3,7 +3,7 @@ import {avatarTemplateParts,createAvatarRig} from '../gorilla-lab/avatar-rig.js'
 import {palmCenter,palmHalfExtent} from '../gorilla-lab/hand-skin.js';
 import {createSettings,readScreenRenderSettings,saveScreenRenderSettings} from '../gorilla-lab/game-settings.js';
 import {GorillaLocomotion} from '../gorilla-lab/locomotion.js';
-import {boxCollider,colliderFor,palmContact,playerObjectContact} from '../gorilla-lab/physics.js';
+import {boxCollider,colliderFor,palmContact,playerObjectContact,penetration} from '../gorilla-lab/physics.js';
 import {createCloudClient,createObjectFeed,decodeAvatar} from '../gorilla-lab/cloud-link.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -1068,4 +1068,34 @@ test('R39 accepts empty maps and retains a 350 m relief across export',()=>{
  const saved=parseMap(JSON.stringify({...map,pieces:[{...map.pieces[0],terrain}],spawn:{...map.spawn,y:400}}));
  assert.equal(saved.spawn.y,400);
  for(const name of ['detail','amplitude','frequency','octaves','roughness']) assert.equal(saved.pieces[0].terrain[name],terrain[name]);
+});
+
+test('Foundry door preserves its hinge in a map and its collider follows both poses',()=>{
+ const original=globalThis.document;
+ globalThis.document={querySelector:()=>({})};
+ try{
+  const arena={boxes:[],bakeLightmap(){},setEnvironment(){}};
+  const maps=connectMaps({scene:new T.Scene(),arena,boot:new T.Vector3(),onReset(){},onVisual(){},
+    getLevel:()=>0,defaultObjects:[]});
+  const model={id:'custom-model-r39-door',kind:'structure',parts:[{
+   name:'Panneau',shape:'box',scale:[2,2,.2],hinge:{pivot:[-1,0,0],closed:0,open:90,seconds:1},
+  }]};
+  const map=parseMap({...exampleMap(),pieces:[{name:'Porte',x:0,y:1,z:0,w:2,h:2,d:.2,solid:true,model}]});
+  const exported=JSON.stringify(map);
+  assert.deepEqual(JSON.parse(exported).pieces[0].model.parts[0].hinge,model.parts[0].hinge);
+  maps.load(exported);
+  assert.equal(arena.boxes.length,1);
+  const [door]=arena.boxes,normal=new T.Vector3();
+  const closed=new T.Vector3(0,1,0),open=new T.Vector3(-1,1,-1);
+  assert.ok(penetration(closed,.08,door,normal)>0);
+  const ray=new T.Vector3(0,0,-1);
+  assert.equal(maps.interactHinge(new T.Vector3(0,1,3),ray,true),'Ouverture');
+  maps.updateHinges(1,true);
+  assert.equal(penetration(closed,.08,door,normal),0);
+  assert.ok(penetration(open,.08,door,normal)>0);
+  assert.equal(maps.interactHinge(new T.Vector3(0,1,-1),new T.Vector3(-1,0,0),true),'Fermeture');
+  maps.updateHinges(1,true);
+  assert.ok(penetration(closed,.08,door,normal)>0);
+  assert.equal(penetration(open,.08,door,normal),0);
+ }finally{globalThis.document=original;}
 });

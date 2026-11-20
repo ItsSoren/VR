@@ -5,8 +5,9 @@ import * as T from 'three';
 import {shouldKeepArenaAsset} from './arena-map-pieces.js';
 import {tiledBox,transformUVs,decorPrimitiveGeometry,rampGeometry} from './texture-geometry.js';
 import {terrainGeometry,terrainCollider,terrainVegetation,terrainInstanceBoxes,disposeVegetation,sculptTerrain,normalizeTerrain,resizeTerrain} from './terrain-edit.js';
+import {applyHinge,hingeAngle} from './model-hinge.js';
 import {boxCollider,colliderFor} from './physics.js';
-import {createModelUnitGeometry,createModelMaterial,modelCollisionZones,modelCollisionGeometry,disposeModelMaterial} from './model-pack.js';
+import {createModelUnitGeometry,createModelMaterial,modelCollisionZones,modelCollisionGeometry,disposeModelMaterial,createModelPartGeometry,createModelPartMaterial,modelBounds} from './model-pack.js';
 import {mapCode} from './cloud-link.js';
 import {parseMap,makePiece,snapPlacement,maxPieces,maxMapBytes,storageKey,downloadMap} from './map-format.js';
 
@@ -14,7 +15,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   const builtBoxes=arena.boxes.slice();
   const replaceableMeshes=new Set(builtBoxes.filter(box=>box.half&&box.mesh?.isObject3D).map(box=>box.mesh));
   const group=new T.Group();scene.add(group);
-  const meshRows=[],mirrorRows=[],history=[],triggerRows=[];
+  const meshRows=[],hingeRows=[],mirrorRows=[],history=[],triggerRows=[];
   let insideTriggers=new Set();
   const loader=new T.TextureLoader(), textures=new Map();
   let loadRequest=0,roomBase=null,loadedSource=null;
@@ -67,13 +68,102 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     return {material,custom:true,ownTexture:model.texture?acquireTexture(model.texture,material):null};
   }
   function removeRow(row){
-    group.remove(row.mesh);row.mesh.geometry.dispose();
+    group.remove(row.mesh);
+    if(row.hinges){
+      for(const mesh of row.mesh.children){mesh.geometry.dispose();disposeModelMaterial(mesh.material);}
+      return;
+    }
+    row.mesh.geometry.dispose();
     if(row.vegetation)disposeVegetation(row.vegetation);
     if(row.custom){row.ownTexture?.materials.delete(row.mesh.material);if(row.model)disposeModelMaterial(row.mesh.material);else row.mesh.material.dispose();}
+  }
+  const neutralPosition=new T.Vector3(),neutralRotation=new T.Quaternion();
+  function moveHinges(row){
+    row.mesh.updateMatrixWorld(true);
+    for(const hinge of row.hinges){
+      applyHinge(hinge.mesh,hinge.pivot,neutralPosition,neutralRotation,hingeAngle(hinge.config,hinge.progress));
+      if(!hinge.collider)continue;
+      const {collider,center}=hinge;
+      collider.position.copy(center).applyQuaternion(hinge.mesh.quaternion).add(hinge.mesh.position)
+        .applyMatrix4(row.mesh.matrixWorld);
+      row.mesh.getWorldQuaternion(collider.quaternion).multiply(hinge.mesh.quaternion);
+    }
+    row.mesh.updateMatrixWorld(true);
+  }
+  function makeHingedRow(piece,index,dimensions){
+    const {model}=piece,root=new T.Group();
+    root.position.set(piece.x,piece.y,piece.z);
+    root.rotation.set(...[piece.pitch,piece.yaw,piece.roll??0].map(T.MathUtils.degToRad),'YXZ');
+    root.userData.mapIndex=index;
+    group.add(root);
+    const bounds=modelBounds(model),center=bounds.getCenter(new T.Vector3());
+    const ratio=dimensions.clone().divide(bounds.getSize(new T.Vector3()).max(new T.Vector3(.00001,.00001,.00001)));
+    const row={mesh:root,hinges:[],colliders:[],model:true};
+    const zones=modelCollisionZones({...model,partCollisions:true},dimensions);
+    let zoneIndex=0;
+    root.updateMatrixWorld(true);
+    for(const part of model.parts){
+      const order=new T.Euler(...part.rotation.map(T.MathUtils.degToRad),'ZYX');
+      const metricScale=new T.Vector3(...part.scale).multiply(new T.Vector3(...[0,1,2].map(axis=>
+        new T.Vector3().setComponent(axis,1).applyEuler(order).multiply(ratio).length()
+      )));
+      const geometry=createModelPartGeometry(part,metricScale);
+      geometry.translate(-center.x,-center.y,-center.z).scale(ratio.x,ratio.y,ratio.z);
+      const mesh=new T.Mesh(geometry,createModelPartMaterial(part));
+      mesh.userData.mapIndex=index;mesh.castShadow=mesh.receiveShadow=true;root.add(mesh);
+      const zone=zones.length&&part.zone!=='pass'?zones[zoneIndex++]:null;
+      let collider=null;
+      if(zone){
+        const half=zone.size.clone().multiplyScalar(.5);
+        const position=root.localToWorld(zone.center.clone());
+        const quaternion=root.quaternion.clone();
+        if(zone.mode==='trigger'){
+          triggerRows.push({name:zone.name,model:piece.name,position,notice:zone.notice,portal:zone.portal,
+            inverse:quaternion.invert(),bounds:new T.Box3(half.clone().negate(),half)});
+        }else{
+          collider={position,quaternion,half,min:half.clone().negate(),shape:boxCollider(half),
+            friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:true,type:piece.material};
+          row.colliders.push(collider);
+        }
+      }
+      if(part.hinge){
+        const pivot=new T.Vector3(...part.hinge.pivot).sub(center).multiply(ratio);
+        row.hinges.push({mesh,pivot,collider,center:zone?.center,config:part.hinge,progress:0,target:0});
+      }
+    }
+    moveHinges(row);
+    return row;
+  }
+  function updateHinges(dt,enabled){
+    for(const row of hingeRows){
+      let moved=false;
+      for(const hinge of row.hinges){
+        const goal=enabled?hinge.target:0;
+        if(!enabled)hinge.target=0;
+        if(hinge.progress===goal)continue;
+        const step=dt/hinge.config.seconds;
+        hinge.progress=goal?Math.min(goal,hinge.progress+step):Math.max(0,hinge.progress-step);
+        moved=true;
+      }
+      if(moved)moveHinges(row);
+    }
+  }
+  function interactHinge(origin,direction,enabled){
+    if(!hingeRows.length)return false;
+    const rowTargets=meshRows.filter(row=>row.mesh.visible);
+    trace.set(origin,direction);trace.far=3.5;
+    const hit=trace.intersectObjects(rowTargets.flatMap(row=>row.hinges?row.mesh.children:[row.mesh]),false)[0];
+    if(!hit)return false;
+    const hinge=meshRows[hit.object.userData.mapIndex]?.hinges?.find(value=>value.mesh===hit.object);
+    if(!hinge)return false;
+    if(!enabled)return 'Les animations interactives sont disponibles en solo.';
+    hinge.target=1-hinge.target;
+    return hinge.target?'Ouverture':'Fermeture';
   }
   function makeRow(piece,index){
     if(piece.model){
       const dimensions=new T.Vector3(piece.w,piece.h,piece.d);
+      if(piece.model.parts.some(part=>part.hinge))return makeHingedRow(piece,index,dimensions);
       const geometry=createModelUnitGeometry(piece.model,dimensions);
       geometry.scale(piece.w,piece.h,piece.d);
       const material=createModelMaterial(piece.model);
@@ -150,7 +240,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   const worldBox=new T.Box3(),pieceBox=new T.Box3();
   function rebuild(){
     for(const row of meshRows)removeRow(row);
-    meshRows.length=0;
+    meshRows.length=hingeRows.length=0;
     mirrorRows.length=0;triggerRows.length=0;insideTriggers.clear();
     const nodes=map?.pieces??[];
     signature=map?'custom-'+mapCode(JSON.stringify(map)):'';
@@ -165,6 +255,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     for(const [index,piece] of nodes.entries()){
       const row=makeRow(piece,index);
       meshRows.push(row);
+      if(row.hinges)hingeRows.push(row);
       for(const box of terrainInstanceBoxes(piece,row.vegetation)){
         instanceColliders.push({...box,min:box.half.clone().negate(),shape:boxCollider(box.half),
           friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:false,type:piece.material});
@@ -183,7 +274,8 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     worldLimits=null;
     if(map){
       worldBox.makeEmpty();worldBox.expandByPoint(boot);
-      for(const {mesh} of meshRows){
+      for(const {mesh,hinges} of meshRows){
+        if(hinges){worldBox.union(pieceBox.setFromObject(mesh));continue;}
         if(!mesh.geometry.boundingBox)mesh.geometry.computeBoundingBox();
         worldBox.union(pieceBox.copy(mesh.geometry.boundingBox).applyMatrix4(mesh.matrixWorld));
       }
@@ -234,7 +326,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   }
   function edit(origin,direction,click,{mode,piece,head,feet}){
     trace.set(origin,direction);trace.far=12;
-    const targets=meshRows.map(row=>row.mesh);
+    const targets=meshRows.flatMap(row=>row.hinges?row.mesh.children:[row.mesh]);
     if(mode===1&&map?.arenaBase&&!map.editableArena)targets.push(...builtBoxes.filter(box=>box.heightfield&&
       !map.pieces.some(piece=>piece.sceneryId===box.editorAssetId)).map(box=>box.mesh));
     const hits=trace.intersectObjects(targets,false);
@@ -384,7 +476,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   document.querySelector('#map-load-url').onclick=()=>loadURL(url.value);
   document.querySelector('#map-export').onclick=save;
   document.querySelector('#map-reset').onclick=reset;
-  return {checkTriggers,get worldLimits(){return worldLimits;},placedModels:()=>map?.pieces.filter(p=>p.model?.kind==='prop')??[],modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,loadRoomMap,leaveRoomMap,roomMapSource,reset,blank,undo,save,edit,recenter,inform,
+  return {checkTriggers,updateHinges,interactHinge,get worldLimits(){return worldLimits;},placedModels:()=>map?.pieces.filter(p=>p.model?.kind==='prop')??[],modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,loadRoomMap,leaveRoomMap,roomMapSource,reset,blank,undo,save,edit,recenter,inform,
     mirrors:()=>mirrorRows,
     get usesBuiltInMirror(){return !map||map.arenaBase&&!map.editableArena&&!map.pieces.some(piece=>piece.sceneryId==='lab-mirror');},
     clearGhost(){ghost.visible=false;},get active(){return Boolean(map);},get builtIn(){return !map||map.arenaBase===true;},get assetLayer(){return map?.assetLayer===true;},

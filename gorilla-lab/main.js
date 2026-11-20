@@ -1680,6 +1680,7 @@ renderer.setAnimationLoop((time,frame)=>{
   if(guestActive&&!wasGuestActive)releaseAll();
   wasGuestActive=guestActive;
   animateProps(time*.001);
+  maps.updateHinges(dt,!spectator.role);
   if(hintUntil&&time>hintUntil){hint.hidden=true;hintUntil=0;vrHint='';}
   cursor.visible=false;toolVisual.hide();toolState.mode=0;
   activeBoxes=settings.collisions?arena.boxes:blocked;
@@ -1749,7 +1750,11 @@ renderer.setAnimationLoop((time,frame)=>{
     if(actions.delete('KeyT'))change('toolMode',1);
     const interact=actions.delete('KeyE');
     if(settings.toolActive)useToolRay(raySource,forward,interact,null);
-    else if(interact&&!grabFlat(raySource,forward))fixtureRay(raySource,forward,true);
+    else if(interact){
+      const door=maps.interactHinge(raySource,forward,!spectator.role);
+      if(door)showGameHint(door);
+      else if(!grabFlat(raySource,forward))fixtureRay(raySource,forward,true);
+    }
     else if(!interact&&!remoteWorld)fixtureRay(raySource,forward,false);
     if(actions.delete('KeyF')){settings.objects=true;requestSpawn(spawnTypes[0]);}
   }

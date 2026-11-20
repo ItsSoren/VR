@@ -11,6 +11,7 @@ import {openTextureStudio} from './texture-studio.js';
 import {openShapeStudio} from './shape-studio.js';
 import {modelFacePosition,modelGroupTransform,scaleHandleSigns} from './editor-scale.js';
 import {avatarJoints,avatarTemplateParts,avatarReady,createAvatarRig,normalizeAvatarJoint,normalizeAvatarRig} from './avatar-rig.js';
+import {applyHinge,hingeAngle,normalizeHinge} from './model-hinge.js';
 import {startingSketch} from './custom-shape.js';
 
 // GORILLA / FOUNDRY. Geometry remains in the Gorilla model-pack v1 format:
@@ -281,7 +282,7 @@ function updateInspector(){
   const model=currentModel(),part=currentPart();
   $('model-details').hidden=!model;
   $('part-inspector').hidden=!part;
-  $('part-empty').hidden=!!part||['settings','collision','publish','avatar'].includes($('model-inspector').dataset.tab);
+  $('part-empty').hidden=!!part||['settings','collision','publish','avatar','animation'].includes($('model-inspector').dataset.tab);
   if(model){
     if(document.activeElement!==$('model-name'))$('model-name').value=model.name;
     $('model-kind').value=model.kind||'prop';
@@ -333,6 +334,7 @@ function updateInspector(){
   $('avatar-new').disabled=pack.models.length>=modelLimits.models;
   $('avatar-copy').disabled=!model?.parts.length||model.kind==='avatar'||$('avatar-new').disabled;
   updateAvatarInspector();
+  updateHingeInspector();
 }
 // The visual preview uses Foundry's uncentred model coordinates.
 // When exported, physics recentres the geometry and applies the same offset.
@@ -420,6 +422,7 @@ function setPanel(tab){
   }
   $('model-inspector').dataset.tab=tab;
   if(tab!=='avatar'){avatarAngles.clear();moveAvatarPivot=false;}
+  if(tab!=='animation')stopHingePreview();
   updateInspector();
   updateHitboxPreview();
   attachGizmo();
@@ -429,7 +432,83 @@ for(const button of document.querySelectorAll('.tab')){
   button.onclick=()=>setPanel(button.dataset.panel);
 }
 
+let hingeFrame=0;
+const hingeBase=new T.Vector3(),hingePivot=new T.Vector3(),hingeBasis=new T.Quaternion(),hingeEuler=new T.Euler();
+const hingeKeys=['closed','open','seconds'],hingeAxes=['x','y','z'];
+function stopHingePreview(){
+  cancelAnimationFrame(hingeFrame);hingeFrame=0;$('hinge-preview').value=0;
+  $('hinge-play').textContent='Lire';
+}
+function updateHingeInspector(){
+  const part=currentPart(),model=currentModel(),hinge=model?.kind==='structure'&&part?.zone!=='trigger'?part?.hinge:null;
+  const eligible=part&&part.zone!=='trigger'&&model.kind!=='avatar';
+  $('hinge-fields').hidden=!hinge;
+  $('hinge-add').hidden=Boolean(hinge);
+  $('hinge-add').disabled=!eligible;
+  $('hinge-hint').textContent=hinge?'Panneau sélectionné : '+part.name:
+    eligible?'Articule le panneau sélectionné. Le modèle devient un décor.':'Sélectionne une pièce solide ou traversable du décor.';
+  if(!hinge)return;
+  hingeAxes.forEach((key,index)=>$(`hinge-${key}`).value=hinge.pivot[index]);
+  for(const key of hingeKeys)$(`hinge-${key}`).value=hinge[key];
+}
+function saveHingeChange(){
+  const part=currentPart();
+  if(!part?.hinge)return;
+  remember();
+  part.hinge=normalizeHinge({
+    pivot:hingeAxes.map(key=>$(`hinge-${key}`).valueAsNumber),
+    ...Object.fromEntries(hingeKeys.map(key=>[key,$(`hinge-${key}`).valueAsNumber])),
+  });
+  markDirty();updateHingeInspector();render();
+}
+$('hinge-add').onclick=()=>{
+  const part=currentPart(),model=currentModel();
+  if(!part||model.kind==='avatar'||part.zone==='trigger')return;
+  remember();
+  model.kind='structure';
+  model.partCollisions=true;
+  const offset=new T.Vector3(-part.scale[0]/2,0,0).applyEuler(hingeEuler.set(...part.rotation.map(T.MathUtils.degToRad),'ZYX'));
+  part.hinge=normalizeHinge({pivot:offset.add(hingeBase.fromArray(part.position)).toArray()});
+  stopHingePreview();markDirty();updateInspector();updatePreview();
+};
+$('hinge-remove').onclick=()=>{
+  const part=currentPart();if(!part?.hinge)return;
+  remember();delete part.hinge;stopHingePreview();markDirty();updateInspector();updatePreview();
+};
+for(const key of [...hingeAxes,...hingeKeys])$(`hinge-${key}`).onchange=saveHingeChange;
+$('hinge-preview').oninput=()=>{
+  cancelAnimationFrame(hingeFrame);hingeFrame=0;$('hinge-play').textContent='Lire';
+  render();
+};
+$('hinge-play').onclick=()=>{
+  const hinge=currentPart()?.hinge;
+  if(!hinge)return;
+  if(hingeFrame){stopHingePreview();render();return;}
+  $('hinge-play').textContent='Revenir à la pose fermée';
+  const start=performance.now();
+  const frame=now=>{
+    if(currentPart()?.hinge!==hinge){stopHingePreview();render();return;}
+    const progress=Math.min(1,(now-start)/(hinge.seconds*1000));
+    $('hinge-preview').value=progress;
+    render();
+    hingeFrame=progress<1?requestAnimationFrame(frame):0;
+    if(!hingeFrame)$('hinge-play').textContent='Relire';
+  };
+  hingeFrame=requestAnimationFrame(frame);
+};
+
 function render(){
+  const model=currentModel(),parts=model?.parts??[];
+  const animate=$('model-inspector').dataset.tab==='animation'&&model?.kind==='structure';
+  for(let index=0;index<previews.children.length;index++){
+    const mesh=previews.children[index],part=parts[index];
+    if(!part?.hinge||part.zone==='trigger')continue;
+    if(!animate&&!mesh.userData.hingePreview)continue;
+    mesh.userData.hingePreview=animate;
+    const position=hingeBase.fromArray(part.position),pivot=hingePivot.fromArray(part.hinge.pivot);
+    const rotation=hingeBasis.setFromEuler(hingeEuler.set(...part.rotation.map(T.MathUtils.degToRad),'ZYX'));
+    applyHinge(mesh,pivot,position,rotation,animate?hingeAngle(part.hinge,index===partIndex?+$('hinge-preview').value:0):0);
+  }
   updateSkeletonGuide();
   renderer?.render(scene,camera);
 }
@@ -613,6 +692,7 @@ function partMesh(part){
 }
 function attachGizmo(){
   if(!gizmo)return;
+  if($('model-inspector').dataset.tab==='animation'){gizmo.detach();return;}
   if($('model-inspector').dataset.tab==='avatar'){
     if(moveAvatarPivot&&rigPreview){
       const key=$('avatar-joint').value;
@@ -734,6 +814,7 @@ function refreshModel(){
   updateParts();updateInspector();updatePreview(true);updateHistoryButtons();
 }
 function selectPart(index,extend=false){
+  if(index!==partIndex)stopHingePreview();
   const parts=currentModel()?.parts,part=parts?.[index];
   if(!part)return;
   const indices=part.group?parts.flatMap((entry,i)=>entry.group===part.group?[i]:[]):[index];
