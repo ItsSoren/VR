@@ -42,17 +42,15 @@ export function createVrEffects(renderer) {
     settings.exposure.value=renderer.toneMappingExposure;
     // La composition manipule l’état global du moteur. Le bloc finally le rétablit même en cas d’erreur.
     const original=renderer.getRenderTarget(),xrEnabled=renderer.xr.enabled;
-    // The eye framebuffer stays at native resolution. The intermediate HDR
-    // scene can be smaller to keep the blur and composite within the XR budget.
-    const scale=half&&bloom?.strength>0 ? .8 : 1;
+    // Keep scene detail at the eye resolution; hdr-bloom only downsamples the blur.
     const shadowUpdate=renderer.shadowMap.autoUpdate,autoReset=renderer.info.autoReset;
     renderer.info.reset();renderer.info.autoReset=false;
     try{
       renderer.xr.enabled=false;
       for(let i=0;i<eyes.length;i++){
         const eye=eyes[i];
-        const width=Math.max(32,Math.round(eye.viewport.z*scale));
-        const height=Math.max(32,Math.round(eye.viewport.w*scale));
+        const width=Math.max(32,Math.round(eye.viewport.z));
+        const height=Math.max(32,Math.round(eye.viewport.w));
         let target=targets[i];
         if(!target){
           target=targets[i]=new T.WebGLRenderTarget(width,height,{type:half?T.HalfFloatType:T.UnsignedByteType,minFilter:T.LinearFilter,magFilter:T.LinearFilter,depthBuffer:true,stencilBuffer:false});
