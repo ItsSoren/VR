@@ -1939,6 +1939,7 @@ $('test-map').onclick = async () => {
 
 const terrainFields=['detail','thickness','seed','amplitude','frequency','octaves','roughness','ridge','edgeFade','textureDensity'];
 
+const terrainCountFormat=new Intl.NumberFormat('fr-FR');
 function renderTerrainRules(piece){
   const rules=piece.terrain.rules;
   const distributions=group.children[selected]?.userData.vegetation?.userData.distribution??[];
@@ -2027,7 +2028,7 @@ function renderTerrainRules(piece){
     const distribution=distributions[index]??{count:0,requested:0,area:0};
     count.textContent=distribution.count+' / '+distribution.requested+' · '+distribution.area.toFixed(1)+' m²';
     if(distribution.requested>distribution.count)count.textContent+=' · répartition limitée';
-    if(rule.collidable)count.textContent+=' · '+format.format(distribution.collisions??0)+' collisions';
+    if(rule.collidable)count.textContent+=' · '+terrainCountFormat.format(distribution.collisions??0)+' collisions';
     const cell=add('Affichées / demandées',count,true);
     const remove=document.createElement('button');remove.type='button';remove.textContent='Retirer la ligne';
     remove.onclick=()=>{remember();rules.splice(index,1);sync();};
