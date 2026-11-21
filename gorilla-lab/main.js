@@ -793,10 +793,10 @@ maps=connectMaps({scene,arena,boot,onReset:angle=>{
 });
 const spectator=addSpectator({scene,localColor:avatarColor,currentMap:()=>(maps.signature||'arena-r25-'+arena.hillSeed)+modelSignature,
   seedArena:seed=>arena.setHillSeed(seed),
-  onRoomMap:(value,expected,active)=>maps.loadRoomMap(value,candidate=>{
+  onRoomMap:(value,expected,active,progress)=>maps.loadRoomMap(value,candidate=>{
     const signature=candidate?'custom-'+mapCode(JSON.stringify(candidate)):'arena-r25-'+arena.hillSeed;
     return active()&&mapCode(signature+modelSignature)===expected;
-  }),
+  },progress),
   restoreRoomMap:()=>maps.leaveRoomMap(),
   exportRoomMap:()=>maps.save(),
   hingeSnapshot:()=>maps.hingeSnapshot(),

@@ -12,6 +12,7 @@ import {readModelPack,modelStorageKey,normalizeModelPack,createModelUnitGeometry
 import {createBuiltinModelTemplates,spawnAssetIds} from './model-assets.js';
 import {normalizeTerrain,normalizeTerrainRule,maxTerrainRules,maxTerrainDensity,maxTerrainPropSize,maxTerrainRuleColors,maxTerrainSizeVariation,terrainQuarterYaw,terrainSeam,stitchTerrain,resizeTerrain,sculptTerrain,terrainGeometry,updateTerrainGeometry,applyTerrainProjection,terrainVegetation,disposeVegetation} from './terrain-edit.js';
 import {openTextureStudio} from './texture-studio.js';
+import {mostlyInRectangle} from './marquee-selection.js';
 import {createTrafficEditor} from './editor-traffic.js';
 import {createAudioEditor} from './editor-audio.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
@@ -569,6 +570,8 @@ const raycaster = new T.Raycaster();
 const worldUp = new T.Vector3(0, 1, 0);
 const horizontalPlane = new T.Plane(worldUp, 0);
 const normalMatrix = new T.Matrix3();
+const multiSelection=new Set(),extraSelectionBoxes=[];
+let marquee=null;
 let selectionBox = null, renderRequested = false, editorFps=60, previousEditorFrame=-Infinity;
 
 // L’éditeur ne redessine que si la vue ou le contenu change.
@@ -711,7 +714,7 @@ function paintPlan() {
   const layers = map.pieces.map((piece, index) => ({ piece, index })).sort((a, b) => a.piece.y - b.piece.y);
   for (const { piece, index } of layers) {
     const color = piece.model?.parts[0]?.color ?? (piece.color === '#ffffff' ? materialColors[piece.material] : piece.color);
-    drawFootprint(piece, color, index === selected ? '#ffe095' : '#a4bac7', index === selected ? 2 : 1, piece.solid ? .86 : .38);
+    drawFootprint(piece, color, index === selected||multiSelection.has(index) ? '#ffe095' : '#a4bac7', index === selected||multiSelection.has(index) ? 2 : 1, piece.solid ? .86 : .38);
   }
   drawMarker(map.spawn, false);
   if (ghost) {
@@ -731,6 +734,11 @@ function placeMesh(mesh, piece) {
 
 // Remplace le cadre jaune et rattache les poignées à la pièce active.
 function updateSceneSelection() {
+  for(const box of extraSelectionBoxes.splice(0)){scene.remove(box);box.geometry.dispose();box.material.dispose();}
+  for(const index of multiSelection){
+    if(index===selected||!group.children[index])continue;
+    const box=new T.BoxHelper(group.children[index],'#ffdf88');extraSelectionBoxes.push(box);scene.add(box);
+  }
   if (selectionBox) {
     scene.remove(selectionBox);
     selectionBox.geometry.dispose();
@@ -1246,7 +1254,8 @@ function sync() {
 
 // Change la sélection sans reconstruire tous les maillages.
 function choose(index) {
-  if (selected === index) return;
+  if(selected===index&&!multiSelection.size)return;
+  multiSelection.clear();
   selected = index;
   editorTrace('sélection',{name:current()?.name,terrain:Boolean(current()?.terrain)});
   heldSnap=null;rejectedSnaps.clear();
@@ -1261,6 +1270,7 @@ function addPiece(piece) {
   if (map.pieces.length >= maxPieces) return notice('Limite de pièces atteinte.');
   remember();
   map.pieces.push(piece);
+  multiSelection.clear();
   selected = map.pieces.length - 1;
   sync();
   notice(piece.name + ' ajouté à la map.');
@@ -1269,12 +1279,14 @@ function addPiece(piece) {
 // Retire la pièce active et garde une sélection valide.
 function removePiece() {
   if (!current()) return;
-  const name = current().name;
+  const count=multiSelection.size||1,name=current().name;
   remember();
-  map.pieces.splice(selected, 1);
+  if(multiSelection.size)map.pieces=map.pieces.filter((_,index)=>!multiSelection.has(index));
+  else map.pieces.splice(selected,1);
+  multiSelection.clear();
   selected = Math.min(selected, map.pieces.length - 1);
   sync();
-  notice(name + ' retiré de la map.');
+  notice(count>1?count+' pièces retirées.':name+' retiré de la map.');
 }
 
 // Crée une copie voisine avec les propriétés de la sélection.
@@ -1301,6 +1313,7 @@ function undo() {
   const last = undoStack.pop();
   if (!last) return;
   map = last.map;
+  multiSelection.clear();
   selected = last.selected;
   showGhost(null);
   sync();
@@ -1382,6 +1395,7 @@ function loadMap(next, message) {
   remember();
   map = next;
   heldSnap=null;rejectedSnaps.clear();
+  multiSelection.clear();
   selected = -1;
   $('piece-search').value='';
   setTool('move');
@@ -1574,7 +1588,9 @@ function beginGesture(canvas, event) {
   if (tool !== 'move') return;
 
   const hit = pointUnderPointer(canvas, event);
-  choose(hit ? group.children.indexOf(hit.object) : -1);
+  const hitIndex=hit?group.children.indexOf(hit.object):-1;
+  if(multiSelection.has(hitIndex)){selected=hitIndex;updateInspector();updateSceneSelection();}
+  else choose(hitIndex);
   const piece = current();
   if (!hit||!piece) return;
   start.height = hit.point.y;
@@ -1611,12 +1627,24 @@ function moveGesture(canvas, event) {
     gesture.recorded = true;
     canvas.toggleAttribute('data-dragging', true);
   }
-  piece.x = x;
-  piece.z = z;
+  if(multiSelection.size>1){
+    let minX=-Infinity,maxX=Infinity,minZ=-Infinity,maxZ=Infinity;
+    for(const index of multiSelection){
+      const part=map.pieces[index];
+      minX=Math.max(minX,-limit-part.x);maxX=Math.min(maxX,limit-part.x);
+      minZ=Math.max(minZ,-limit-part.z);maxZ=Math.min(maxZ,limit-part.z);
+    }
+    const dx=minX<=maxX?T.MathUtils.clamp(x-piece.x,minX,maxX):0;
+    const dz=minZ<=maxZ?T.MathUtils.clamp(z-piece.z,minZ,maxZ):0;
+    for(const index of multiSelection){
+      const part=map.pieces[index];part.x+=dx;part.z+=dz;placeMesh(group.children[index],part);
+    }
+    for(const box of extraSelectionBoxes)box.update();
+  }else{piece.x=x;piece.z=z;}
   placeMesh(group.children[selected], piece);
   selectionBox?.update();
-  $('p-x').value = x;
-  $('p-z').value = z;
+  $('p-x').value = piece.x;
+  $('p-z').value = piece.z;
   paintPlan();
   queueRender();
 }
@@ -1634,7 +1662,7 @@ function endGesture(canvas, event, commit) {
   }
   if (finished.recorded) {
     pendingSave();
-    notice(current().name + ' déplacé.');
+    notice(multiSelection.size>1?multiSelection.size+' pièces déplacées.':current().name+' déplacé.');
   }
   if (commit && tool === finished.tool && tool !== 'move') {
     const moved = Math.hypot(event.clientX - finished.clientX, event.clientY - finished.clientY);
@@ -1743,6 +1771,65 @@ for(const button of quickMenu.querySelectorAll('[data-context-action]'))button.o
   else setTool(action);
 };
 
+
+const marqueeBox=document.createElement('div');
+Object.assign(marqueeBox.style,{position:'fixed',pointerEvents:'none',zIndex:100,border:'1px solid #a6efff',background:'#60bfe633'});
+marqueeBox.hidden=true;document.body.append(marqueeBox);
+function rectangle(a,b){
+  return {left:Math.min(a.x,b.x),top:Math.min(a.y,b.y),right:Math.max(a.x,b.x),bottom:Math.max(a.y,b.y)};
+}
+function projectedPiece(mesh,canvas,rect){
+  const geometry=mesh.geometry;
+  if(!geometry.boundingBox)geometry.computeBoundingBox();
+  const {min,max}=geometry.boundingBox,result=[];
+  for(const x of [min.x,max.x])for(const y of [min.y,max.y])for(const z of [min.z,max.z]){
+    const point=new T.Vector3(x,y,z).applyMatrix4(mesh.matrixWorld);
+    if(canvas===plan){
+      const [px,pz]=transform(point.x,point.z);
+      result.push([rect.left+px*rect.width/plan.width,rect.top+pz*rect.height/plan.height]);
+    }else{
+      point.project(camera);
+      if(point.z>-1&&point.z<=1&&Number.isFinite(point.x)&&Number.isFinite(point.y))
+        result.push([rect.left+(point.x+1)*rect.width/2,rect.top+(1-point.y)*rect.height/2]);
+    }
+  }
+  return result;
+}
+for(const canvas of [screen,plan]){
+  canvas.addEventListener('pointerdown',event=>{
+    if(!event.shiftKey||event.button!==0||!event.isPrimary||gesture||gizmo.dragging)return;
+    event.preventDefault();event.stopImmediatePropagation();
+    canvas.focus({preventScroll:true});canvas.setPointerCapture(event.pointerId);
+    marquee={canvas,id:event.pointerId,x:event.clientX,y:event.clientY};
+  },{capture:true});
+  canvas.addEventListener('pointermove',event=>{
+    if(marquee?.id!==event.pointerId||marquee.canvas!==canvas)return;
+    event.stopImmediatePropagation();
+    const r=rectangle(marquee,{x:event.clientX,y:event.clientY});
+    Object.assign(marqueeBox.style,{left:r.left+'px',top:r.top+'px',width:r.right-r.left+'px',height:r.bottom-r.top+'px'});
+    marqueeBox.hidden=false;
+  },{capture:true});
+  const finish=(event,commit)=>{
+    if(marquee?.id!==event.pointerId||marquee.canvas!==canvas)return;
+    event.stopImmediatePropagation();
+    const r=rectangle(marquee,{x:event.clientX,y:event.clientY});
+    marquee=null;marqueeBox.hidden=true;
+    if(canvas.hasPointerCapture(event.pointerId))canvas.releasePointerCapture(event.pointerId);
+    if(!commit||r.right-r.left<4||r.bottom-r.top<4)return;
+    const canvasBounds=canvas.getBoundingClientRect(),hits=[];
+    camera.updateMatrixWorld();
+    group.children.forEach((mesh,index)=>{
+      if(mesh.visible&&mostlyInRectangle(projectedPiece(mesh,canvas,canvasBounds),r))hits.push(index);
+    });
+    multiSelection.clear();hits.forEach(index=>multiSelection.add(index));
+    selected=hits.at(-1)??-1;
+    updateInspector();updateSceneSelection();paintPlan();queueRender();
+    notice(hits.length+' pièce'+(hits.length===1?' sélectionnée.':'s sélectionnées.'));
+  };
+  canvas.addEventListener('pointerup',event=>finish(event,true),{capture:true});
+  canvas.addEventListener('pointercancel',event=>finish(event,false),{capture:true});
+  canvas.addEventListener('lostpointercapture',event=>finish(event,false),{capture:true});
+}
 
 for (const canvas of [screen, plan]) {
   canvas.addEventListener('pointerdown', event => beginGesture(canvas, event), { capture: true });

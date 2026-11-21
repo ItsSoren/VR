@@ -1,4 +1,5 @@
 import {normalizeSoundAssets,normalizeSoundZones,normalizeSurfaceSound} from './map-audio-format.js';
+import {roomMapImportBytes} from './room-map-link.js';
 import {normalizeTraffic} from './traffic-format.js';
 import {Euler,Vector3} from 'three';
 import {normalizeEnvironment} from './map-environment.js';
@@ -11,7 +12,7 @@ import {normalizeTerrain,terrainQuarterYaw} from './terrain-edit.js';
 export const mapMaterials=['Ardoise','Nacre','Brique','Sable','Marbre','Bois','Cuivre','Chrome','Carreaux','Béton','Verre bleu','Verre ambre','Glace','Caoutchouc','Émail','Mosaïque','Benchmark'];
 export const materialColors=['#555e6a','#537586','#855443','#a28e61','#bbb8b0','#664527','#794a36','#758291','#293e4b','#626664','#94cfdd','#d1a053','#7cb0cf','#45404b','#40468c','#455d62','#141414'];
 export const surfacePresets={normal:{grip:.8,gravity:1,bounce:1},ice:{grip:.035,gravity:1,bounce:1},rubber:{grip:1.15,gravity:1,bounce:1.52},moon:{grip:.8,gravity:.28,bounce:1}};
-export const maxMapBytes=16_000_000;
+export const maxMapBytes=roomMapImportBytes;
 export const maxPieces=512;
 export const maxWorldReach=1024;
 export const maxWorldHeight=20_000;

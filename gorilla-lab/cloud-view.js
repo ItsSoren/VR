@@ -217,7 +217,20 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
   const start=$('#cloud-private-start'),active=$('#cloud-private-active');
   const copyButton=$('#cloud-copy'),playerButton=$('#cloud-player');
   const importButton=$('#cloud-import'),fileInput=$('#cloud-map-file'),exportButton=$('#cloud-export');
-  let mapLoadError='';
+  let mapLoadError='',downloadProgress=null;
+  const progressPanel=$('#cloud-map-transfer'),progressBar=$('#cloud-map-progress'),progressEta=$('#cloud-map-eta');
+  function transferProgress(data){
+    progressPanel.hidden=!data;
+    if(!data)return;
+    const {loaded=0,total,seconds=0}=data;
+    if(!total){progressBar.removeAttribute('value');progressEta.textContent='Estimation en cours…';return;}
+    const fraction=Math.min(1,loaded/total);
+    progressBar.value=fraction;
+    const remaining=seconds>0&&loaded>0?Math.ceil((total-loaded)*seconds/loaded):null;
+    const time=remaining===null?'estimation en cours':remaining<60?'environ '+remaining+' s':
+      'environ '+Math.ceil(remaining/60)+' min';
+    progressEta.textContent=Math.floor(fraction*100)+' % · '+(loaded>=total?'ouverture de la carte…':time);
+  }
   function refreshRoomActions(){
     start.hidden=Boolean(client.role);
     active.hidden=!client.role;
@@ -281,6 +294,7 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
   let roomMapPending=false,visit=0,lastMapAttempt=null,telemetryAt=-Infinity;
   function leave(){
     visit++;roomMapPending=false;lastMapAttempt=null;mapLoadError='';client.leave();
+    downloadProgress=null;transferProgress(null);
     sharedSourceMap=-1;sharedSource=null;sourceAt=-Infinity;
     for(const [id,entry] of peers)removePeer(id,entry);restoreRoomMap?.();refreshRoomActions();
     const output=$('#cloud-telemetry');
@@ -321,14 +335,15 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
   async function loadRoomSource(source,host,manual=false){
     const attempt=++visit;
     roomMapPending=true;
+    downloadProgress={};
     mapLoadError='';
     try{
-      const ok=await onRoomMap(source,host.map,()=>attempt===visit&&client.remote?.id===host.id&&client.remote?.map===host.map);
+      const ok=await onRoomMap(source,host.map,()=>attempt===visit&&client.remote?.id===host.id&&client.remote?.map===host.map,progress=>{if(attempt===visit)downloadProgress=progress;});
       if(attempt===visit&&!ok&&source!=='arena')mapLoadError=manual?
         'Ce fichier ne correspond pas à la carte du salon ou son import a échoué. Demande à l’hôte le JSON actuel.':
         'Carte inaccessible ou différente. Récupère le JSON actuel auprès de l’hôte.';
     }finally{
-      if(attempt===visit)roomMapPending=false;
+      if(attempt===visit){roomMapPending=false;downloadProgress=null;}
     }
   }
   $('#cloud-copy').onclick=async()=>{
@@ -409,8 +424,14 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
     }
   }
   function updateStatus(localReady,now){
-    if(now<copyUntil)return;
     const host=client.remote;
+    const peer=host&&peers.get(host.id),fragments=peer?.transfer;
+    const waiting=client.role&&client.role!=='vr'&&host?.ready&&host.map!==localMap()&&
+      !mapLoadError&&peer?.source?.value!=='file';
+    const assembled=fragments?.map===host?.map&&fragments?.total?
+      {loaded:fragments.fragments.size,total:fragments.total,seconds:(fragments.lastAt-fragments.firstAt)/1000}:null;
+    transferProgress(waiting?(assembled??downloadProgress??{}):null);
+    if(now<copyUntil)return;
     let caption=networkCaption;
     if(client.state==='open'){
       const prefix='Salon '+client.code+' · ';

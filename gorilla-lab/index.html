@@ -32,6 +32,10 @@ button:focus-visible{outline:2px solid #ffe6a5}button:hover{background:#4d6b78}b
 <button id="restore">Réglages par défaut</button>
 <p><button id="capture-report">Capturer le rapport</button> <button id="download-report" disabled>JSON</button></p><section id="cloud-access" aria-label="Salons" hidden>
 <p id="cloud-status" role="status">Hors ligne</p>
+<div id="cloud-map-transfer" hidden>
+<progress id="cloud-map-progress" max="1" aria-label="Chargement de la carte du salon" style="display:block;width:100%"></progress>
+<output id="cloud-map-eta"></output>
+</div>
 <output id="cloud-telemetry"></output>
 <button id="cloud-import" hidden>Charger le JSON du salon</button>
 <input id="cloud-map-file" type="file" accept=".json,application/json" hidden>

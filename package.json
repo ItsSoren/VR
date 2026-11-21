@@ -1,11 +1,11 @@
 {
   "name": "gorilla-lab",
   "private": true,
-  "version": "0.44.0",
+  "version": "0.45.0",
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test tests/core.test.js tests/lot1.test.js tests/lot2.test.js tests/lot3.test.js tests/lot4.test.js"
+    "test": "node --test tests/core.test.js tests/lot1.test.js tests/lot2.test.js tests/lot3.test.js tests/lot4.test.js tests/transfer-selection.test.js"
   },
   "engines": { "node": ">=20" },
   "dependencies": { "three": "0.180.0" },

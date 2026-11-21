@@ -517,10 +517,11 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     }catch(e){if(request===loadRequest)inform(e.message);}
   };
   // Une importation peut se terminer après un reset ou un autre import. Seule l’opération courante peut charger la carte.
-  async function fetchMap(value,httpsOnly){
+  async function fetchMap(value,httpsOnly,progress){
     const url=new URL(value,location.href);
     if(url.username||url.password||!(httpsOnly?url.protocol==='https:':['http:','https:'].includes(url.protocol)))
       throw Error(httpsOnly?'La carte du salon doit être accessible en HTTPS.':'Il faut une URL HTTP ou HTTPS.');
+    const start=performance.now();
     const response=await fetch(url,{credentials:'omit',referrerPolicy:'no-referrer'});
     if(!response.ok)throw Error('URL de map inaccessible ('+response.status+').');
     if(Number(response.headers.get('content-length'))>maxMapBytes)throw Error('Map trop lourde.');
@@ -531,6 +532,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
         const {done,value}=await reader.read();
         if(done)break;
         bytes+=value.byteLength;
+        progress?.({loaded:bytes,total:Number(response.headers.get('content-length')),seconds:(performance.now()-start)/1000});
         if(bytes>maxMapBytes){await reader.cancel();throw Error('Map trop lourde.');}
         contents+=decoder.decode(value,{stream:true});
       }
@@ -548,12 +550,12 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     }catch(e){if(request===loadRequest)inform(e.message);}
     return false;
   }
-  async function loadRoomMap(value,accepts){
+  async function loadRoomMap(value,accepts,progress){
     const request=++loadRequest;
     try{
       if(value instanceof Blob&&value.size>maxMapBytes)throw Error('Carte trop lourde.');
       const remote=value==='arena'?null:value instanceof Blob?parseMap(await value.text()):isEncodedRoomMap(value)?
-        parseMap(await decodeRoomMapLink(value,maxMapBytes)):(await fetchMap(value,true)).map;
+        parseMap(await decodeRoomMapLink(value,maxMapBytes)):(await fetchMap(value,true,progress)).map;
       if(request!==loadRequest)return false;
       if(!accepts(remote))return false;
       roomBase??={map,history:history.slice(),source:loadedSource};
