@@ -1974,4 +1974,8 @@ renderer.setAnimationLoop((time,frame)=>{
       refreshHz:renderer.xr.getSession()?.frameRate??null,targetFps:fpsGoal,supportedHz:refreshOptions.slice(),
       foveation:renderer.xr.getFoveation()??null,
       visualEffects:{post:useVrPost,bloom:useVrPost&&settings.bloom,rayTrace:useVrTrace},
-      eyeViewports:renderer.xr.getCamera().cameras.map(c=>({width:c.viewport?.z??null
+      eyeViewports:renderer.xr.getCamera().cameras.map(c=>({width:c.viewport?.z??null,height:c.viewport?.w??null})),
+    };
+    }
+  }
+});

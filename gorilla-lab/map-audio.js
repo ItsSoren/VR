@@ -181,4 +181,5 @@ export function createMapAudio(getContext){
   }
   return {setAssets,setZones,clear,update,impact,playSurface,preview,stopPreview,
     get diagnostics(){return {surfacesPlayed,ambientStarted,activeZones:voices.filter(v=>v.active>.01).length,
-      gains:voices.map(v=>v.active)};
+      gains:voices.map(v=>v.active)};}};
+}
