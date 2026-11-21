@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Atelier Gorilla Lab R41</title>
+<title>Atelier Gorilla Lab R42</title>
 <style>
   :root{color-scheme:dark;--page:#101b22;--panel:#192932;--border:#334b58;--text:#f5efdf;--muted:#b4cbd1;--accent:#ffda90;--field:#12232c}
   *{box-sizing:border-box}
@@ -337,7 +337,7 @@
 </head>
 <body>
   <header class="header">
-    <h1>Atelier des cartes <small style="font-size:11px;color:var(--muted)">Gorilla Lab R41</small></h1>
+    <h1>Atelier des cartes <small style="font-size:11px;color:var(--muted)">Gorilla Lab R42</small></h1>
     <a href="./">Retour au jeu</a>
     <a href="./model-editor.html" id="open-model-editor" title="Ouvrir GORILLA / FOUNDRY pour créer et modifier les modèles">✎ Atelier modèles</a>
     <div class="header-actions">
@@ -597,7 +597,7 @@
           <label>Diamètre apparent du soleil (°)<input data-env="sunDiameter" type="number" min=".1" max="12" step=".1"></label>
           <label>Portée des ombres (m, 0 = auto)<input data-env="shadowRange" type="number" min="0" max="160" step="1"></label>
           <label>Halo du soleil<input data-env="sunHalo" type="number" min="0" max="4" step=".1"></label>
-              <label>Rayons du soleil<input type="number" data-env="sunStarburst" min="0" max="2" step=".1"></label>
+              <label>Brillance HDR du disque<input type="number" data-env="sunRadiance" min=".1" max="100" step=".1"></label>
           <label>Intensité du soleil<input data-env="sunPower" type="number" min="0" max="12" step=".05"></label>
           <label>Lumière ambiante du ciel<input data-env="ambientColor" type="color"></label>
           <label>Lumière du sol<input data-env="groundColor" type="color"></label>
@@ -640,7 +640,7 @@
     <button data-context-action="focus">Cadrer</button>
     <button data-context-action="delete">Supprimer</button>
   </div>
-  <script defer src="./gorilla-editor-r39.js?v=R41"></script>
+  <script defer src="./gorilla-editor-r39.js?v=R42"></script>
 </body>
 </html>
 
