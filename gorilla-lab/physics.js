@@ -527,7 +527,7 @@ function frictionOf(body){
   return body.friction??body.spec?.friction??.78;
 }
 
-function resolveContact(a,b,box,depth,rebound){
+function resolveContact(a,b,box,depth,rebound,onImpact){
   const {body}=a;
   const other=b?.body;
   const friction=other?Math.sqrt(frictionOf(body)*frictionOf(other)):Math.min(frictionOf(body),box.friction??.78);
@@ -537,6 +537,7 @@ function resolveContact(a,b,box,depth,rebound){
   const inwardSpeed=relativeVelocity.dot(normal);
   let changed=false;
   if(inwardSpeed<-1e-5){
+    if(box?.sound&&-inwardSpeed>=box.sound.minImpact)onImpact?.(body,box.sound,contact,-inwardSpeed);
     const bounce=inwardSpeed<-.8?T.MathUtils.clamp(rebound*(box?.bounce??1)*(body.spec?.physics?.bounce??1)*(other?.spec?.physics?.bounce??1),0,.98):0;
     const impulse=-inwardSpeed*(1+bounce)/(impulseResponse(a,leverA,normal)+impulseResponse(b,leverB,normal));
     applyImpulse(a,leverA,normal,impulse);
@@ -633,7 +634,7 @@ function sweptBounds(body,dt,gravity){
 }
 function surfaceAtGravity(body){return body.sweepGravity??1;}
 
-export function solveObjects(objects,boxes,dt,gravity,rebound,surfaceAt) {
+export function solveObjects(objects,boxes,dt,gravity,rebound,surfaceAt,onImpact) {
   Object.assign(objectPhysicsStats,{substeps:0,active:0,free:0,sleeping:0});
   if(!Number.isFinite(dt)||dt<=0)return;
   const states=[], free=[], arena=boxes.map(box=>({box,bounds:boundsFor(box)}));
@@ -685,7 +686,7 @@ export function solveObjects(objects,boxes,dt,gravity,rebound,surfaceAt) {
         for(const {box,bounds} of arena){
           if(!overlapsArena(state.bounds,box,bounds))continue;
           const depth=shapeContact(state.body,box,normal,contact);
-          if(depth>0)changed=resolveContact(state,null,box,depth,rebound)||changed;
+          if(depth>0)changed=resolveContact(state,null,box,depth,rebound,onImpact)||changed;
         }
       }
       for(const state of states){state.sweepStart=state.bounds.min.x;state.sweepEnd=state.bounds.max.x;}

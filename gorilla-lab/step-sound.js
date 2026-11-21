@@ -48,12 +48,16 @@ export function createStepSound(){
       oscillator.start(time);oscillator.stop(time+interval);
     });
   }
-  function update({dt,inVR,hands,grounded,travel,volume,enabled}){
+  function update({dt,inVR,hands,grounded,travel,volume,enabled,surface,position,playSurface}){
     if(inVR){
       hands.forEach((hand,i)=>{
         handCooldown[i]=Math.max(0,handCooldown[i]-dt);
-        const contact=hand.valid&&hand.groundContact;
-        if(contact&&!previous[i]&&!handCooldown[i]&&enabled){play(volume);handCooldown[i]=.11;}
+        const contact=hand.valid&&(hand.groundContact||Boolean(hand.surface?.sound));
+        if(contact&&!previous[i]&&!handCooldown[i]&&enabled){
+          if(hand.surface?.sound)playSurface?.(hand.surface.sound,hand.target,volume/10);
+          else play(volume);
+          handCooldown[i]=hand.surface?.sound?.cooldown??.11;
+        }
         previous[i]=contact;
       });
       return;
@@ -61,7 +65,9 @@ export function createStepSound(){
     cooldown=Math.max(0,cooldown-dt);
     distance=grounded?distance+travel:0;
     if(grounded&&enabled&&cooldown===0&&(distance>=.64||!wasGrounded&&travel>.025)){
-      play(volume);distance=0;cooldown=.12;
+      if(surface?.sound)playSurface?.(surface.sound,position,volume/10);
+      else play(volume);
+      distance=0;cooldown=surface?.sound?.cooldown??.12;
     }
     wasGrounded=grounded;
   }
@@ -69,5 +75,5 @@ export function createStepSound(){
     distance=0;wasGrounded=false;cooldown=0;
     previous.fill(false);handCooldown.fill(0);
   }
-  return {unlock,play,playCue,update,reset,get count(){return count;},get state(){return context?.state??'locked';}};
+  return {unlock,play,playCue,update,reset,get context(){return context;},get count(){return count;},get state(){return context?.state??'locked';}};
 }

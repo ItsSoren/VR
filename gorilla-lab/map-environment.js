@@ -3,6 +3,7 @@ export const defaultEnvironment={
   preset:0,sky:'preset',rotation:0,skyTint:'#ffffff',skyColor:'#a6d4ea',skyImage:null,
   fog:true,fogColor:'#a6d4ea',fogNear:55,fogFar:135,
   azimuth:-131,elevation:50,sunColor:'#fff0d0',sunPower:3,sunDiameter:3.3,sunHalo:1,sunRadiance:7.5,shadowRange:0,
+  bloomRadius:.43,bloomThreshold:1.25,bloomSoftness:.01,bloomResolution:.64,
   ambientColor:'#daeaff',groundColor:'#88724c',ambientPower:2.25,
 };
 const presets=[
@@ -34,6 +35,10 @@ export function normalizeEnvironment(value){
     sunColor:color(value.sunColor,defaults.sunColor),sunPower:number(value.sunPower,0,12,defaults.sunPower),
     sunDiameter:number(value.sunDiameter,.1,12,defaults.sunDiameter),sunHalo:number(value.sunHalo,0,4,defaults.sunHalo),
     sunRadiance:number(value.sunRadiance,.1,100,Math.max(1,number(value.sunPower,0,12,defaults.sunPower)*2.5)),
+    bloomRadius:number(value.bloomRadius,0,1,defaults.bloomRadius),
+    bloomThreshold:number(value.bloomThreshold,.01,12,defaults.bloomThreshold),
+    bloomSoftness:number(value.bloomSoftness,.001,2,defaults.bloomSoftness),
+    bloomResolution:number(value.bloomResolution,.25,1,defaults.bloomResolution),
     shadowRange:number(value.shadowRange,0,160,defaults.shadowRange),
     ambientColor:color(value.ambientColor,defaults.ambientColor),groundColor:color(value.groundColor,defaults.groundColor),
     ambientPower:number(value.ambientPower,0,12,defaults.ambientPower),

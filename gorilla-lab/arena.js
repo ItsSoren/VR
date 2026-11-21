@@ -395,5 +395,8 @@ export function buildArena(scene,renderer) {
     skyQuality=level>=2;
     setTimeOfDay(mood);
   }
-  return {boxes,floors,probe,display,visual,shadow,setTimeOfDay,setEnvironment,centerSky,setRetroSky(value){if(retro!==value){retro=value;setTimeOfDay(mood);}},sunDirection:()=>direction.clone(),centerShadows,lighting:[ambient,sun,sun.target,disk],sunDisk:disk,get bloomAmount(){return (environment??environmentPreset(mood)).sunHalo*.19;},get skyLoading(){return skyLoading;},get hillSeed(){return hillSeed;},setHillSeed,bakeLightmap,mapMaterial:(i,level)=>level>=4?tiles[i]:alt[i],builtObjects:[...boxes.map(b=>b.mesh).filter(m=>m?.isObject3D),probe,...props],materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
+  return {boxes,floors,probe,display,visual,shadow,setTimeOfDay,setEnvironment,centerSky,setRetroSky(value){if(retro!==value){retro=value;setTimeOfDay(mood);}},sunDirection:()=>direction.clone(),centerShadows,lighting:[ambient,sun,sun.target,disk],sunDisk:disk,get bloomProfile(){
+    const light=environment??environmentPreset(mood);
+    return {strength:light.sunHalo*.19,radius:light.bloomRadius,threshold:light.bloomThreshold,
+      softness:light.bloomSoftness,resolution:light.bloomResolution};},get skyLoading(){return skyLoading;},get hillSeed(){return hillSeed;},setHillSeed,bakeLightmap,mapMaterial:(i,level)=>level>=4?tiles[i]:alt[i],builtObjects:[...boxes.map(b=>b.mesh).filter(m=>m?.isObject3D),probe,...props],materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
 }

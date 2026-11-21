@@ -7,7 +7,7 @@ export function createSettings(mobileScreen){
     size:5, arms:5, bounce:4,
     throw:5, preciseHitboxes:true, movement:true,
     collisions:true, objects:true, body:true,
-    hands:true, stepAudio:true, stepVolume:5,
+    hands:true, stepAudio:true, stepVolume:5, ambienceAudio:true, ambienceVolume:7,
     // Diagnostic overlays are off in normal play.
     debugScene:true, debugObjects:true, debugMesh:false, debugRange:6, debugBudget:5,
     debugPalm:false, debugHitboxes:false, debugInvisible:false, debugForces:false, debugBody:false, debugSpeed:1,

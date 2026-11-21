@@ -361,11 +361,14 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     for(const [index,piece] of nodes.entries()){
       const row=makeRow(piece,index);
       meshRows.push(row);
+      if(piece.surfaceSound){
+        for(const collider of row.colliders??[row.collider])collider.sound=piece.surfaceSound;
+      }
       if(piece.flight){row.mesh.castShadow=false;flights.push({mesh:row.mesh,piece});}
       if(row.hinges)hingeRows.push(row);
       for(const box of terrainInstanceBoxes(piece,row.vegetation)){
         instanceColliders.push({...box,min:box.half.clone().negate(),shape:boxCollider(box.half),
-          friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:false,type:piece.material});
+          friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,sound:piece.surfaceSound,zone:false,type:piece.material});
       }
     }
     for(const row of meshRows)if(row.mesh.userData.mirrorSize)mirrorRows.push(row);
@@ -602,7 +605,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   document.querySelector('#map-load-url').onclick=()=>loadURL(url.value);
   document.querySelector('#map-export').onclick=save;
   document.querySelector('#map-reset').onclick=reset;
-  return {get boundary(){return map?.boundary??null;},updateFlights,checkTriggers,interactReaction,updateHinges,interactHinge,receiveHingeRequest,hingeSnapshot,receiveHinges,get worldLimits(){return worldLimits;},placedModels:()=>map?.pieces.filter(p=>p.model?.kind==='prop')??[],modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,loadRoomMap,leaveRoomMap,roomMapSource,reset,blank,undo,save,edit,recenter,inform,
+  return {get soundZones(){return map?.soundZones;},get soundAssets(){return map?.soundAssets;},get boundary(){return map?.boundary??null;},updateFlights,checkTriggers,interactReaction,updateHinges,interactHinge,receiveHingeRequest,hingeSnapshot,receiveHinges,get worldLimits(){return worldLimits;},placedModels:()=>map?.pieces.filter(p=>p.model?.kind==='prop')??[],modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,loadRoomMap,leaveRoomMap,roomMapSource,reset,blank,undo,save,edit,recenter,inform,
     mirrors:()=>mirrorRows,
     get usesBuiltInMirror(){return !map||map.arenaBase&&!map.editableArena&&!map.pieces.some(piece=>piece.sceneryId==='lab-mirror');},
     clearGhost(){ghost.visible=false;},get active(){return Boolean(map);},get builtIn(){return !map||map.arenaBase===true;},get assetLayer(){return map?.assetLayer===true;},
