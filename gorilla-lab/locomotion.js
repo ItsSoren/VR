@@ -259,9 +259,9 @@ export class GorillaLocomotion {
 
     // Wait for a second direction sample before firing from a planted hand.
     // A hand that is already leaving the surface can release immediately.
-    const firmGroundPush = moving && sample.distance.y > 8 * this.inputDt &&
-      this.hands.some(({hand}) => hand.groundContact);
-    if (hasContact && !this.released && !firmGroundPush && this.pushDuration < MIN_PUSH_SECONDS) return result;
+    const groundPush = moving && this.hands.some(({hand}) => hand.groundContact);
+    const firmGroundPush = groundPush && sample.distance.y > 8 * this.inputDt;
+    if (groundPush && !this.released && !firmGroundPush && this.pushDuration < MIN_PUSH_SECONDS) return result;
 
     // A launch cannot point back into the surfaces that produced it.
     for (let pass = 0; pass < 2; pass++) {
