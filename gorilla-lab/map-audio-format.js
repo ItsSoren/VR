@@ -3,7 +3,7 @@ export const surfaceSounds={
   grating:'Grille métallique',glass:'Verre épais',ceramic:'Plaques céramiques',rubber:'Caoutchouc',
   gravel:'Gravillons',panel:'Panneau composite',
 };
-export const ambientSounds={district:'Ventilation urbaine',reactor:'Réacteurs et relais'};
+export const ambientSounds={district:'Ventilation urbaine',reactor:'Réacteurs et relais',traffic:'Circulation urbaine'};
 export const maxSoundAssets=12,maxSoundAssetLength=600_000,maxSoundZones=48;
 const assetId=/^audio-[a-z0-9-]{1,64}$/i;
 const audioData=/^data:audio\/(?:wav|wave|x-wav|mpeg|mp3|ogg|webm|mp4|aac|flac|x-flac);base64,[a-z0-9+/]+={0,2}$/i;

@@ -12,6 +12,7 @@ import {readModelPack,modelStorageKey,normalizeModelPack,createModelUnitGeometry
 import {createBuiltinModelTemplates,spawnAssetIds} from './model-assets.js';
 import {normalizeTerrain,normalizeTerrainRule,maxTerrainRules,maxTerrainDensity,maxTerrainPropSize,maxTerrainRuleColors,maxTerrainSizeVariation,terrainQuarterYaw,terrainSeam,stitchTerrain,resizeTerrain,sculptTerrain,terrainGeometry,updateTerrainGeometry,applyTerrainProjection,terrainVegetation,disposeVegetation} from './terrain-edit.js';
 import {openTextureStudio} from './texture-studio.js';
+import {createTrafficEditor} from './editor-traffic.js';
 import {createAudioEditor} from './editor-audio.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import {resizedCenter,scaleHandleSigns} from './editor-scale.js';
@@ -80,7 +81,7 @@ const toolHelp = {
   spawn: 'Déplace l’anneau avec les flèches ou clique sur une surface pour placer le départ.',
   model: 'Choisis un modèle dans la bibliothèque, puis clique dans la vue 3D ou sur le plan pour le poser.',
 };
-let map, selected = -1, tool = 'move', gesture = null, ghost = null, audioEditor;
+let map, selected = -1, tool = 'move', gesture = null, ghost = null, audioEditor, trafficEditor;
 let pieceMeshStats=[],sceneMeshStats=null;
 const editorEvents=[];
 function editorTrace(event,details={},level='info'){
@@ -300,7 +301,7 @@ function buildWorkspaceShell(){
   const tabs=make('nav','inspector-tabs');
   tabs.setAttribute('aria-label','Propriétés');
   const specs=[['object','Modéliser'],['terrain','Terrain'],['material','Texturer'],['props','Props'],['collision','Collisions'],
-    ['behavior','Physique'],['audio','Audio'],['scene','Scène'],['publish','Jouer / Exporter']];
+    ['behavior','Physique'],['audio','Audio'],['traffic','Circulation'],['scene','Scène'],['publish','Jouer / Exporter']];
   for(const [key,label] of specs){
     const button=make('button','inspector-tab',label);
     button.type='button';
@@ -336,7 +337,8 @@ function buildWorkspaceShell(){
     publish.append(make('h3','',title),actions);
   }
   const audio=make('section');audio.id='audio-options';
-  content.append(objectSection,collision,behavior,audio,publish);
+  const traffic=make('section');traffic.id='traffic-options';
+  content.append(objectSection,collision,behavior,audio,traffic,publish);
   const sceneOptions=make('section','scene-options');
   sceneOptions.id='scene-options';
   sceneOptions.append(make('h2','','Paramètres de carte'));
@@ -361,6 +363,7 @@ function buildWorkspaceShell(){
     if(tab==='terrain')$('terrain-controls').open=true;
     if(tab==='material')surfaceControls.open=true;
     audioEditor?.setVisible(tab==='audio');
+    trafficEditor?.setVisible(tab==='traffic');
     content.scrollTop=0;
   };
   for(const button of tabs.querySelectorAll('button'))button.addEventListener('click',()=>setTab(button.dataset.tab));
@@ -386,6 +389,8 @@ controls.maxPolarAngle = Math.PI - .035;
 
 const scene = new T.Scene();
 audioEditor=createAudioEditor({container:$('audio-options'),scene,getMap:()=>map,getPiece:current,
+  getCenter:()=>controls.target.toArray(),remember,save:pendingSave,render:queueRender});
+trafficEditor=createTrafficEditor({container:$('traffic-options'),scene,getMap:()=>map,getPiece:current,
   getCenter:()=>controls.target.toArray(),remember,save:pendingSave,render:queueRender});
 const neutralBackground=new T.Color('#8fb6c6');
 scene.background = neutralBackground;
@@ -572,6 +577,7 @@ function queueRender() {
   renderRequested = true;
   requestAnimationFrame(time => {
     renderRequested = false;
+    const animateTraffic=trafficEditor.update(time);
     const interval=time-previousEditorFrame;
     previousEditorFrame=time;
     if(interval<125)editorFps=T.MathUtils.lerp(editorFps,1000/Math.max(10,interval),.17);
@@ -587,7 +593,7 @@ function queueRender() {
     if(!previewBloom.render(scene,camera,$('environment-bloom-preview').checked&&previewArena.sunDisk.visible?previewArena.bloomProfile:null))renderer.render(scene,camera);
     const elapsed=performance.now()-started;
     if(elapsed>25)editorFps=Math.min(editorFps,1000/elapsed);
-    if(Math.abs(camera.far-desired)>3)queueRender();
+    if(animateTraffic||Math.abs(camera.far-desired)>3)queueRender();
     updateDebugStats();
   });
 }
@@ -1138,6 +1144,7 @@ function updateInspector() {
   document.querySelector('.inspector-tab[data-tab="behavior"]').disabled=!piece;
   for(const name of ['terrain','props'])document.querySelector('.inspector-tab[data-tab="'+name+'"]').disabled=!terrain;
   audioEditor.refresh();
+  trafficEditor.refresh();
 }
 
 function applyEnvironmentPreview(){

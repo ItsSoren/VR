@@ -56,7 +56,11 @@ function makeAmbience(context,id,variant){
       const hum=Math.sin(t*tau*(city?53:47)+Math.sin(t*.22+phase)*.35)*.103
         +Math.sin(t*tau*(city?106.5:71.7)+Math.sin(t*.17+phase*1.43)*.38)*.057;
       const call=Math.sin(t*tau*(city?201:143)+Math.sin(t*1.4+phase)*1.3)*pulse*.054;
-      data[i]=(hum*(city?.66:1)+wind*1.30+air*(city?.27:.13)+call)*flutter*Math.min(1,i/180,(data.length-i)/180);
+      const cycle=(t+(side?1.7:.3)+variant*.89)%4.2-.1;
+      const sweep=Math.exp(-((cycle-2.05)**2)*2.1);
+      const motor=Math.sin(tau*(155*t+22*Math.sin(t*.47+phase)))+.32*Math.sin(tau*(331*t+16*Math.sin(t*.58)));
+      const street=wind*.95+air*.19+sweep*(motor*.11+air*.6);
+      data[i]=(id==='traffic'?street:(hum*(city?.66:1)+wind*1.30+air*(city?.27:.13)+call))*flutter*Math.min(1,i/180,(data.length-i)/180);
     }
   }
   return result;

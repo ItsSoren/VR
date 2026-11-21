@@ -1,4 +1,5 @@
 import {normalizeSoundAssets,normalizeSoundZones,normalizeSurfaceSound} from './map-audio-format.js';
+import {normalizeTraffic} from './traffic-format.js';
 import {Euler,Vector3} from 'three';
 import {normalizeEnvironment} from './map-environment.js';
 import {labSpawn} from './lab-layout.js';
@@ -34,12 +35,14 @@ export function parseMap(input){
   }
   const s=input.spawn??{},boundary=input.boundary,environment=normalizeEnvironment(input.environment);
   const soundZones=normalizeSoundZones(input.soundZones),soundAssets=normalizeSoundAssets(input.soundAssets);
+  const traffic=normalizeTraffic(input.traffic);
   const pieces=input.pieces.filter(piece=>
     !isRetiredArenaAsset(piece?.sceneryId)&&!isRetiredArenaModel(piece?.model));
   return {
     format:'gorilla-lab-map',version:1,...(input.arenaBase===true?{arenaBase:true}:{}),...(input.assetLayer===true?{assetLayer:true}:{}),...(input.editableArena===true?{editableArena:true}:{}),name:text(input.name,56,'Ma map'),
     worldSize:number(input.worldSize,24,2048,240),
     ...(environment?{environment}:{}),
+    ...(traffic.length?{traffic}:{}),
     ...(soundZones.length?{soundZones}:{}),...(soundAssets.length?{soundAssets}:{}),
     ...(boundary?.diameter>0?{boundary:{diameter:number(boundary.diameter,12,2048,650),ceiling:number(boundary.ceiling,3,256,128)}}:{}),
     spawn:{x:number(s.x,-maxWorldReach,maxWorldReach,0),y:number(s.y,-maxWorldHeight,maxWorldHeight,.06),z:number(s.z,-maxWorldReach,maxWorldReach,3),yaw:number(s.yaw,-360,360,0)},

@@ -1,5 +1,6 @@
 import {encodeRoomMapLink,decodeRoomMapLink,isEncodedRoomMap} from './room-map-link.js';
 
+import {createTraffic} from './traffic.js';
 import {clearLocalMap,writeLocalMap} from './map-storage.js';
 import * as T from 'three';
 import {shouldKeepArenaAsset} from './arena-map-pieces.js';
@@ -15,6 +16,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   const builtBoxes=arena.boxes.slice();
   const replaceableMeshes=new Set(builtBoxes.filter(box=>box.half&&box.mesh?.isObject3D).map(box=>box.mesh));
   const group=new T.Group();scene.add(group);
+  const traffic=createTraffic(scene);
   const meshRows=[],hingeRows=[],mirrorRows=[],history=[],triggerRows=[];
   const hingeById=new Map();
   let insideTriggers=new Set();
@@ -335,6 +337,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   }
   const flights=[];
   function updateFlights(time){
+    traffic.update(time);
     for(const {mesh,piece:{x,y,z,yaw,flight}} of flights){
       const angle=time/flight.seconds*Math.PI*2+T.MathUtils.degToRad(flight.phase);
       const sin=Math.sin(angle),cos=Math.cos(angle);
@@ -349,6 +352,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     meshRows.length=hingeRows.length=0;hingeById.clear();
     flights.length=0;mirrorRows.length=0;triggerRows.length=0;insideTriggers.clear();hasUseReaction=false;
     const nodes=map?.pieces??[];
+    traffic.set(map?.traffic);
     signature=map?'custom-'+mapCode(JSON.stringify(map)):'';
     // Asset-backed map pieces replace their matching built-in fixture instead of stacking on it.
     const mappedAssets=new Set(nodes.map(piece=>piece.model?.assetId).filter(Boolean));
@@ -605,7 +609,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   document.querySelector('#map-load-url').onclick=()=>loadURL(url.value);
   document.querySelector('#map-export').onclick=save;
   document.querySelector('#map-reset').onclick=reset;
-  return {get soundZones(){return map?.soundZones;},get soundAssets(){return map?.soundAssets;},get boundary(){return map?.boundary??null;},updateFlights,checkTriggers,interactReaction,updateHinges,interactHinge,receiveHingeRequest,hingeSnapshot,receiveHinges,get worldLimits(){return worldLimits;},placedModels:()=>map?.pieces.filter(p=>p.model?.kind==='prop')??[],modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,loadRoomMap,leaveRoomMap,roomMapSource,reset,blank,undo,save,edit,recenter,inform,
+  return {get trafficCount(){return traffic.count;},get soundZones(){return map?.soundZones;},get soundAssets(){return map?.soundAssets;},get boundary(){return map?.boundary??null;},updateFlights,checkTriggers,interactReaction,updateHinges,interactHinge,receiveHingeRequest,hingeSnapshot,receiveHinges,get worldLimits(){return worldLimits;},placedModels:()=>map?.pieces.filter(p=>p.model?.kind==='prop')??[],modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,loadRoomMap,leaveRoomMap,roomMapSource,reset,blank,undo,save,edit,recenter,inform,
     mirrors:()=>mirrorRows,
     get usesBuiltInMirror(){return !map||map.arenaBase&&!map.editableArena&&!map.pieces.some(piece=>piece.sceneryId==='lab-mirror');},
     clearGhost(){ghost.visible=false;},get active(){return Boolean(map);},get builtIn(){return !map||map.arenaBase===true;},get assetLayer(){return map?.assetLayer===true;},
