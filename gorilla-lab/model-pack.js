@@ -16,8 +16,9 @@ export function normalizePartReaction(value,zone){
   const door=typeof value.door==='string'&&actionIdPattern.test(value.door)?value.door:null;
   const light=typeof value.light==='string'&&actionIdPattern.test(value.light)?value.light:null;
   const sound=Object.hasOwn(actionSounds,value.sound)?value.sound:null;
-  if(!(door||light||sound))return null;
-  return {phase,...(door?{door,doorState:['open','close','toggle'].includes(value.doorState)||zone==='trigger'&&value.doorState==='hold'?value.doorState:'open'}:{}),
+  const receiver=phase==='use'&&identifier.test(value.receiver??'')?value.receiver:null;
+  if(!(door||light||sound||receiver))return null;
+  return {phase,...(receiver?{receiver}:{}),...(door?{door,doorState:['open','close','toggle'].includes(value.doorState)||zone==='trigger'&&value.doorState==='hold'?value.doorState:'open'}:{}),
     ...(door&&zone==='trigger'&&value.doorState==='hold'?{doorDelay:number(value.doorDelay,.25,10,1.25)}:{}),
     ...(light?{light,lightState:['on','off','toggle'].includes(value.lightState)?value.lightState:'on',
       lightColor:colorPattern.test(value.lightColor??'')?value.lightColor:'#ffbd54'}:{}),
@@ -31,7 +32,7 @@ export const modelShapes = Object.freeze({
   torus: 'Anneau', capsule: 'Capsule', tetrahedron:'Tétraèdre régulier', diamond: 'Diamant',custom:'Forme libre',asset:'Asset du jeu',
 });
 export const modelSurfaces = Object.freeze({
-  plain: 'Uni', grid: 'Grille', stripes: 'Rayures', wood: 'Bois', speckle: 'Minéral',
+  plain: 'Uni', grid: 'Grille', stripes: 'Rayures', wood: 'Bois', windows:'Façade éclairée', concrete:'Béton strié', ceramic:'Plaques céramiques', speckle: 'Minéral',
 });
 export const modelFinishes=Object.freeze({
   original:{label:'Standard',roughness:.68,metalness:0},
@@ -176,6 +177,12 @@ function textureTone(surface, x, y) {
     case 'grid': return x % 16 < 2 || y % 16 < 2 ? 135 : 255;
     case 'stripes': return (x + y) % 16 < 6 ? 155 : 255;
     case 'wood': return 204 + 24 * Math.sin(y * .75 + Math.sin(x * .13)) + 27 * grain;
+    case 'windows': {
+      const seam=x%8<2||y%8<4||y%8===7;
+      return seam?100+19*grain:158+32*grain;
+    }
+    case 'concrete': return 170+36*grain+(x%8===0?-16:9);
+    case 'ceramic': return x%16===0||y%16===0?145:197+33*grain;
     case 'speckle': return grain > .88 ? 130 : 207 + 48 * grain;
     default: return 255;
   }
@@ -205,6 +212,22 @@ function surfaceAtlas() {
 }
 
 const repeatTextures=new Map();
+let windowLights;
+function facadeLights(){
+  if(windowLights)return windowLights;
+  const data=new Uint8Array(tileSize**2*4);
+  for(let y=0;y<tileSize;y++)for(let x=0;x<tileSize;x++){
+    const cellX=x>>3,cellY=y>>3,code=(cellX*13+cellY*17+cellX*cellY*7)%37;
+    const on=code>13&&x%8>=2&&x%8<=6&&y%8>=4&&y%8<=6;
+    data.set(on?(code%5<3?[184,129,60,255]:[97,158,182,255]):[0,0,0,255],(y*tileSize+x)*4);
+  }
+  windowLights=new T.DataTexture(data,tileSize,tileSize);
+  windowLights.colorSpace=T.SRGBColorSpace;
+  windowLights.wrapS=windowLights.wrapT=T.RepeatWrapping;
+  windowLights.magFilter=T.LinearFilter;windowLights.minFilter=T.LinearMipmapLinearFilter;
+  windowLights.generateMipmaps=true;windowLights.needsUpdate=true;
+  return windowLights;
+}
 function repeatedSurface(surface){
   if(repeatTextures.has(surface))return repeatTextures.get(surface);
   const data=new Uint8Array(tileSize*tileSize*4);
@@ -222,7 +245,7 @@ function repeatedSurface(surface){
   return texture;
 }
 export function modelPartOwnMaterial(part){
-  return Boolean(part?.effect||part?.texture||part?.uv||part?.shape==='asset'||part?.finish&&part.finish!=='original');
+  return Boolean(part?.effect||part?.texture||part?.uv||part?.surface==='windows'||part?.shape==='asset'||part?.finish&&part.finish!=='original');
 }
 
 function projectModelUv(geometry,part,metricScale){
@@ -271,7 +294,7 @@ export function createModelPartGeometry(part,metricScale=new T.Vector3(...part.s
       colors[index*3+1]=sourceColors.getY(index)*tint.g;
       colors[index*3+2]=sourceColors.getZ(index)*tint.b;
     }else tint.toArray(colors,index*3);
-    if(part.shape!=='asset'&&!part.texture&&!part.uv)uv.setXY(index, (column + .05 + uv.getX(index) * .90) / atlasColumns,
+    if(part.shape!=='asset'&&!part.texture&&!part.uv&&part.surface!=='windows')uv.setXY(index, (column + .05 + uv.getX(index) * .90) / atlasColumns,
       (row + .05 + uv.getY(index) * .90) / atlasRows);
   }
   geometry.setAttribute('color', new T.BufferAttribute(colors, 3));
@@ -300,6 +323,9 @@ function createBasePartMaterial(part){
     return material;
   }
   const {roughness,metalness}=finish??modelFinishes.original;
+  if(part?.surface==='windows'&&!part.texture)
+    return new T.MeshStandardMaterial({vertexColors:true,map:repeatedSurface('windows'),
+      emissive:'#ffffff',emissiveMap:facadeLights(),emissiveIntensity:1.3,roughness,metalness});
   if(!part?.texture)return new T.MeshStandardMaterial({vertexColors:true,map:part?.uv?repeatedSurface(part.surface):surfaceAtlas(),roughness,metalness});
   const texture=new T.TextureLoader().load(part.texture);
   texture.colorSpace=T.SRGBColorSpace;

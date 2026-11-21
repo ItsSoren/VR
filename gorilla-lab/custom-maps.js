@@ -193,12 +193,24 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     }
     return reaction.sound?{cue:{name:reaction.sound,volume:reaction.soundVolume,at:position.toArray()}}:door||light?.originalEmission?{}:null;
   }
-  function interactReaction(origin,direction,ownsDoors){
+  function interactReaction(origin,direction,ownsDoors,held,dock){
     if(!hasUseReaction)return null;
     const hit=pickPiece(origin,direction),source=hit?.object.userData.reaction;
     if(!source)return null;
-    const reaction=performReaction(source.row,source.part.reaction,hit.point,ownsDoors);
-    return reaction?{phase:'use',part:source.part.name,...reaction}:null;
+    const config=source.part.reaction;
+    if(config.receiver){
+      if(!dock)return {phase:'use',notice:'Le raccordement de la batterie se fait en solo.'};
+      const socket=source.row;
+      if(socket.battery&&!socket.battery.frozen)socket.battery=null;
+      if(socket.battery)return {phase:'use',notice:'Station alimentée.'};
+      if(held?.spec.id!==config.receiver)return {phase:'use',notice:'Prends le module de réserve, puis vise le logement et appuie sur E.'};
+      socket.battery=held;
+      hit.object.geometry.computeBoundingBox();
+      const position=hit.object.localToWorld(hit.object.geometry.boundingBox.getCenter(new T.Vector3()));
+      dock(held,position,source.row.mesh.quaternion);
+    }
+    const reaction=performReaction(source.row,config,hit.point,ownsDoors);
+    return reaction?{phase:'use',part:source.part.name,...(config.receiver?{notice:'Batterie raccordée : circuit alimenté.'}:{}),...reaction}:null;
   }
   function toggleHinge(hinge,online){
     if(online&&hingeById.size>maxSyncedHinges)return 'Trop de portes à synchroniser sur cette carte.';
@@ -288,6 +300,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
         material.customProgramCacheKey=base.customProgramCacheKey;custom=true;
       }
       material.side=T.DoubleSide;
+      if(piece.terrain.projection==='regolith')material.flatShading=false;
       applyTerrainProjection(material,piece);
     }
     const geometry=piece.terrain?terrainGeometry(piece):piece.primitive==='ramp'?rampGeometry(piece.w,piece.h,piece.d):piece.primitive&&piece.primitive!=='box'
@@ -304,6 +317,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     const collider={mesh,position:mesh.position,quaternion:mesh.quaternion,half,min:half.clone().negate(),
       convex:piece.primitive==='ramp',shape:piece.primitive==='ramp'?colliderFor(geometry):boxCollider(half),friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:true,type:piece.material};
     if(!piece.terrain)return {mesh,collider,custom,ownTexture};
+    if(piece.terrain.projection==='regolith')mesh.castShadow=false;
     const vegetation=terrainVegetation(piece);
     if(vegetation)mesh.add(vegetation);
     return {mesh,collider:terrainCollider(piece,mesh),custom,ownTexture,vegetation};
@@ -319,12 +333,21 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
       }
     }
   }
+  const flights=[];
+  function updateFlights(time){
+    for(const {mesh,piece:{x,y,z,yaw,flight}} of flights){
+      const angle=time/flight.seconds*Math.PI*2+T.MathUtils.degToRad(flight.phase);
+      const sin=Math.sin(angle),cos=Math.cos(angle);
+      mesh.position.set(x+flight.x*cos,y+flight.rise*Math.sin(angle*2),z+flight.z*sin);
+      mesh.rotation.y=T.MathUtils.degToRad(yaw)+Math.atan2(flight.x*sin,-flight.z*cos);
+    }
+  }
   let worldLimits=null;
   const worldBox=new T.Box3(),pieceBox=new T.Box3();
   function rebuild(){
     for(const row of meshRows)removeRow(row);
     meshRows.length=hingeRows.length=0;hingeById.clear();
-    mirrorRows.length=0;triggerRows.length=0;insideTriggers.clear();hasUseReaction=false;
+    flights.length=0;mirrorRows.length=0;triggerRows.length=0;insideTriggers.clear();hasUseReaction=false;
     const nodes=map?.pieces??[];
     signature=map?'custom-'+mapCode(JSON.stringify(map)):'';
     // Asset-backed map pieces replace their matching built-in fixture instead of stacking on it.
@@ -338,6 +361,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     for(const [index,piece] of nodes.entries()){
       const row=makeRow(piece,index);
       meshRows.push(row);
+      if(piece.flight){row.mesh.castShadow=false;flights.push({mesh:row.mesh,piece});}
       if(row.hinges)hingeRows.push(row);
       for(const box of terrainInstanceBoxes(piece,row.vegetation)){
         instanceColliders.push({...box,min:box.half.clone().negate(),shape:boxCollider(box.half),
@@ -578,7 +602,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   document.querySelector('#map-load-url').onclick=()=>loadURL(url.value);
   document.querySelector('#map-export').onclick=save;
   document.querySelector('#map-reset').onclick=reset;
-  return {checkTriggers,interactReaction,updateHinges,interactHinge,receiveHingeRequest,hingeSnapshot,receiveHinges,get worldLimits(){return worldLimits;},placedModels:()=>map?.pieces.filter(p=>p.model?.kind==='prop')??[],modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,loadRoomMap,leaveRoomMap,roomMapSource,reset,blank,undo,save,edit,recenter,inform,
+  return {get boundary(){return map?.boundary??null;},updateFlights,checkTriggers,interactReaction,updateHinges,interactHinge,receiveHingeRequest,hingeSnapshot,receiveHinges,get worldLimits(){return worldLimits;},placedModels:()=>map?.pieces.filter(p=>p.model?.kind==='prop')??[],modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,loadRoomMap,leaveRoomMap,roomMapSource,reset,blank,undo,save,edit,recenter,inform,
     mirrors:()=>mirrorRows,
     get usesBuiltInMirror(){return !map||map.arenaBase&&!map.editableArena&&!map.pieces.some(piece=>piece.sceneryId==='lab-mirror');},
     clearGhost(){ghost.visible=false;},get active(){return Boolean(map);},get builtIn(){return !map||map.arenaBase===true;},get assetLayer(){return map?.assetLayer===true;},

@@ -14,8 +14,15 @@ export const maxPieces=512;
 export const maxWorldReach=1024;
 export const maxWorldHeight=20_000;
 export const maxObjectSize=512;
+export const maxTerrainSize=1024;
 const number=(value,min,max,fallback)=>typeof value==='number'&&Number.isFinite(value)?Math.max(min,Math.min(max,value)):fallback;
 const text=(value,length,fallback)=>typeof value==='string'&&value.trim()?value.trim().slice(0,length):fallback;
+function normalizeFlight(value){
+  if(!value||!Number.isFinite(value.seconds)||!(value.x>0||value.z>0))return null;
+  return {x:number(value.x,0,640,0),z:number(value.z,0,640,0),
+    seconds:number(value.seconds,10,900,90),phase:number(value.phase,-360,360,0),rise:number(value.rise,0,100,0)};
+}
+
 export function parseMap(input){
   if(typeof input==='string'){
     if(new TextEncoder().encode(input).length>maxMapBytes)throw Error('Cette map dépasse 16 Mo.');
@@ -24,17 +31,20 @@ export function parseMap(input){
   if(input?.format!=='gorilla-lab-map'||input.version!==1||!Array.isArray(input.pieces)||input.pieces.length>maxPieces) {
     throw Error('Choisis une map Gorilla Lab v1 avec 0 à '+maxPieces+' pièces.');
   }
-  const s=input.spawn??{},environment=normalizeEnvironment(input.environment);
+  const s=input.spawn??{},boundary=input.boundary,environment=normalizeEnvironment(input.environment);
   const pieces=input.pieces.filter(piece=>
     !isRetiredArenaAsset(piece?.sceneryId)&&!isRetiredArenaModel(piece?.model));
   return {
     format:'gorilla-lab-map',version:1,...(input.arenaBase===true?{arenaBase:true}:{}),...(input.assetLayer===true?{assetLayer:true}:{}),...(input.editableArena===true?{editableArena:true}:{}),name:text(input.name,56,'Ma map'),
     worldSize:number(input.worldSize,24,2048,240),
     ...(environment?{environment}:{}),
+    ...(boundary?.diameter>0?{boundary:{diameter:number(boundary.diameter,12,2048,650),ceiling:number(boundary.ceiling,3,256,128)}}:{}),
     spawn:{x:number(s.x,-maxWorldReach,maxWorldReach,0),y:number(s.y,-maxWorldHeight,maxWorldHeight,.06),z:number(s.z,-maxWorldReach,maxWorldReach,3),yaw:number(s.yaw,-360,360,0)},
     pieces:pieces.map((p,i)=>{
       if(!p||typeof p!=='object')throw Error('Pièce invalide : '+(i+1));
-      const w=number(p.w,.05,maxObjectSize,3),d=number(p.d,.05,maxObjectSize,3);
+      const limit=p.terrain?maxTerrainSize:maxObjectSize;
+      const w=number(p.w,.05,limit,3),d=number(p.d,.05,limit,3);
+      const flight=p.solid===false?normalizeFlight(p.flight):null;
       const terrain=p.terrain&&typeof p.terrain==='object'?normalizeTerrain(p.terrain,w*d):null;
       const model=p.model ? normalizeModelPack({version:1,models:[p.model]}).models[0] : null;
       if(model && !model.parts.length)throw Error('Le modèle doit contenir au moins une forme.');
@@ -45,6 +55,7 @@ export function parseMap(input){
         w,h:number(p.h,.05,256,.5),d,
         pitch:terrain?0:number(p.pitch,-180,180,0),yaw:terrain?terrainQuarterYaw(number(p.yaw,-360,360,0)):number(p.yaw,-360,360,0),roll:terrain?0:number(p.roll,-180,180,0),
         ...(terrain?{terrain}:{}),
+        ...(flight?{flight}:{}),
         ...(model?{model}:{}),
         primitive:['sphere','cylinder','cone','torus','capsule','ramp'].includes(p.primitive)?p.primitive:'box',
         uvScale:number(p.uvScale,.05,100,1),uvOffsetX:number(p.uvOffsetX,-100,100,0),

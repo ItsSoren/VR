@@ -96,7 +96,7 @@ const delta=new T.Vector3(), worldHead=new T.Vector3(), rotated=new T.Vector3(),
 const point=new T.Vector3(), prior=new T.Vector3(), candidate=new T.Vector3(), scratch=new T.Vector3();
 const priorPlayer=new T.Vector3(),appliedMove=new T.Vector3(),previousHead=new T.Vector3(),playerNormal=new T.Vector3();
 const HEAD_RADIUS=.105,bodyCollisionBack=new T.Vector3();
-let hasPreviousHead=false,grounded=false;
+let hasPreviousHead=false,grounded=false,jumpBuffer=0;
 
 let launchCount=0,lastLaunch=null;
 let refreshOptions=[],fpsGoal=100;
@@ -229,7 +229,7 @@ function makePropMesh(type,ownMaterial=false){
 let maps=null;
 const objects=[],noBodies=[];
 const desktopActor={held:null},remoteActors=new Map();
-let remoteHeld=0,riddenVehicle=null,driveSpeed=0;
+let remoteHeld=0,riddenVehicle=null,driveSpeed=0,driveHeading=0;
 let nextNetId=1;
 const gripRotation=new T.Quaternion(), inverseGrip=new T.Quaternion();
 const spawnPoint=new T.Vector3(),spawnDirection=new T.Vector3(),spawnOrigin=new T.Vector3(),spawnHit=new T.Vector3(),spawnNormal=new T.Vector3();
@@ -307,7 +307,7 @@ function resetPlayer(){
   standingHeight=NaN;drop=0;
   blaster.reset();
   rig.position.copy(boot);yaw=T.MathUtils.degToRad(maps.yaw);pitch=0;rig.rotation.y=yaw;
-  velocity.set(0,0,0);snapState.armed=true;grounded=false;walkingSupport.normal.set(0,0,0);walkingSupport.surface=null;hasPreviousHead=false;locomotion.reset();steps.reset();torsoTilt.set(0,0);
+  velocity.set(0,0,0);snapState.armed=true;grounded=false;jumpBuffer=0;walkingSupport.normal.set(0,0,0);walkingSupport.surface=null;hasPreviousHead=false;locomotion.reset();steps.reset();torsoTilt.set(0,0);
   for(const hand of hands){hand.valid=false;hand.hapticGrounded=false;hand.hapticPending=false;hand.hapticCooldown=0;hand.gamepad=null;release(hand,false);}
 
 }
@@ -1270,7 +1270,7 @@ function grabFlat(origin,direction){
   }else{
     const body=objects.find(o=>o.mesh===hit.object);
     if(!spectator.role&&body?.spec.properties?.drivable&&!body.frozen){
-      riddenVehicle=body;driveSpeed=0;velocity.set(0,0,0);hasPreviousHead=false;
+      riddenVehicle=body;driveSpeed=0;driveHeading=vehicleEuler.setFromQuaternion(body.mesh.quaternion).y;velocity.set(0,0,0);hasPreviousHead=false;
       showGameHint('Véhicule · déplacement pour piloter, E pour descendre');return true;
     }
     camera.getWorldQuaternion(toolRotationWorld);
@@ -1471,6 +1471,19 @@ function updateTorso(inVR,dt){
 }
 
 const vehicleEuler=new T.Euler(0,0,0,'YXZ'),vehicleForward=new T.Vector3();
+function confine(position,speed,headroom,margin){
+  const boundary=maps.boundary;
+  if(!boundary)return;
+  const radius=boundary.diameter/2-margin,distance=Math.hypot(position.x,position.z);
+  if(distance>radius){
+    const x=position.x/distance,z=position.z/distance;
+    position.x=radius*x;position.z=radius*z;
+    const outward=Math.max(0,x*speed.x+z*speed.z);
+    speed.x-=x*outward;speed.z-=z*outward;
+  }
+  const top=boundary.ceiling-headroom;
+  if(position.y>top){position.y=top;speed.y=Math.min(0,speed.y);}
+}
 function character(frame,space,pose,dt,inputDt=dt){
   const inVR=Boolean(pose);
   if(riddenVehicle&&(inVR||spectator.role||!objects.includes(riddenVehicle)||riddenVehicle.owner))riddenVehicle=null;
@@ -1523,15 +1536,17 @@ function character(frame,space,pose,dt,inputDt=dt){
     const z=Number(keys.has('KeyS'))-Number(keys.has('KeyW')||keys.has('KeyZ'))+flat.movement.z;
     if(riddenVehicle){
       const body=riddenVehicle;
-      vehicleEuler.setFromQuaternion(body.mesh.quaternion);
       const steering=T.MathUtils.clamp(x,-1,1),throttle=T.MathUtils.clamp(-z,-1,1);
-      if(Math.abs(throttle)>.05)vehicleEuler.y-=steering*1.55*dt*Math.sign(throttle);
-      vehicleEuler.x=0;vehicleEuler.z=0;
+      const turn=steering*dt*(1.42+Math.abs(throttle)*.48)*(throttle<-.05?-1:1);
+      driveHeading-=turn;
+      yaw-=turn;
+      vehicleEuler.set(0,driveHeading,0,'YXZ');
       body.mesh.quaternion.setFromEuler(vehicleEuler);
       body.angular.set(0,0,0);
       driveSpeed=T.MathUtils.lerp(driveSpeed,throttle*(throttle<0?2.7:6.2),1-Math.exp(-dt*4));
       vehicleForward.set(0,0,-1).applyQuaternion(body.mesh.quaternion).multiplyScalar(driveSpeed);
       body.velocity.x=vehicleForward.x;body.velocity.z=vehicleForward.z;body.sleeping=false;
+      confine(body.mesh.position,body.velocity,1.8,body.radius);
       rig.position.copy(body.mesh.position).addScaledVector(up,body.shape.thickness*.42);
       worldHead.copy(rig.position).add(head);
       velocity.set(0,0,0);delta.set(0,0,0);
@@ -1541,7 +1556,9 @@ function character(frame,space,pose,dt,inputDt=dt){
     const a=1-Math.exp(-dt*(floor?.friction<.1?2:grounded?13:4));
     velocity.x=T.MathUtils.lerp(velocity.x,scratch.x,a);velocity.z=T.MathUtils.lerp(velocity.z,scratch.z,a);
     const jump=flat.consumeJump()||actions.delete('Space');
-    const takeoff=jump&&grounded;
+    jumpBuffer=jump?.16:Math.max(0,jumpBuffer-dt);
+    const takeoff=jumpBuffer>0&&grounded;
+    if(takeoff)jumpBuffer=0;
     const n=walkingSupport.normal;
     const stickToGround=!takeoff&&grounded&&n.y>=.62&&(walkingSupport.surface?.friction??0)>=.45;
     if(takeoff)velocity.y=3.1+settings.jump*.18;
@@ -1569,10 +1586,11 @@ function character(frame,space,pose,dt,inputDt=dt){
     for(const field of activeBoxes){
       if(!field.heightfield||x<field.xMin||x>field.xMax||z<field.zMin||z>field.zMax)continue;
       const top=field.height(x,z),feet=rig.position.y;
-      if(feet>=top-.015&&feet+delta.y<top){delta.y=top+.001-feet;velocity.y=Math.max(0,velocity.y);}
+      if(feet>=top-.015&&feet+delta.y<top-.08)delta.y=top-.004-feet;
     }
   }
   rig.position.add(delta);
+  confine(rig.position,velocity,head.y,.28);
   worldHead.copy(head).applyAxisAngle(up,yaw).add(rig.position);
   grounded=false;
   walkingSupport.normal.set(0,0,0);walkingSupport.surface=null;
@@ -1587,7 +1605,8 @@ function character(frame,space,pose,dt,inputDt=dt){
       point.set(worldHead.x,rig.position.y+height,worldHead.z);
       if(i<2)point.add(bodyProxyOffset(inVR,bodyCollisionBack,Math.max(0,head.y-height),scratch));
       prior.copy(point);
-      grounded=solve(point,radius,arena.boxes,velocity,0,3+settings.grip,dt,i===0?walkingSupport:null)||grounded;
+      const supported=solve(point,radius,arena.boxes,velocity,0,3+settings.grip,dt,i===0?walkingSupport:null);
+      grounded=grounded||i===0&&supported;
       if(settings.objects)for(const object of blockers){
         const heldSupport=!inVR&&i===0&&object.owner===desktopActor&&!object.toolHold&&!!object.spec.supportAxis;
         if((!object.owner||heldSupport)&&playerObjectContact(point,radius,object,velocity,playerNormal,heldSupport)&&playerNormal.y>.6)grounded=true;
@@ -1748,6 +1767,7 @@ renderer.setAnimationLoop((time,frame)=>{
   wasGuestActive=guestActive;
   animateProps(time*.001);
   setModelEffectTime(time*.001);
+  maps.updateFlights(time*.001);
   maps.updateHinges(dt,!spectator.role||spectator.role==='vr',spectator.role==='player'||spectator.role==='pc');
   if(hintUntil&&time>hintUntil){hint.hidden=true;hintUntil=0;vrHint='';}
   cursor.visible=false;toolVisual.hide();toolState.mode=0;
@@ -1821,8 +1841,14 @@ renderer.setAnimationLoop((time,frame)=>{
     else if(interact){
       const hosting=spectator.role==='vr';
       const request=spectator.guestActive?id=>spectator.sendAction({type:'hinge',objectId:id}):null;
-      const reaction=riddenVehicle?null:maps.interactReaction(raySource,forward,ownsReactionDoors);
-      if(reaction)notifyMapTrigger(reaction);
+      const reaction=riddenVehicle?null:maps.interactReaction(raySource,forward,ownsReactionDoors,desktopActor.held,
+        spectator.role?null:(body,position,rotation)=>{
+          release(desktopActor,false);
+          body.mesh.position.copy(position);
+          body.mesh.quaternion.copy(rotation);
+          body.frozen=true;
+        });
+      if(reaction){if(reaction.notice)showGameHint(reaction.notice);notifyMapTrigger(reaction);}
       else {
         const door=riddenVehicle?false:maps.interactHinge(raySource,forward,ownsReactionDoors,request,hosting);
         if(door)showGameHint(door);

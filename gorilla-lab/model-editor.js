@@ -445,7 +445,7 @@ function stopHingePreview(){
   cancelAnimationFrame(hingeFrame);hingeFrame=0;$('hinge-preview').value=0;
   $('hinge-play').textContent='Lire';
 }
-const reactionFields=['phase','door','doorState','doorDelay','light','lightState','lightColor','sound','soundVolume'];
+const reactionFields=['phase','door','doorState','doorDelay','receiver','light','lightState','lightColor','sound','soundVolume'];
 function updateReactionInspector(){
   const model=currentModel(),part=currentPart();
   const eligible=part&&model.kind==='structure'&&(part.zone!=='trigger'||model.partCollisions&&model.properties.collidable);
@@ -470,6 +470,8 @@ function updateReactionInspector(){
   $('reaction-lightState').value=reaction.lightState??'on';
   $('reaction-lightColor').value=reaction.lightColor??'#ffbd54';
   $('reaction-soundVolume').value=reaction.soundVolume??.6;
+  $('reaction-receiver').disabled=part.zone==='trigger';
+  $('reaction-receiver').value=reaction.receiver??'';
 }
 for(const field of reactionFields)$('reaction-'+field).onchange=()=>{
   const model=currentModel(),part=currentPart();

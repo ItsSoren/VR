@@ -16,7 +16,7 @@ import {resizedCenter,scaleHandleSigns} from './editor-scale.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   parseMap, arenaMap, exampleMap, makePiece, mapMaterials, materialColors, surfacePresets,
-  maxPieces, maxWorldReach, maxWorldHeight, maxObjectSize, snapPlacement, downloadMap, storageKey,
+  maxPieces, maxWorldReach, maxWorldHeight, maxObjectSize, maxTerrainSize, snapPlacement, downloadMap, storageKey,
 } from './map-format.js';
 
 const $ = id => document.getElementById(id);
@@ -829,8 +829,8 @@ gizmo.addEventListener('objectChange',()=>{
       mesh.rotation.set(0,T.MathUtils.degToRad(piece.yaw),0,'YXZ');
     }
   }else{
-    piece.w=clamp(mesh.scale.x*(piece.terrain?original.w:1),.05,maxObjectSize);
-    piece.d=clamp(mesh.scale.z*(piece.terrain?original.d:1),.05,maxObjectSize);
+    piece.w=clamp(mesh.scale.x*(piece.terrain?original.w:1),.05,piece.terrain?maxTerrainSize:maxObjectSize);
+    piece.d=clamp(mesh.scale.z*(piece.terrain?original.d:1),.05,piece.terrain?maxTerrainSize:maxObjectSize);
     if(!piece.terrain)piece.h=clamp(mesh.scale.y,.05,256);
     mesh.scale.set(piece.terrain?piece.w/original.w:piece.w,piece.terrain?1:piece.h,piece.terrain?piece.d/original.d:piece.d);
     syncScaleAnchor();
@@ -924,7 +924,10 @@ function rebuildScene() {
       material.map.wrapS = material.map.wrapT = T.RepeatWrapping;
       material.color.set(piece.color);
     }
-    if(piece.terrain)applyTerrainProjection(material,piece);
+    if(piece.terrain){
+      if(piece.terrain.projection==='regolith')material.flatShading=false;
+      applyTerrainProjection(material,piece);
+    }
     const generationStarted=piece.terrain?performance.now():0;
     const geometry=piece.terrain?terrainGeometry(piece):
       piece.primitive==='ramp'?rampGeometry(piece.w,piece.h,piece.d).scale(1/piece.w,1/piece.h,1/piece.d):
@@ -1081,6 +1084,8 @@ function updateInspector() {
   $('delete').firstChild.textContent=piece?.model?'Retirer ':'Supprimer ';
   $('texture-clear').disabled = !piece?.texture;
   $('texture-paint').disabled = !piece||Boolean(piece.model);
+  $('flight-controls').hidden=!piece||piece.solid||Boolean(piece.terrain)||piece.model?.kind==='prop';
+  for(const [key,initial] of Object.entries(flightDefaults))$('flight-'+key).value=piece?.flight?.[key]??initial;
   const meshStats=pieceMeshStats[selected],statsOutput=$('selection-mesh-stats');
   statsOutput.hidden=!meshStats;
   if(meshStats)statsOutput.textContent=formatMeshStats(meshStats);
@@ -1131,9 +1136,10 @@ function applyEnvironmentPreview(){
   const show=Boolean(map.arenaBase||map.environment);
   sun.visible=ambient.visible=!show;
   for(const light of previewArena.lighting)light.visible=show;
-  const {sunDisk,sunHalo}=previewArena;
+  const {sunDisk,sunHalo,sunGlare}=previewArena;
   sunDisk.visible=show&&(map.environment?.sunPower??3)>0;
   sunHalo.visible=sunDisk.visible&&(map.environment?.sunHalo??1)>0;
+  sunGlare.visible=sunHalo.visible&&(map.environment?.sunStarburst??0)>0;
   scene.background=show?referenceScene.background:neutralBackground;
   scene.backgroundRotation.copy(referenceScene.backgroundRotation);
   scene.fog=show&&$('environment-fog-preview').checked?referenceScene.fog:null;
@@ -1212,6 +1218,8 @@ $('environment-image').onchange=event=>{
 function sync() {
   $('map-name').value = map.name;
   $('map-world-size').value=map.worldSize??240;
+  $('map-boundary').value=map.boundary?.diameter??0;
+  $('map-ceiling').value=map.boundary?.ceiling??128;
   camera.far=Math.max(640,map.worldSize*2);camera.updateProjectionMatrix();
   controls.maxDistance=Math.max(580,map.worldSize*1.6);
   for (const key of ['x', 'y', 'z', 'yaw']) $('spawn-' + key).value = map.spawn[key];
@@ -1782,6 +1790,27 @@ for (const key of fields) {
   });
 }
 
+const flightDefaults={x:0,z:0,seconds:90,phase:0,rise:0};
+for(const key of Object.keys(flightDefaults))$('flight-'+key).onchange=()=>{
+  const piece=current();
+  if(!piece||piece.solid)return;
+  remember();
+  const values=Object.fromEntries(Object.entries(flightDefaults).map(([key,fallback])=>{
+    const field=$('flight-'+key);
+    return [key,T.MathUtils.clamp(Number.isFinite(field.valueAsNumber)?field.valueAsNumber:fallback,Number(field.min),Number(field.max))];
+  }));
+  if(values.x||values.z)piece.flight=values;
+  else delete piece.flight;
+  sync();pendingSave();
+};
+
+$('map-boundary').onchange=$('map-ceiling').onchange=()=>{
+  remember();
+  const diameter=$('map-boundary').valueAsNumber;
+  if(diameter>0)map.boundary={diameter:T.MathUtils.clamp(diameter,12,2048),ceiling:T.MathUtils.clamp($('map-ceiling').valueAsNumber||128,3,256)};
+  else delete map.boundary;
+  sync();pendingSave();
+};
 $('map-world-size').onchange=event=>{
   remember();
   map.worldSize=T.MathUtils.clamp(Number(event.target.value)||240,24,2048);

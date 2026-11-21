@@ -2,7 +2,7 @@ export const environmentPresets=['Jour','Coucher de soleil','Nuit'];
 export const defaultEnvironment={
   preset:0,sky:'preset',rotation:0,skyTint:'#ffffff',skyColor:'#a6d4ea',skyImage:null,
   fog:true,fogColor:'#a6d4ea',fogNear:55,fogFar:135,
-  azimuth:-131,elevation:50,sunColor:'#fff0d0',sunPower:3,sunDiameter:3.3,sunHalo:1,shadowRange:0,
+  azimuth:-131,elevation:50,sunColor:'#fff0d0',sunPower:3,sunDiameter:3.3,sunHalo:1,sunStarburst:0,shadowRange:0,
   ambientColor:'#daeaff',groundColor:'#88724c',ambientPower:2.25,
 };
 const presets=[
@@ -33,6 +33,7 @@ export function normalizeEnvironment(value){
     azimuth:number(value.azimuth,-360,360,defaults.azimuth),elevation:number(value.elevation,-89,89,defaults.elevation),
     sunColor:color(value.sunColor,defaults.sunColor),sunPower:number(value.sunPower,0,12,defaults.sunPower),
     sunDiameter:number(value.sunDiameter,.1,12,defaults.sunDiameter),sunHalo:number(value.sunHalo,0,4,defaults.sunHalo),
+    sunStarburst:number(value.sunStarburst,0,2,0),
     shadowRange:number(value.shadowRange,0,160,defaults.shadowRange),
     ambientColor:color(value.ambientColor,defaults.ambientColor),groundColor:color(value.groundColor,defaults.groundColor),
     ambientPower:number(value.ambientPower,0,12,defaults.ambientPower),

@@ -106,7 +106,7 @@ export function normalizeTerrain(value = {},area=1) {
     edgeFade:bounded(value?.edgeFade,0,1,0),
     ...(value?.reliefArea?{reliefArea:normalizeReliefArea(value.reliefArea)}:{}),
     rules:readTerrainRules(value??{},area),
-    ...(value?.projection==='triplanar'?{projection:'triplanar'}:{}),
+    ...(['triplanar','regolith'].includes(value?.projection)?{projection:value.projection}:{}),
     textureDensity:bounded(value?.textureDensity,.0001,maxTextureDensity,defaultTerrainTextureDensity),
     grassTexture:typeof value?.grassTexture==='string'&&value.grassTexture.length<500000&&texturePattern.test(value.grassTexture)?value.grassTexture:null,
     heights: Array.isArray(heights) && heights.length === (detail + 1) ** 2
@@ -422,12 +422,12 @@ export function sculptTerrain(piece, x, z, { mode, radius, strength, target } = 
 }
 
 export function applyTerrainProjection(material,piece){
-  if(piece.terrain?.projection!=='triplanar')return;
+  const regolith=piece.terrain?.projection==='regolith';
+  if(!regolith&&piece.terrain?.projection!=='triplanar')return;
   const transform=material.onBeforeCompile,previousKey=material.customProgramCacheKey();
   const angle=T.MathUtils.degToRad(piece.uvRotation??0);
   const repeats=Math.sqrt(piece.terrain.textureDensity??defaultTerrainTextureDensity)/(piece.uvScale??1);
   material.onBeforeCompile=function(shader,renderer){
-    transform.call(this,shader,renderer);
     Object.assign(shader.uniforms,{
       terrainRepeat:{value:repeats},
       terrainUvBasis:{value:new T.Vector2(Math.cos(angle),Math.sin(angle))},
@@ -452,11 +452,19 @@ export function applyTerrainProjection(material,piece){
         vec4 xSample=texture2D(map,terrainUv(vec2(p.z+terrainHalfSize.y,p.y)));
         vec4 ySample=texture2D(map,terrainUv(vec2(p.x+terrainHalfSize.x,terrainHalfSize.y-p.z)));
         vec4 zSample=texture2D(map,terrainUv(vec2(p.x+terrainHalfSize.x,p.y)));
-        diffuseColor*=xSample*weight.x+ySample*weight.y+zSample*weight.z;
+        ${regolith?`
+        vec2 macro=p.xz;
+        vec2 alt=mat2(.79,.61,-.61,.79)*macro*.39;
+        float veins=smoothstep(-.85,.85,sin(macro.x*.073+sin(macro.y*.057))+sin(macro.y*.091-macro.x*.021)*.68);
+        vec4 mixedDust=mix(ySample,texture2D(map,terrainUv(alt)+.371),.26+veins*.29);
+        mixedDust.rgb*=.74+veins*.43;
+        diffuseColor*=xSample*weight.x+mixedDust*weight.y+zSample*weight.z;
+        `:'diffuseColor*=xSample*weight.x+ySample*weight.y+zSample*weight.z;'}
       #endif
     `);
+    transform.call(this,shader,renderer);
   };
-  material.customProgramCacheKey=()=>previousKey+'|terrain-triplanar';
+  material.customProgramCacheKey=()=>previousKey+(regolith?'|terrain-regolith':'|terrain-triplanar');
 }
 
 export function terrainGeometry(piece) {
