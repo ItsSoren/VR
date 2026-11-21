@@ -12,7 +12,7 @@ import {normalizeTerrain} from './terrain-edit.js';
 import {texturePresets,seamlessTexture} from './seamless-texture.js';
 import {createFlatControls,createKeyboardState} from './flat-controls.js';
 import {screenPixelRatio} from './screen-render.js';
-import { GorillaLocomotion } from './locomotion.js';
+import { GorillaLocomotion, updateUnderSurfaceCrouch } from './locomotion.js';
 import { updateGroundHaptics,pulseHand } from './ground-haptics.js';
 import { createToolVisual } from './tool-visual.js';
 import {createBlasterSystem,bindBlasterTrigger} from './blaster-system.js';
@@ -104,7 +104,7 @@ let hasPreviousHead=false,grounded=false,jumpBuffer=0;
 let launchCount=0,lastLaunch=null;
 let refreshOptions=[],fpsGoal=100;
 const up=new T.Vector3(0,1,0), spin=new T.Quaternion();
-let yaw=0,bodyYaw=0,pitch=0, drop=0, standingHeight=NaN, snapState={armed:true}, frameTime=0,fps=0,windowFrames=0,windowElapsed=0,qualityTimer=0,lowCount=0,highCount=0,liveLevel=settings.quality,refreshRate=72;
+let yaw=0,bodyYaw=0,pitch=0, drop=0, underSurfaceCrouch=0, standingHeight=NaN, snapState={armed:true}, frameTime=0,fps=0,windowFrames=0,windowElapsed=0,qualityTimer=0,lowCount=0,highCount=0,liveLevel=settings.quality,refreshRate=72;
 let vrRowsPage=0;
 let menu=false,panelHand='left',page=new URLSearchParams(location.search).has('room')?5:0,renderPage=0,spawnPage=0,mapPage=0,hudDirty=true,lastDraw=0;
 const blocked=[],handBoxes=[];
@@ -308,7 +308,7 @@ function resetObjects(){
   }
 }
 function resetPlayer(){
-  standingHeight=NaN;drop=0;
+  standingHeight=NaN;drop=0;underSurfaceCrouch=0;
   blaster.reset();
   rig.position.copy(boot);yaw=T.MathUtils.degToRad(maps.yaw);pitch=0;rig.rotation.y=yaw;
   velocity.set(0,0,0);snapState.armed=true;grounded=false;jumpBuffer=0;walkingSupport.normal.set(0,0,0);walkingSupport.surface=null;hasPreviousHead=false;locomotion.reset();steps.reset();torsoTilt.set(0,0);
@@ -433,7 +433,7 @@ function saveReport(mode, automatic=false){
     haptics:hands.map(h=>({side:h.side,tracked:Boolean(h.valid),...h.hapticStats})),
     debug:lastPlayerDiagnostics,audio:{volume:settings.stepVolume,enabled:settings.stepAudio,clipsPlayed:steps.count,state:steps.state,...mapAudio.diagnostics},
     performance:{fps,frames:captured.frames.length,frameMs:captured.metrics.frameMs},
-    xr:mode==='VR'?lastVR:null,previousVR:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{physics:{...objectPhysicsStats},total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},cloud:{role:spectator.role,connected:spectator.connected,replicas:spectator.replicaCount,...spectator.stats},locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
+    xr:mode==='VR'?lastVR:null,previousVR:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{physics:{...objectPhysicsStats},total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},cloud:{role:spectator.role,connected:spectator.connected,replicas:spectator.replicaCount,...spectator.stats},locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop,underSurfaceCrouch},
   };
   document.querySelector('#download-report').disabled=false;
   hudDirty=true;
@@ -1592,7 +1592,7 @@ function character(frame,space,pose,dt,inputDt=dt){
   if(inVR){
     const p=pose.transform.position;
     standingHeight=calibratedHeight(standingHeight,p.y);
-    drop=T.MathUtils.clamp(standingHeight-targetEye,-.65,1.7);
+    drop=T.MathUtils.clamp(standingHeight-targetEye,-.65,1.7)+underSurfaceCrouch;
     eye.position.y=-drop;
     head.set(p.x,p.y-drop,p.z);
     const source=[...frame.session.inputSources].find(s=>s.handedness==='right');
@@ -1732,6 +1732,8 @@ function character(frame,space,pose,dt,inputDt=dt){
     position:rig.position,playSurface:mapAudio.playSurface});
   if(inVR){
     // L’impulsion utilise le déplacement réalisé, une fois les collisions du corps résolues.
+    const bracedUnderSurface=locomotion.hands.some(({hand,normal})=>hand.surface&&normal.y<-.55);
+    underSurfaceCrouch=updateUnderSurfaceCrouch(underSurfaceCrouch,locomotion.planned.y,appliedMove.y,bracedUnderSurface,head.y,inputDt);
     const result=locomotion.finish(appliedMove,velocity);
     if(result.contacts)contactFrames++;
     if(result.launched){launchCount++;lastLaunch={handSpeed:result.launchSpeed,velocity:velocity.toArray(),t:performance.now()};}
