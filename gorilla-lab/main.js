@@ -385,7 +385,7 @@ const renderGroups=[
 ];
 function currentRows(){return page===2?renderGroups[renderPage][1]:page===3?spawnGroups[spawnPage][1]:page===4?mapGroups[mapPage][1]:sections[page][1];}
 function selectPage(index){page=index;vrRowsPage=0;hudDirty=true;}
-let reportSnapshot=null, rawFrameMs=[], frameSampleIndex=0, diagAt=0, lastVR=null, reportHadVR=false, contactFrames=0, trackedFrames=0, renderStats={};
+let reportSnapshot=null, capturedVRThisSession=false, rawFrameMs=[], frameSampleIndex=0, diagAt=0, lastVR=null, reportHadVR=false, contactFrames=0, trackedFrames=0, renderStats={};
 const lightSlots=Array.from({length:3},()=>{
   const light=new T.PointLight('#ffffff',0,22,1.60);
   light.visible=false;scene.add(light);
@@ -417,19 +417,22 @@ function updatePropLights(spectating){
 }
 // Une capture garde les dernières mesures VR pour un téléchargement après la session.
 function captureReport(){
-  diagnostics.record('capture',{mode:renderer.xr.isPresenting?'VR':'PC'});
-
-  const captured=diagnostics.snapshot(renderer.xr.isPresenting?'VR':'PC');
+  saveReport(renderer.xr.isPresenting?'VR':'PC');
+}
+function saveReport(mode, automatic=false){
+  diagnostics.record('capture',{mode,automatic});
+  const captured=diagnostics.snapshot(mode);
+  if(mode==='VR')capturedVRThisSession=true;
   reportSnapshot={
-    game:'Gorilla Lab',version:labRelease.toLowerCase(),reportSchema:2,revision:'lot3-input-debug',time:new Date().toISOString(),
-    mode:renderer.xr.isPresenting?'VR':'PC',sessionHadVR:reportHadVR,settings:{...settings},qualityActive:liveLevel,
+    game:'Gorilla Lab',version:labRelease.toLowerCase(),reportSchema:2,revision:'vr-session-report',time:new Date().toISOString(),
+    mode,automatic,sessionHadVR:reportHadVR,settings:{...settings},qualityActive:liveLevel,
     diagnostics:captured,debugGeometry:{...debugView.stats},
     scenario:document.querySelector('#report-note')?.value?.slice(0,500)??'',
     device:{userAgent:navigator.userAgent,cores:navigator.hardwareConcurrency??null,memoryGiB:navigator.deviceMemory??null,viewport:[innerWidth,innerHeight],pixelRatio:renderer.getPixelRatio()},
     haptics:hands.map(h=>({side:h.side,tracked:Boolean(h.valid),...h.hapticStats})),
     debug:lastPlayerDiagnostics,audio:{volume:settings.stepVolume,enabled:settings.stepAudio,clipsPlayed:steps.count,state:steps.state,...mapAudio.diagnostics},
     performance:{fps,frames:captured.frames.length,frameMs:captured.metrics.frameMs},
-    xr:renderer.xr.isPresenting?lastVR:null,previousVR:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{physics:{...objectPhysicsStats},total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},cloud:{role:spectator.role,connected:spectator.connected,replicas:spectator.replicaCount,...spectator.stats},locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
+    xr:mode==='VR'?lastVR:null,previousVR:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{physics:{...objectPhysicsStats},total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},cloud:{role:spectator.role,connected:spectator.connected,replicas:spectator.replicaCount,...spectator.stats},locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop},
   };
   document.querySelector('#download-report').disabled=false;
   hudDirty=true;
@@ -1355,7 +1358,7 @@ enter.onclick=async()=>{
     refreshRate=session.frameRate||refreshRate;
     fpsGoal=Math.min(100,refreshRate);
     if(settings.auto){liveLevel=Math.min(liveLevel,4);qualityTimer=lowCount=highCount=0;}
-    rawFrameMs=[];diagnostics.reset();frameSampleIndex=0;diagAt=0;contactFrames=trackedFrames=launchCount=0;lastLaunch=null;reportHadVR=true;lastVR=null;
+    rawFrameMs=[];diagnostics.reset();frameSampleIndex=0;diagAt=0;contactFrames=trackedFrames=launchCount=0;lastLaunch=null;reportHadVR=true;capturedVRThisSession=false;lastVR=null;
     standingHeight=NaN;drop=0;resetPlayer();applyVisual();
     document.body.classList.add('immersive');
   }catch(error){
@@ -1364,6 +1367,7 @@ enter.onclick=async()=>{
   }
 };
 renderer.xr.addEventListener('sessionend',()=>{
+  if(lastVR&&!capturedVRThisSession)saveReport('VR',true);
   enter.disabled=false;menu=false;panel.mesh.visible=false;wrist.mesh.visible=false;
   document.body.classList.remove('immersive');resetPlayer();resize();
 });
@@ -1896,7 +1900,8 @@ renderer.setAnimationLoop((time,frame)=>{
       object.shadow.position.set(x,shadowY+.006,z);
     }
   }
-  if(!remoteWorld&&settings.objects){
+  const simulatesObjects=!remoteWorld&&settings.objects;
+  if(simulatesObjects){
     const physicsStart=performance.now();
     solveObjects(objects,arena.boxes,dt,9.81*settings.gravity/5,.12+settings.bounce*.064,surfaceAt,mapAudio.impact);
     physicsCpuMs=performance.now()-physicsStart;
@@ -2034,7 +2039,11 @@ renderer.setAnimationLoop((time,frame)=>{
     }
   }
   renderSubmissionCpuMs=performance.now()-renderStart;
-  diagnostics.sample({mode:inVR?'VR':'PC',frameMs:actual*1000,physicsCpuMs,debugCpuMs,mirrorCpuMs,renderSubmissionCpuMs,objects:objects.length,moving:objects.filter(o=>!o.owner&&!o.frozen&&!o.sleeping&&o.velocity.lengthSq()>.0001).length,debugSegments:debugView.stats.segments});
+  diagnostics.sample({mode:inVR?'VR':'PC',frameMs:actual*1000,physicsCpuMs,debugCpuMs,mirrorCpuMs,renderSubmissionCpuMs,objects:remoteWorld?spectator.replicaCount:objects.length,
+    moving:remoteWorld?null:objects.filter(o=>!o.owner&&!o.frozen&&!o.sleeping&&o.velocity.lengthSq()>.0001).length,
+    physicsSubsteps:simulatesObjects?objectPhysicsStats.substeps:null,
+    activePhysicsObjects:simulatesObjects?objectPhysicsStats.active:null,
+    debugSegments:debugView.stats.segments});
   if(time-diagAt>350){
     debugReadout.hidden=!(settings.debugForces||debugView.stats.truncated);
     if(!debugReadout.hidden)debugReadout.textContent='Vitesse joueur : '+velocity.length().toFixed(2)+' m/s · Gravité : '+currentGravity.toFixed(2)+' m/s² · Segments : '+debugView.stats.segments+(debugView.stats.truncated?' (budget atteint : augmenter Budget debug ou réduire la portée)':'');
