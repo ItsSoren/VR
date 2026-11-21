@@ -2,8 +2,8 @@ import * as T from 'three';
 
 const sides=12;
 const profile=[
-  [-.41,.13,.115],[-.32,.215,.160],[.09,.316,.215],
-  [.22,.327,.221],[.34,.264,.193],[.405,.146,.140],[.46,.097,.108],
+  [-.38,.115,.105],[-.29,.205,.152],[.075,.303,.208],
+  [.22,.361,.235],[.34,.292,.193],[.407,.165,.140],[.46,.097,.108],
 ];
 const jointRays=[
   [-.66,.75],[.66,.75],[1,0],[.66,-.75],[-.66,-.75],[-1,0],
@@ -60,12 +60,13 @@ export function createBodySkin(material,handMeshes){
   geometry.setIndex(combinations[0]);
   const rest=new T.Vector3(),base=new T.Vector3(),elbow=new T.Vector3(),wrist=new T.Vector3(),reach=new T.Vector3();
   const tangent=new T.Vector3(),bend=new T.Vector3(),point=new T.Vector3(),center=new T.Vector3();
+  const restingWrist=new T.Vector3(),upperAxis=new T.Vector3(),lowerAxis=new T.Vector3();
   const armFrame=new T.Quaternion(),forearmFrame=new T.Quaternion(),targetFrame=new T.Quaternion();
   const blendFrame=new T.Quaternion(),wristTwist=new T.Quaternion(),partialTwist=new T.Quaternion();
   const forward=new T.Vector3(0,0,-1);
   const restHand=new T.Quaternion().setFromEuler(new T.Euler(-1.42,0,0));
-  const lengths=[.24,.62,.94,.56];
-  const widths=[.089,.084,.069,.054,.037];
+  const lengths=[.22,.64,.99,.52];
+  const widths=[.105,.091,.065,.061];
 
   let lastWidth=0,lastStretch=0,wasTracked=true;
   function pose(hands,segmentLength,width,stretch,showHands){
@@ -86,22 +87,33 @@ export function createBodySkin(material,handMeshes){
       base.multiplyScalar(1/6);
       wrist.set(0,0,0);
       for(const joint of jointCenters)wrist.add(rest.fromBufferAttribute(source,joint));
-      wrist.multiplyScalar(1/6).applyQuaternion(hand?.quaternion??restHand);
-      if(tracked)wrist.add(hand.position);
-      else wrist.add(rest.set(base.x+arm.sign*.026,base.y-.43,base.z-.015));
-      reach.subVectors(wrist,base);
-      tangent.copy(reach).normalize();
-      bend.set(arm.sign*.18,-.58,.78);
-      bend.addScaledVector(tangent,-tangent.dot(bend)).normalize();
-      elbow.copy(base).addScaledVector(reach,.49);
-      if(tracked){
-        const bendDepth=Math.sqrt(Math.max(0,segmentLength**2-reach.lengthSq()*.25));
-        const hanging=T.MathUtils.smoothstep(-tangent.y,.6,.96);
-        elbow.addScaledVector(bend,bendDepth*T.MathUtils.lerp(.72,.31,hanging));
-      }
-      armFrame.setFromUnitVectors(forward,tangent.subVectors(elbow,base).normalize());
+      restingWrist.set(base.x+arm.sign*.05*width,base.y-.43*width,base.z-.04*width);
       targetFrame.copy(hand?.quaternion??restHand);
-      forearmFrame.setFromUnitVectors(forward,tangent.subVectors(wrist,elbow).normalize());
+      wrist.multiplyScalar(1/6).applyQuaternion(targetFrame).add(hand?.position??restingWrist);
+      reach.subVectors(wrist,base);
+      const distance=reach.length();
+      tangent.copy(reach);
+      if(distance>.0001)tangent.multiplyScalar(1/distance);
+      else tangent.set(0,-1,0);
+
+      // Keep the elbow out of the chest as the wrist approaches the shoulder.
+      const hanging=T.MathUtils.smoothstep(-tangent.y,.55,.99);
+      bend.set(arm.sign*T.MathUtils.lerp(.77,.55,hanging),-.52,.62);
+      bend.addScaledVector(tangent,-tangent.dot(bend));
+      const poleWeight=T.MathUtils.smoothstep(bend.length(),.03,.28);
+      bend.normalize();
+      elbow.copy(base).addScaledVector(reach,.48);
+      const depth=Math.sqrt(Math.max(0,segmentLength**2-distance**2*.25));
+      const flex=tracked?T.MathUtils.lerp(.77,.25,hanging):.18;
+      const reachLimit=distance*.64+segmentLength*.19;
+      elbow.addScaledVector(bend,Math.min(depth*flex,reachLimit)*poleWeight);
+
+      upperAxis.subVectors(elbow,base);
+      lowerAxis.subVectors(wrist,elbow);
+      if(upperAxis.lengthSq()<1e-8)upperAxis.copy(tangent);
+      if(lowerAxis.lengthSq()<1e-8)lowerAxis.copy(tangent);
+      armFrame.setFromUnitVectors(forward,upperAxis.normalize());
+      forearmFrame.setFromUnitVectors(forward,lowerAxis.normalize());
       // Retain wrist roll without tilting the forearm cross section into its own axis.
       wristTwist.copy(forearmFrame).invert().multiply(targetFrame);
       const twistLength=Math.hypot(wristTwist.z,wristTwist.w);
@@ -113,15 +125,14 @@ export function createBodySkin(material,handMeshes){
         blendFrame.copy(armFrame).slerp(forearmFrame,lower?1:j*.24);
         blendFrame.multiply(partialTwist.identity().slerp(wristTwist,lower?.84:j*.13));
         for(let k=0;k<6;k++){
-          const ray=jointRays[k],radius=widths[j];
+          const ray=jointRays[k],radius=widths[j]*width;
           point.set(ray[0]*radius,ray[1]*radius*.84,0).applyQuaternion(blendFrame).add(center);
           coords.setXYZ(arm.rings[j+1][k],point.x,point.y,point.z);
         }
       }
       for(let j=0;j<arm.remap.length;j++){
         point.fromBufferAttribute(source,j).applyQuaternion(targetFrame);
-        if(tracked)point.add(hand.position);
-        else point.add(rest.set(base.x+arm.sign*.026,base.y-.43,base.z-.015));
+        point.add(hand?.position??restingWrist);
         coords.setXYZ(arm.remap[j],point.x,point.y,point.z);
       }
     }
