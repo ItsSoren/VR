@@ -24,7 +24,7 @@ import {spawnAssetIds} from './model-assets.js';
 import { makeAnimatedProps,clonePropMaterial } from './animated-props.js';
 import {setModelEffectTime} from './model-effect.js';
 import {readModelPack,createModelPropDefinitions,createModelAvatarHead,createModelUnitGeometry,createModelMaterial,createModelPartGeometry,createModelPartMaterial,disposeModelMaterial,modelPhysics,modelCollisionGeometry,modelBounds,normalizeModelPack,modelLimits,modelStorageKey} from './model-pack.js';
-import {mapCode,publicRooms} from './cloud-link.js';
+import {mapCode,publicRooms,roomCode} from './cloud-link.js';
 import { createHandSkin,palmCenter } from './hand-skin.js';
 import {placeTrackedPalm} from './xr-palm.js';
 import {createStepSound} from './step-sound.js';
@@ -384,7 +384,8 @@ const renderGroups=[
     ['Intensité du focus','focusStrength'],['Zone nette du focus','focusSize']]],
 ];
 function currentRows(){return page===2?renderGroups[renderPage][1]:page===3?spawnGroups[spawnPage][1]:page===4?mapGroups[mapPage][1]:sections[page][1];}
-function selectPage(index){page=index;vrRowsPage=0;hudDirty=true;}
+let vrRoomDraft=null;
+function selectPage(index){page=index;vrRowsPage=0;vrRoomDraft=null;hudDirty=true;}
 let reportSnapshot=null, capturedVRThisSession=false, rawFrameMs=[], frameSampleIndex=0, diagAt=0, lastVR=null, reportHadVR=false, contactFrames=0, trackedFrames=0, renderStats={};
 const lightSlots=Array.from({length:3},()=>{
   const light=new T.PointLight('#ffffff',0,22,1.60);
@@ -1156,6 +1157,29 @@ function drawPanel(){
   }
   const tabWidth=Math.floor(587/sections.length);
   sections.forEach(([name],i)=>item(25+i*tabWidth,61,tabWidth-4,44,name,()=>selectPage(i),page===i?'#586d53':'#334b58'));
+  if(page===5&&vrRoomDraft!==null){
+    c.fillStyle='#e9e5ce';c.font='22px system-ui';c.fillText('Code du salon privé',25,139,587);
+    c.font='bold 30px monospace';c.fillText(vrRoomDraft||'—',25,188,587);
+    for(const [i,key] of Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789').entries()){
+      item(25+(i%9)*66,216+Math.floor(i/9)*56,59,48,key,()=>{
+        if(vrRoomDraft.length<12)vrRoomDraft+=key;
+      });
+    }
+    item(25,450,190,44,'Effacer un caractère',()=>{vrRoomDraft=vrRoomDraft.slice(0,-1);});
+    item(223,450,190,44,'Tout effacer',()=>{vrRoomDraft='';});
+    item(421,450,190,44,'Annuler',()=>{vrRoomDraft=null;});
+    if(/^[A-Z0-9]{5,12}$/.test(vrRoomDraft)){
+      item(25,519,587,49,'Rejoindre '+vrRoomDraft,()=>{
+        const code=vrRoomDraft;
+        vrRoomDraft=null;
+        spectator.connect('player',code);
+      });
+    }else{
+      c.fillStyle='#c4d5d8';c.font='20px system-ui';c.fillText('Saisis entre 5 et 12 caractères.',25,548,587);
+    }
+    panel.texture.needsUpdate=true;
+    return;
+  }
   if(page===5){
     c.fillStyle='#e9e5ce';c.font='22px system-ui';c.fillText(spectator.caption,25,145,587);
     c.fillText('Salons publics',25,190);
@@ -1166,9 +1190,12 @@ function drawPanel(){
       item(406,y,206,40,'Héberger',()=>spectator.connect('vr',code));
     });
     c.fillText('Salon privé',25,390);
-    item(25,405,286,44,'Rejoindre le code saisi',()=>spectator.connect('player'));
+    item(25,405,286,44,'Saisir un code',()=>{
+      const code=roomCode(document.querySelector('#cloud-room').value);
+      vrRoomDraft=/^[A-Z0-9]{5,12}$/.test(code)?code:'';
+    });
     item(325,405,287,44,'Créer un salon privé',()=>document.querySelector('#cloud-new').click());
-    c.font='17px system-ui';c.fillText('Pour saisir un autre code, utilise le panneau du navigateur.',25,473,587);
+    c.font='17px system-ui';
     if(spectator.downloadCaption){
       c.fillText(spectator.downloadCaption,25,511,275);
       c.fillStyle='#344b59';c.fillRect(25,518,275,7);
@@ -1368,7 +1395,7 @@ enter.onclick=async()=>{
 };
 renderer.xr.addEventListener('sessionend',()=>{
   if(lastVR&&!capturedVRThisSession)saveReport('VR',true);
-  enter.disabled=false;menu=false;panel.mesh.visible=false;wrist.mesh.visible=false;
+  enter.disabled=false;menu=false;vrRoomDraft=null;panel.mesh.visible=false;wrist.mesh.visible=false;
   document.body.classList.remove('immersive');resetPlayer();resize();
 });
 
