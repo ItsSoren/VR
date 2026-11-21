@@ -4,6 +4,7 @@ import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
 import {build} from 'esbuild';
 import {createLevel} from './level.mjs';
+import {patchDemoLocomotion} from './appuis.mjs';
 
 const here=dirname(fileURLToPath(import.meta.url));
 const base=resolve(process.argv[2]??join(here,'..','base'));
@@ -32,6 +33,7 @@ const bunker=createLevel(calibration);
 let game=await read(entry);
 game=edit(game,"const labRelease=__LAB_RELEASE__;",[
   "import {createExperience} from 'demo:experience';",
+  "import {createCeilingAssist} from 'demo:appuis';",
   "import demoLevel from 'demo:level';",
   "const labRelease=__LAB_RELEASE__;",
 ].join('\n'));
@@ -67,6 +69,32 @@ game=edit(game,"    else if(!menu&&!settings.blasterActive&&(h.side==='right'||t
   "    else if(!demoTrigger&&!menu&&!settings.blasterActive&&(h.side==='right'||trigger&&!h.trigger))fixtureAim=");
 game=edit(game,"  const targetEye=.43+settings.size*.088;",
   "  const targetEye=.43+settings.size*.088-(!inVR&&(keys.has('KeyC')||keys.has('ControlLeft'))?.28:0);");
+game=edit(game,"let currentGravity=9.81,lastPlayerDiagnostics=null;",[
+  "let currentGravity=9.81,lastPlayerDiagnostics=null;",
+  "const ceilingAssist=createCeilingAssist();",
+  "const crouchFrom=new T.Vector3(),crouchTo=new T.Vector3(),crouchHit=new T.Vector3(),crouchNormal=new T.Vector3();",
+].join('\n'));
+game=edit(game,"function resetPlayer(){","function resetPlayer(){\n  ceilingAssist.reset();");
+game=edit(game,"    eye.position.y=-drop;\n    head.set(p.x,p.y-drop,p.z);",[
+  "    const rise=ceilingAssist.rise(inputDt);",
+  "    if(rise>0){",
+  "      crouchFrom.set(p.x,p.y-drop-ceilingAssist.depth,p.z).applyAxisAngle(up,yaw).add(rig.position);",
+  "      crouchTo.copy(crouchFrom).y+=rise;",
+  "      if(!settings.collisions||!handContact(crouchFrom,crouchTo,HEAD_RADIUS,activeBoxes,crouchHit,crouchNormal)||crouchNormal.y>=-.2){",
+  "        ceilingAssist.recover(rise);",
+  "      }",
+  "    }",
+  "    eye.position.y=-drop-ceilingAssist.depth;",
+  "    head.set(p.x,p.y-drop-ceilingAssist.depth,p.z);",
+].join('\n'));
+game=edit(game,"    const result=locomotion.finish(appliedMove,velocity);",[
+  "    const crouch=ceilingAssist.press({",
+  "      underside:settings.collisions&&locomotion.hands.some(({hand,normal})=>hand.surface&&normal.y<-.65),",
+  "      grounded,plannedY:locomotion.planned.y,appliedY:appliedMove.y,intentY:locomotion.intent.y,eyeHeight:head.y,",
+  "    });",
+  "    eye.position.y-=crouch;head.y-=crouch;worldHead.y-=crouch;",
+  "    const result=locomotion.finish(appliedMove,velocity);",
+].join('\n'));
 const move="    locomotion.move({head:worldHead,dt,inputDt,gravity,settings,boxes:handBoxes,velocity,movement:delta,reach:armSegmentLength()*2+.16});";
 game=edit(game,move,move+"\n"+[
   "    const stick=hands[0].gamepad?.axes;",
@@ -106,7 +134,7 @@ html=replaceSection(html,'<p>VR :','<nav aria-label="Réglages">',[
 html=edit(html,'</aside><script defer src="./game-lab-r39.js"></script></body></html>',[
   '</details></aside>',
   '<output id="demo-objective" aria-live="polite"></output>',
-  '<script defer src="./bunker.js"></script></body></html>',
+  '<script type="module" src="./bunker.js"></script></body></html>',
   '',
 ].join('\n'));
 html=edit(html,'<button data-flat-action="tool">Outil</button><button data-flat-action="mode">Mode</button>',
@@ -116,27 +144,32 @@ await mkdir(out,{recursive:true});
 await writeFile(join(out,'index.html'),html);
 await writeFile(join(out,'bunker.json'),JSON.stringify(bunker,null,2)+'\n');
 await copyFile(join(here,'bunker.css'),join(out,'bunker.css'));
+for(const name of ['three.module.min.js','three.core.min.js']){
+  await copyFile(join(threeRoot,'build',name),join(out,name));
+}
+await copyFile(join(threeRoot,'LICENSE'),join(out,'three.LICENSE.txt'));
 const bundle=await build({
   stdin:{contents:game,sourcefile:entry,resolveDir:dirname(entry)},
-  outfile:join(out,'bunker.js'),bundle:true,format:'iife',target:'es2022',write:false,
+  outfile:join(out,'bunker.js'),bundle:true,format:'esm',target:'es2022',write:false,
   define:{__LAB_RELEASE__:JSON.stringify('R46.1')},minify:true,legalComments:'inline',
   nodePaths:[join(here,'..','node_modules')],
   plugins:[{
     name:'scary-gorilla',
     setup(plugin){
       plugin.onResolve({filter:/^demo:experience$/},()=>({path:join(here,'experience.mjs'),namespace:'demo-files'}));
+      plugin.onResolve({filter:/^demo:appuis$/},()=>({path:join(here,'appuis.mjs'),namespace:'demo-files'}));
       plugin.onResolve({filter:/^demo:level$/},()=>({path:'level',namespace:'scary-gorilla'}));
       plugin.onLoad({filter:/.*/,namespace:'scary-gorilla'},()=>({contents:JSON.stringify(bunker),loader:'json'}));
       plugin.onResolve({filter:/^(three|\.)/},({path,resolveDir})=>{
-        const source=path==='three'?join(threeRoot,'build','three.module.js'):
-          path.startsWith('three/addons/')?join(threeRoot,'examples','jsm',path.slice('three/addons/'.length)):
+        if(path==='three')return {path:'./three.module.min.js',external:true};
+        const source=path.startsWith('three/addons/')?join(threeRoot,'examples','jsm',path.slice('three/addons/'.length)):
           resolve(resolveDir,path);
         return {path:source,namespace:'demo-files'};
       });
       plugin.onLoad({filter:/.*/,namespace:'demo-files'},async({path})=>{
         let contents=await read(path);
         if(path===join(base,'gorilla-lab','locomotion.js')){
-          contents=edit(contents,'!hand.held&&!hand.remoteHeld','!hand.held&&!hand.remoteHeld&&!hand.demoHeld');
+          contents=patchDemoLocomotion(contents,edit);
         }
         return {contents,resolveDir:dirname(path)};
       });
