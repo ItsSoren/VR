@@ -33,7 +33,7 @@ import { createBodySkin } from './body-skin.js';
 import { labMirror,labSpawn } from './lab-layout.js';
 import { readLocalMap } from './map-storage.js';
 import { connectMaps } from './custom-maps.js';
-import { arenaMap, makePiece, mapMaterials, surfacePresets, storageKey, materialColors } from './map-format.js';
+import { arenaMap, thinSurfaceCourse, makePiece, mapMaterials, surfacePresets, storageKey, materialColors } from './map-format.js';
 import { createVrEffects, addRayProbe } from './vr-effects.js';
 import { createVrFovMask } from './vr-fov.js';
 import { addLabFixtures } from './fixtures.js';
@@ -462,6 +462,7 @@ sections.push(['Spawn',[]]);
 const mapGroups=[['Construction',[
   ['Éditeur VR','mapEdit'],['Action','mapMode'],['Pièce','mapShape'],['Matériau','mapMaterial'],['Surface','mapSurface'],['Rotation','mapTurn'],['Texture raccordable','mapTexture'],
   ['Créer atelier vide',()=>{maps.blank();settings.mapEdit=true;}],['Annuler placement',()=>maps.undo()],
+  ['Parcours appuis fins',()=>{maps.load(thinSurfaceCourse());settings.mapEdit=false;}],
 ]],['Terrain',[
   ['Détail du maillage','terrainResolution'],['Amplitude du bruit','terrainAmplitude'],['Fréquence du bruit','terrainFrequency'],
   ['Graine','terrainSeed'],['Herbe','terrainGrass'],['Buissons','terrainShrub'],['Rayon de la brosse','brushRadius'],['Force de la brosse','brushStrength'],
@@ -1825,6 +1826,7 @@ let startingMap=true;
 async function restoreStartingMap(){
   try{
     if(mapQuery.has('map'))await maps.loadURL(mapQuery.get('map'));
+    else if(mapQuery.get('exercise')==='appuis')maps.load(thinSurfaceCourse());
     else{
       const saved=await readLocalMap(storageKey);
       if(saved&&!maps.active)maps.load(saved);
