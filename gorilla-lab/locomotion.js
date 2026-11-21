@@ -4,8 +4,16 @@ import {palmCenter} from './hand-skin.js';
 
 const HISTORY_SECONDS = .065;
 const RELEASE_SECONDS = .08;
+const MIN_PUSH_SECONDS = .020;
 const STICK_DISTANCE = .035;
 const CONTACT_SKIN = .003;
+
+export function updateUnderSurfaceCrouch(offset, plannedY, appliedY, braced, eyeHeight, dt) {
+  const limit = Math.min(.34, Math.max(0, eyeHeight + offset - .34));
+  const blocked = Math.max(0, Math.min(0, appliedY) - plannedY);
+  const next = braced ? offset + Math.min(blocked, dt * 2.3) : offset - dt * .65;
+  return Math.max(0, Math.min(limit, next));
+}
 
 export class GorillaLocomotion {
   constructor(Vector3, hands, palmContact) {
@@ -53,6 +61,7 @@ export class GorillaLocomotion {
   }
 
   clearHistory() {
+    this.pushDuration = 0;
     for (const sample of this.history) sample.duration = 0;
   }
 
@@ -204,7 +213,7 @@ export class GorillaLocomotion {
     result.launchSpeed = 0;
     if (dt <= 0) return result;
 
-    let hasContact = false;
+    let hasContact = false, underSurface = false, otherSupport = false;
     for (const state of this.hands) {
       const {hand, previousPalm, previousTarget, offset} = state;
       state.tracked = state.eligible;
@@ -214,10 +223,12 @@ export class GorillaLocomotion {
       if (hand.surface) {
         previousPalm.copy(hand.anchor).add(offset);
         hasContact = true;
+        if (state.normal.y < -.55) underSurface = true;
+        else otherSupport = true;
       }
     }
 
-    if (!contacts && !this.released) {
+    if ((underSurface && !otherSupport) || (!contacts && !this.released)) {
       this.clearHistory();
       return result;
     }
@@ -228,6 +239,7 @@ export class GorillaLocomotion {
     sample.distance.set(0, 0, 0);
     const moving = this.intent.dot(appliedMove) > 0 && this.planned.dot(appliedMove) > 0 && contacts;
     if (moving) {
+      this.pushDuration += this.inputDt;
       const aligned = this.intent.dot(appliedMove) / appliedMove.length();
       sample.distance.copy(appliedMove).clampLength(0, Math.min(aligned, this.planned.length()));
     }
@@ -245,11 +257,11 @@ export class GorillaLocomotion {
     this.average.multiplyScalar(1 / HISTORY_SECONDS);
     if (this.settings.movement === false || (!moving && (hasContact || !this.released))) return result;
 
-    // Give a short, firm vertical push credit without increasing the speed of small steps.
-    if (moving && this.hands.some(({hand}) => hand.groundContact)) {
-      const appliedUpSpeed=sample.distance.y / Math.max(this.inputDt, .001);
-      this.average.y+=Math.max(0, appliedUpSpeed - Math.max(3, this.average.y)) * .38;
-    }
+    // Wait for a second direction sample before firing from a planted hand.
+    // A hand that is already leaving the surface can release immediately.
+    const firmGroundPush = moving && sample.distance.y > 8 * this.inputDt &&
+      this.hands.some(({hand}) => hand.groundContact);
+    if (hasContact && !this.released && !firmGroundPush && this.pushDuration < MIN_PUSH_SECONDS) return result;
 
     // A launch cannot point back into the surfaces that produced it.
     for (let pass = 0; pass < 2; pass++) {
@@ -261,6 +273,7 @@ export class GorillaLocomotion {
       }
     }
     const {jump, weight} = this.settings;
+    if (this.average.y < 0 && underSurface) this.average.y = 0;
     if (this.average.lengthSq() < (1.05 + .04 * weight) ** 2) return result;
     const jumpPower=jump<=5?jump*2:10+(jump-5)*.65;
     velocity.copy(this.average).multiplyScalar((.93 + .15 * jumpPower) / (.72 + .056 * weight));
