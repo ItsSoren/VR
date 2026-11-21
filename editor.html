@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Atelier Gorilla Lab R40</title>
+<title>Atelier Gorilla Lab R41</title>
 <style>
   :root{color-scheme:dark;--page:#101b22;--panel:#192932;--border:#334b58;--text:#f5efdf;--muted:#b4cbd1;--accent:#ffda90;--field:#12232c}
   *{box-sizing:border-box}
@@ -337,7 +337,7 @@
 </head>
 <body>
   <header class="header">
-    <h1>Atelier des cartes <small style="font-size:11px;color:var(--muted)">Gorilla Lab R40</small></h1>
+    <h1>Atelier des cartes <small style="font-size:11px;color:var(--muted)">Gorilla Lab R41</small></h1>
     <a href="./">Retour au jeu</a>
     <a href="./model-editor.html" id="open-model-editor" title="Ouvrir GORILLA / FOUNDRY pour créer et modifier les modèles">✎ Atelier modèles</a>
     <div class="header-actions">
@@ -419,6 +419,8 @@
     <aside class="panel" aria-label="Réglages de la carte">
       <label>Nom de la map<input id="map-name" maxlength="56"></label>
       <div class="fields">
+        <label>Diamètre de la limite invisible (m)<input id="map-boundary" type="number" min="0" max="2048" step="1" title="0 désactive la limite"></label>
+        <label>Plafond invisible (m)<input id="map-ceiling" type="number" min="3" max="256" step="1"></label>
         <label>Étendue de la carte (m)<input id="map-world-size" type="number" min="24" max="2048" step="8" title="Dimension du terrain de construction ; jusqu’à 2 048 m"></label>
         <label>Largeur du panneau (px)<input id="sidebar-width" type="range" min="260" max="520" step="10" value="310"></label>
       </div>
@@ -460,6 +462,17 @@
           <label>Pente X (°)<input id="p-pitch" type="number" step="1"></label>
           <label>Inclinaison Z (°)<input id="p-roll" type="number" step="1"></label>
         </div>
+        <details id="flight-controls" hidden>
+          <summary>Vol décoratif</summary>
+          <div class="fields">
+            <label>Rayon X (m)<input id="flight-x" type="number" min="0" max="640"></label>
+            <label>Rayon Z (m)<input id="flight-z" type="number" min="0" max="640"></label>
+            <label>Durée d’un tour (s)<input id="flight-seconds" type="number" min="10" max="900"></label>
+            <label>Phase de départ (°)<input id="flight-phase" type="number" min="-360" max="360"></label>
+            <label>Variation d’altitude (m)<input id="flight-rise" type="number" min="0" max="100"></label>
+          </div>
+          <p>En jeu, la pièce non solide suit cette orbite. Deux rayons à zéro désactivent le vol.</p>
+        </details>
         <details id="model-object-controls" hidden open>
           <summary>Comportement en jeu · Objet saisissable</summary>
           <div class="fields">
@@ -539,7 +552,7 @@
             <button id="texture-paint" class="wide">Créer une texture · motifs et pinceaux</button>
             <h3 class="wide">Projection et répétition</h3>
           <div class="wide fields" id="terrain-texture-density-fields" hidden>
-              <label>Projection du relief<select id="terrain-projection"><option value="flat">Vue de dessus</option><option value="triplanar">Sur les pentes et parois</option></select></label>
+              <label>Projection du relief<select id="terrain-projection"><option value="flat">Vue de dessus</option><option value="triplanar">Sur les pentes et parois</option><option value="regolith">Régolithe à deux échelles</option></select></label>
               <label>Texture de terrain (motifs/m²)<input id="terrain-textureDensity" type="number" min=".0001" max="10000" step="any"></label>
               <label>Densité après échelle UV <output id="terrain-texture-effective">–</output></label>
             </div>
@@ -584,6 +597,7 @@
           <label>Diamètre apparent du soleil (°)<input data-env="sunDiameter" type="number" min=".1" max="12" step=".1"></label>
           <label>Portée des ombres (m, 0 = auto)<input data-env="shadowRange" type="number" min="0" max="160" step="1"></label>
           <label>Halo du soleil<input data-env="sunHalo" type="number" min="0" max="4" step=".1"></label>
+              <label>Rayons du soleil<input type="number" data-env="sunStarburst" min="0" max="2" step=".1"></label>
           <label>Intensité du soleil<input data-env="sunPower" type="number" min="0" max="12" step=".05"></label>
           <label>Lumière ambiante du ciel<input data-env="ambientColor" type="color"></label>
           <label>Lumière du sol<input data-env="groundColor" type="color"></label>
@@ -626,7 +640,7 @@
     <button data-context-action="focus">Cadrer</button>
     <button data-context-action="delete">Supprimer</button>
   </div>
-  <script defer src="./gorilla-editor-r39.js?v=R40"></script>
+  <script defer src="./gorilla-editor-r39.js?v=R41"></script>
 </body>
 </html>
 

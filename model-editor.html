@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#191d23">
-<title>GORILLA / FOUNDRY · Atelier de modèles R40</title>
+<title>GORILLA / FOUNDRY · Atelier de modèles R41</title>
 <style>
 :root{color-scheme:dark;--ink:#e4e8eb;--soft:#a4adb5;--muted:#798790;--line:#39424a;
 --panel:#232a30;--panel-2:#1d252c;--bg:#151b20;--accent:#edac67;--blue:#77c7cc;
@@ -515,6 +515,7 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
                 <label>Porte <select id="reaction-door"></select></label>
                 <label>Mouvement <select id="reaction-doorState"><option value="open">Ouvrir</option><option value="close">Fermer</option><option value="toggle">Inverser</option><option value="hold">Ouvrir en présence</option></select></label>
                 <label>Attente avant fermeture (s)<input id="reaction-doorDelay" type="number" min=".25" max="10" step=".25" value="1.25"></label>
+                <label>Objet requis (ID du modèle)<input id="reaction-receiver" maxlength="62" placeholder="custom-model-…"></label>
                 <label>Voyant <select id="reaction-light"></select></label>
                 <label>État <select id="reaction-lightState"><option value="on">Allumer</option><option value="off">Éteindre</option><option value="toggle">Inverser</option></select></label>
                 <label>Couleur du voyant <input id="reaction-lightColor" type="color" value="#ffbd54"></label>
@@ -570,6 +571,6 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
   <button data-action="mirror">⥊ Miroir X</button><button data-action="ground">⤓ Poser sur la grille</button>
   <button data-action="focus">⊡ Cadrer</button><button data-action="delete">✕ Supprimer</button>
 </div>
-<script defer src="./gorilla-model-editor-r39.js?v=R40"></script>
+<script defer src="./gorilla-model-editor-r39.js?v=R41"></script>
 </body>
 </html>
