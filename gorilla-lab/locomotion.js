@@ -129,7 +129,7 @@ export class GorillaLocomotion {
       hand.anchor.copy(this.hit).sub(offset);
       normal.copy(this.hitNormal);
       const friction = surface.friction ?? .8;
-      const grip = Math.min(1, Math.max(0, friction * (.75 + settings.grip * .09)));
+      const grip = Math.min(1, Math.max(0, friction * (settings.grip<=5?.75+settings.grip*.18:1.65+(settings.grip-5)*.09)));
       // Ordinary inclines keep a planted palm. Near-vertical contacts can still
       // slide slowly with low grip; ice keeps its own low adhesion at any angle.
       const wall = Math.max(0, 1 - Math.abs(normal.y) / .28);
@@ -251,8 +251,9 @@ export class GorillaLocomotion {
     }
     const {jump, weight} = this.settings;
     if (this.average.lengthSq() < (1.05 + .04 * weight) ** 2) return result;
-    velocity.copy(this.average).multiplyScalar((.93 + .15 * jump) / (.72 + .056 * weight));
-    velocity.clampLength(0, 8.5 + .28 * jump);
+    const jumpPower=jump<=5?jump*2:10+(jump-5)*.65;
+    velocity.copy(this.average).multiplyScalar((.93 + .15 * jumpPower) / (.72 + .056 * weight));
+    velocity.clampLength(0, 8.5 + .28 * jumpPower);
     for (const state of this.hands) {
       const surface = state.hand.surface ?? state.released;
       if (!surface) continue;

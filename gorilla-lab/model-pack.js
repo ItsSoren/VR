@@ -17,7 +17,8 @@ export function normalizePartReaction(value,zone){
   const light=typeof value.light==='string'&&actionIdPattern.test(value.light)?value.light:null;
   const sound=Object.hasOwn(actionSounds,value.sound)?value.sound:null;
   if(!(door||light||sound))return null;
-  return {phase,...(door?{door,doorState:['open','close','toggle'].includes(value.doorState)?value.doorState:'open'}:{}),
+  return {phase,...(door?{door,doorState:['open','close','toggle'].includes(value.doorState)||zone==='trigger'&&value.doorState==='hold'?value.doorState:'open'}:{}),
+    ...(door&&zone==='trigger'&&value.doorState==='hold'?{doorDelay:number(value.doorDelay,.25,10,1.25)}:{}),
     ...(light?{light,lightState:['on','off','toggle'].includes(value.lightState)?value.lightState:'on',
       lightColor:colorPattern.test(value.lightColor??'')?value.lightColor:'#ffbd54'}:{}),
     ...(sound?{sound,soundVolume:number(value.soundVolume,0,1,.6)}:{})};
@@ -96,9 +97,9 @@ export function normalizeModelPack(input) {
       ...(raw.kind==='avatar'?{avatarRig:normalizeAvatarRig(raw.avatarRig)}:{}),
       ...(isBuiltinAsset(raw.assetId)?{assetId:raw.assetId}:{}),
       inGame: raw.kind!=='avatar'&&raw.inGame===true,
-      properties: Object.fromEntries(Object.entries(defaultModelProperties).map(([key, fallback]) => [
+      properties: {...Object.fromEntries(Object.entries(defaultModelProperties).map(([key, fallback]) => [
         key, typeof raw.properties?.[key] === 'boolean' ? raw.properties[key] : fallback,
-      ])),
+      ])),...(raw.kind!=='structure'&&raw.kind!=='avatar'&&raw.properties?.drivable===true?{drivable:true}:{})},
       hitbox:normalizeHitbox(raw?.hitbox),
       ...(raw.physics?{physics:modelPhysics(raw)}:{}),
       ...(raw.partCollisions===true?{partCollisions:true}:{}),

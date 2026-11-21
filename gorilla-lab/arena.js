@@ -17,13 +17,19 @@ export function buildArena(scene,renderer) {
   const {day:sky,sunset,night:nightSky}=createLabSky();
   const panoramas=[sky,sunset,nightSky],backgroundColor=new T.Color(),fog=new T.Fog('#a6d4ea',55,135);
   const diskTexture=canvasTexture(64,64,(ctx,w)=>{
-    ctx.fillStyle='#ffffff';ctx.beginPath();ctx.arc(w/2,w/2,w*.48,0,Math.PI*2);ctx.fill();
+    const g=ctx.createRadialGradient(w/2,w/2,w*.22,w/2,w/2,w*.5);
+    g.addColorStop(0,'#fff');g.addColorStop(.65,'#fff');g.addColorStop(.88,'rgba(255,255,255,.72)');g.addColorStop(1,'rgba(255,255,255,0)');
+    ctx.fillStyle=g;ctx.fillRect(0,0,w,w);
   });
   const disk=new T.Sprite(new T.SpriteMaterial({map:diskTexture,alphaTest:.15,depthWrite:false,fog:false,toneMapped:false}));
   scene.add(disk);
   const haloTexture=canvasTexture(128,128,(ctx,w)=>{
     const g=ctx.createRadialGradient(w/2,w/2,0,w/2,w/2,w/2);
-    g.addColorStop(0,'rgba(255,255,255,.85)');g.addColorStop(.16,'rgba(255,255,255,.42)');g.addColorStop(1,'rgba(255,255,255,0)');
+    g.addColorStop(0,'rgba(255,255,255,.96)');
+    g.addColorStop(.11,'rgba(255,255,255,.67)');
+    g.addColorStop(.28,'rgba(255,255,255,.22)');
+    g.addColorStop(.64,'rgba(255,255,255,.055)');
+    g.addColorStop(1,'rgba(255,255,255,0)');
     ctx.fillStyle=g;ctx.fillRect(0,0,w,w);
   });
   const halo=new T.Sprite(new T.SpriteMaterial({map:haloTexture,blending:T.AdditiveBlending,depthWrite:false,fog:false,toneMapped:false}));

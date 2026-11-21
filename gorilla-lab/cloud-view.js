@@ -6,6 +6,8 @@ import {createBlasterModel} from './arcade-blaster.js';
 import {createToolVisual} from './tool-visual.js';
 import {createCloudClient,mapCode,roomCode,createObjectFeed,publicRooms,maxRoomSourceLength} from './cloud-link.js';
 
+import {splitRoomMap,receiveMapFragment} from './room-map-link.js';
+
 const up=T.Object3D.DEFAULT_UP;
 const cameraType=15;
 const cameraModes=['Libre','Face au joueur','Troisième personne','Caméra physique'];
@@ -119,7 +121,7 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
     peers.delete(id);
   }
   let replicaHost=0,replicaMap=-1,replicaLight=-1,hasInitialWorld=false;
-  let sharedSourceMap=-1,sharedSource=null,sourceAt=-Infinity;
+  let sharedSourceMap=-1,sharedSource=null,sourceAt=-Infinity,mapFragments=null,fragmentIndex=0;
   let cachedMap='',cachedId=0;
   function localMap(){
     const name=currentMap();
@@ -244,7 +246,14 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
       if(!entry){entry={art:null,motion:new T.Vector3(),handMotion:[new T.Vector3(),new T.Vector3()]};peers.set(pose.id,entry);}
       const prior=entry.pose;
       if(client.role==='vr'&&readyHere(pose)&&(!readyHere(prior)||entry.inactive))feed.requestFull();
-      if(pose.role==='vr'&&pose.roomSource)entry.source={map:pose.map,value:pose.roomSource};
+      if(pose.role==='vr'&&pose.roomSource){
+        let value=pose.roomSource;
+        if(value.startsWith('part:')){
+          if(entry.transfer?.map!==pose.map)entry.transfer={map:pose.map};
+          value=receiveMapFragment(value,entry.transfer);
+        }
+        if(value)entry.source={map:pose.map,value};
+      }
       entry.motion.set(0,0,0);
       for(const motion of entry.handMotion)motion.set(0,0,0);
       if(prior&&prior.map===pose.map){
@@ -341,7 +350,7 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
       if(client.role!=='vr'||client.code!==code)return;
       if(!source||source==='file'){
         try{await navigator.clipboard.writeText(url.href);}catch{window.prompt('Copie le lien du salon',url.href);}
-        status.textContent='Lien copié. Exporte aussi la carte du salon et envoie le fichier JSON à l’invité.';
+        status.textContent='Lien copié. La carte sera proposée au salon. Le fichier JSON reste disponible si nécessaire.';
         copyUntil=performance.now()+12000;return;
       }
       url.hash=new URLSearchParams({roomMap:source}).toString();
@@ -411,7 +420,8 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
       else if(client.role!=='vr'&&host&&host.map!==localMap()){
         const advertised=peers.get(host.id)?.source;
         const requiresFile=advertised?.map===host.map&&advertised.value==='file';
-        caption=prefix+(mapLoadError||(requiresFile?
+        const progress=peers.get(host.id)?.transfer;
+        caption=prefix+(mapLoadError||(progress?.map===host.map&&progress.total?'réception de la carte '+progress.fragments.size+'/'+progress.total:requiresFile?
           'carte trop volumineuse pour cet envoi. Demande le JSON à l’hôte puis charge-le ici.':
           'carte différente. En attente de sa source. Tu peux aussi charger le JSON de l’hôte.'));
       }
@@ -473,17 +483,18 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
     const hosting=ready&&client.role==='vr';
     if(hosting&&sharedSourceMap!==map){
       const code=client.code;
-      sharedSourceMap=map;sharedSource=null;sourceAt=-Infinity;
-      Promise.resolve().then(()=>roomMapSource?.()).catch(()=>null).then(source=>{
-        if(client.role==='vr'&&client.code===code&&sharedSourceMap===map)
-          sharedSource=source&&source.length<=maxRoomSourceLength?source:'file';
+      sharedSourceMap=map;sharedSource=null;sourceAt=-Infinity;mapFragments=null;fragmentIndex=0;
+      Promise.resolve().then(()=>roomMapSource?.(true)).catch(()=>null).then(source=>{
+        if(client.role!=='vr'||client.code!==code||sharedSourceMap!==map)return;
+        mapFragments=splitRoomMap(source);
+        sharedSource=mapFragments?'fragments':source&&source.length<=maxRoomSourceLength?source:'file';
       });
     }
-    const share=hosting&&sharedSource&&now-sourceAt>=1800&&client.peers.some(p=>p.role!=='vr'&&p.map!==map);
+    const share=hosting&&sharedSource&&now-sourceAt>=(mapFragments?650:1800)&&client.peers.some(p=>p.role!=='vr'&&p.map!==map);
     const sent=client.tick({x:position.x,y:position.y,z:position.z,yaw,map,ready,avatar:ready&&client.role!=='pc'?avatar:null,
-      roomSource:share?sharedSource:null,hinges:hosting?hingeSnapshot?.():null,
+      roomSource:share?(mapFragments?.[fragmentIndex]??sharedSource):null,hinges:hosting?hingeSnapshot?.():null,
       objectFeed:hosting&&bodies?t=>feed.capture(t,bodies,true):null});
-    if(share&&sent)sourceAt=now;
+    if(share&&sent){sourceAt=now;if(mapFragments)fragmentIndex=(fragmentIndex+1)%mapFragments.length;}
     if(now-statusAt>=150){statusAt=now;updateStatus(ready,now);}
     if(now-telemetryAt>=750){
       telemetryAt=now;

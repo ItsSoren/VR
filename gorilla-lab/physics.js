@@ -28,6 +28,7 @@ export function penetration(position,radius,box,normal) {
   if(!nearBox(position,radius,box))return 0;
   qInv.copy(box.quaternion).invert();
   local.copy(position).sub(box.position).applyQuaternion(qInv);
+  if(box.convex)return convexContact(radius,box,normal);
   const h=box.half;
   closest.copy(local).clamp(box.min,h);
   normal.subVectors(local,closest);
@@ -91,6 +92,28 @@ export function handContact(from,to,radius,boxes,out,hitNormal) {
 
 const probePoint=new T.Vector3(), contact=new T.Vector3(), supportAxis=new T.Vector3();
 const triangle=new T.Triangle(), nearestPoint=new T.Vector3();
+const hullCenter=new T.Vector3(), hullVector=new T.Vector3(), hullNormal=new T.Vector3(), hullClosest=new T.Vector3();
+function convexContact(radius,box,out){
+  const {faces,vertices}=box.shape;
+  hullCenter.set(0,0,0);
+  for(const v of vertices)hullCenter.add(v);
+  hullCenter.multiplyScalar(1/vertices.length);
+  let plane=-Infinity,distance=Infinity;
+  for(const face of faces){
+    hullNormal.copy(face.n);
+    if(hullNormal.dot(hullVector.subVectors(hullCenter,face.a))>0)hullNormal.negate();
+    const signed=hullNormal.dot(hullVector.subVectors(local,face.a));
+    if(signed>plane){plane=signed;out.copy(hullNormal);}
+    triangle.set(face.a,face.b,face.c).closestPointToPoint(local,nearestPoint);
+    const ds=nearestPoint.distanceToSquared(local);
+    if(ds<distance){distance=ds;hullClosest.copy(nearestPoint);}
+  }
+  if(plane<=0){out.applyQuaternion(box.quaternion);return radius-plane;}
+  if(distance>=radius*radius)return 0;
+  if(distance>1e-12)out.subVectors(local,hullClosest).multiplyScalar(1/Math.sqrt(distance));
+  out.applyQuaternion(box.quaternion);
+  return radius-Math.sqrt(distance);
+}
 export function colliderFor(geometry,sphereRadius=0) {
   const positions=geometry.attributes.position;
   const vertices=[], faces=[], keys=new Set();
@@ -154,6 +177,16 @@ function vertexContact(body,box,outNormal,outPoint) {
     local.copy(mesh.position).sub(box.position).applyQuaternion(qInv);
     closest.copy(local).clamp(box.min,box.half);
     if(local.distanceToSquared(closest)>shape.radius*shape.radius)return 0;
+  }
+  if(box.heightfield&&mesh.position.x>=box.xMin&&mesh.position.x<=box.xMax&&mesh.position.z>=box.zMin&&mesh.position.z<=box.zMax){
+    const height=box.height(mesh.position.x,mesh.position.z);
+    // Resolve a downward crossing from the top even if the hull's vertices skipped the skin.
+    if(body.previousY>height&&mesh.position.y<=height&&body.velocity?.y<0){
+      floorNormal(box,mesh.position.x,mesh.position.z,outNormal);
+      const extent=support(body,hullNormal.copy(outNormal).negate());
+      outPoint.copy(mesh.position).addScaledVector(outNormal,-extent);
+      return extent+(height-mesh.position.y)*outNormal.y;
+    }
   }
   let deepest=0, matches=0;
   for(const vertex of shape.vertices){
@@ -263,8 +296,11 @@ function singleFaceContact(body,box,outNormal){
 function shapeContact(body,box,outNormal,outPoint) {
   if(body.shape.sphereRadius||box.heightfield||!box.shape)return vertexContact(body,box,outNormal,outPoint??contact);
   // A hull within two of the box slabs can only contact the third slab's faces.
-  const depth=singleFaceContact(body,box,outNormal)??sat(body,box,outNormal);
-  if(depth>0&&outPoint)contactPoint(body,box,outNormal,outPoint);
+  // Static colliders own a world pose. Some have no render mesh, and hinged
+  // colliders may be offset from the mesh origin.
+  const target={mesh:box,shape:box.shape};
+  const depth=(box.convex?null:singleFaceContact(body,box,outNormal))??sat(body,target,outNormal);
+  if(depth>0&&outPoint)contactPoint(body,target,outNormal,outPoint);
   return depth;
 }
 const palmHull=colliderFor(new T.OctahedronGeometry(1,0).scale(...palmHalfExtent));
@@ -574,6 +610,7 @@ function travelLimit(shape){
 export const objectPhysicsStats={substeps:0,active:0,free:0,sleeping:0};
 
 function advanceBody(body,dt,gravity,surfaceAt){
+  body.previousY=body.mesh.position.y;
   body.velocity.y-=gravity*dt*(body.spec?.physics?.gravity??1)*(surfaceAt?.(body.mesh.position)?.gravity??1);
   body.mesh.position.addScaledVector(body.velocity,dt);
   const speed=body.angular.length();
@@ -732,15 +769,16 @@ function volumeHeightContact(p,radius,field,out){
 }
 
 const playerProbe={mesh:{position:null,quaternion:new T.Quaternion()},shape:{sphereRadius:0,normals:[],edges:[]}};
-function objectPenetration(position,radius,object,out){
-  if(!object.blocksPlayer || object.owner || !object.mesh.visible)return 0;
+function objectPenetration(position,radius,object,out,heldSupport=false){
+  if(!object.blocksPlayer || object.owner&&!heldSupport || !object.mesh.visible)return 0;
   if(position.distanceToSquared(object.mesh.position)>(radius+object.radius)**2)return 0;
   playerProbe.mesh.position=position;
   playerProbe.shape.sphereRadius=radius;
   return sat(playerProbe,object,out);
 }
-export function playerObjectContact(position,radius,object,velocity,outNormal){
-  const depth=objectPenetration(position,radius,object,normal);
+export function playerObjectContact(position,radius,object,velocity,outNormal,heldSupport=false){
+  const depth=objectPenetration(position,radius,object,normal,heldSupport);
+  if(heldSupport&&normal.y<.62)return false;
   if(depth<=0)return false;
   position.addScaledVector(normal,depth+.001);
   outNormal?.copy(normal);

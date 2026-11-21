@@ -200,11 +200,13 @@ const spawnTypes=[...basicTypes,...detailTypes,...animatedTypes,...workshopTypes
 objectSpecs[8].properties={supportWhileHeld:true};
 objectSpecs[11].properties={supportWhileHeld:true};
 function supportAxisFor(spec){
-  if(!spec.properties?.supportWhileHeld)return null;
   spec.geo.computeBoundingBox();
   const axisSize=spec.geo.boundingBox.getSize(new T.Vector3());
   const k=axisSize.x>=axisSize.y&&axisSize.x>=axisSize.z?0:axisSize.y>=axisSize.z?1:2;
-  return new T.Vector3().setComponent(k,axisSize.getComponent(k)*.49);
+  const length=axisSize.getComponent(k);
+  const cross=Math.max(axisSize.getComponent((k+1)%3),axisSize.getComponent((k+2)%3));
+  if(spec.properties?.supportWhileHeld===false||!spec.properties?.supportWhileHeld&&(length<.6||length<cross*2))return null;
+  return new T.Vector3().setComponent(k,length*.49);
 }
 for(const spec of objectSpecs)if(spec)spec.supportAxis=supportAxisFor(spec);
 function cameraDetails(mesh){
@@ -227,7 +229,7 @@ function makePropMesh(type,ownMaterial=false){
 let maps=null;
 const objects=[],noBodies=[];
 const desktopActor={held:null},remoteActors=new Map();
-let remoteHeld=0;
+let remoteHeld=0,riddenVehicle=null,driveSpeed=0;
 let nextNetId=1;
 const gripRotation=new T.Quaternion(), inverseGrip=new T.Quaternion();
 const spawnPoint=new T.Vector3(),spawnDirection=new T.Vector3(),spawnOrigin=new T.Vector3(),spawnHit=new T.Vector3(),spawnNormal=new T.Vector3();
@@ -269,6 +271,7 @@ function spawnObject(index,origin,actor,quiet=false){
   return body;
 }
 function releaseAll(){
+  riddenVehicle=null;driveSpeed=0;
   for(const hand of hands)release(hand,false);
   release(desktopActor,false);
   for(const actor of remoteActors.values())release(actor,false);
@@ -793,7 +796,7 @@ const spectator=addSpectator({scene,localColor:avatarColor,currentMap:()=>(maps.
   exportRoomMap:()=>maps.save(),
   hingeSnapshot:()=>maps.hingeSnapshot(),
   applyHinges:(states,initial)=>maps.receiveHinges(states,initial),
-  roomMapSource:()=>maps.roomMapSource(),
+  roomMapSource:forRoom=>maps.roomMapSource(forRoom),
   makeReplica:type=>{
     const mesh=makePropMesh(type,true);
     if(mesh)grade(mesh.material);
@@ -1244,6 +1247,12 @@ addEventListener('keydown',e=>{
 addEventListener('keyup',e=>keyboard.up(e.code));
 addEventListener('blur',()=>{keyboard.clear();flat.clear();blasterTrigger.clear();});
 function grabFlat(origin,direction){
+  if(riddenVehicle){
+    const body=riddenVehicle;riddenVehicle=null;driveSpeed=0;
+    rig.position.copy(body.mesh.position).add(scratch.set(body.radius+.38,0,0));
+    velocity.set(0,0,0);hasPreviousHead=false;
+    showGameHint('Descendu du véhicule.');return true;
+  }
   if(!settings.objects)return false;
   const online=spectator.guestActive;
   if(online&&remoteHeld){
@@ -1259,8 +1268,13 @@ function grabFlat(origin,direction){
     const objectId=hit.object.userData.netId;
     if(spectator.sendAction({type:'hold',objectId}))remoteHeld=objectId;
   }else{
+    const body=objects.find(o=>o.mesh===hit.object);
+    if(!spectator.role&&body?.spec.properties?.drivable&&!body.frozen){
+      riddenVehicle=body;driveSpeed=0;velocity.set(0,0,0);hasPreviousHead=false;
+      showGameHint('Véhicule · déplacement pour piloter, E pour descendre');return true;
+    }
     camera.getWorldQuaternion(toolRotationWorld);
-    manipulateBody(objects.find(o=>o.mesh===hit.object),1,desktopActor,Math.max(.75,hit.distance));
+    manipulateBody(body,1,desktopActor,Math.max(.75,hit.distance));
   }
   return true;
 }
@@ -1456,8 +1470,10 @@ function updateTorso(inVR,dt){
   monkey.quaternion.setFromEuler(bodyEuler);
 }
 
+const vehicleEuler=new T.Euler(0,0,0,'YXZ'),vehicleForward=new T.Vector3();
 function character(frame,space,pose,dt,inputDt=dt){
   const inVR=Boolean(pose);
+  if(riddenVehicle&&(inVR||spectator.role||!objects.includes(riddenVehicle)||riddenVehicle.owner))riddenVehicle=null;
   const targetEye=.43+settings.size*.088;
   if(inVR){
     const p=pose.transform.position;
@@ -1505,6 +1521,21 @@ function character(frame,space,pose,dt,inputDt=dt){
     velocity.y-=gravity*dt;
     const x=Number(keys.has('KeyD'))-Number(keys.has('KeyA')||keys.has('KeyQ'))+flat.movement.x;
     const z=Number(keys.has('KeyS'))-Number(keys.has('KeyW')||keys.has('KeyZ'))+flat.movement.z;
+    if(riddenVehicle){
+      const body=riddenVehicle;
+      vehicleEuler.setFromQuaternion(body.mesh.quaternion);
+      const steering=T.MathUtils.clamp(x,-1,1),throttle=T.MathUtils.clamp(-z,-1,1);
+      if(Math.abs(throttle)>.05)vehicleEuler.y-=steering*1.55*dt*Math.sign(throttle);
+      vehicleEuler.x=0;vehicleEuler.z=0;
+      body.mesh.quaternion.setFromEuler(vehicleEuler);
+      body.angular.set(0,0,0);
+      driveSpeed=T.MathUtils.lerp(driveSpeed,throttle*(throttle<0?2.7:6.2),1-Math.exp(-dt*4));
+      vehicleForward.set(0,0,-1).applyQuaternion(body.mesh.quaternion).multiplyScalar(driveSpeed);
+      body.velocity.x=vehicleForward.x;body.velocity.z=vehicleForward.z;body.sleeping=false;
+      rig.position.copy(body.mesh.position).addScaledVector(up,body.shape.thickness*.42);
+      worldHead.copy(rig.position).add(head);
+      velocity.set(0,0,0);delta.set(0,0,0);
+    }else{
     const sprint=keys.has('ShiftLeft')||keys.has('ShiftRight');
     scratch.set(x,0,z).clampLength(0,1).applyAxisAngle(up,yaw).multiplyScalar(sprint?5.4:3.4);
     const a=1-Math.exp(-dt*(floor?.friction<.1?2:grounded?13:4));
@@ -1522,9 +1553,10 @@ function character(frame,space,pose,dt,inputDt=dt){
     // Bias into the surface along its normal. A vertical bias alone injects
     // a downhill step on every collision correction, even with no input.
     if(stickToGround)delta.addScaledVector(n,-gravity*dt*dt);
+    }
   }
 
-  if(settings.collisions&&hasPreviousHead){
+  if(settings.collisions&&hasPreviousHead&&!riddenVehicle){
     candidate.copy(worldHead).add(delta);
     const headHit=handContact(previousHead,candidate,HEAD_RADIUS,activeBoxes,point,playerNormal);
     if(headHit&&scratch.subVectors(candidate,point).dot(playerNormal)<0){
@@ -1532,11 +1564,19 @@ function character(frame,space,pose,dt,inputDt=dt){
       removeInwardVelocity(velocity,playerNormal);
     }
   }
+  if(settings.collisions&&delta.y<0){
+    const x=worldHead.x+delta.x,z=worldHead.z+delta.z;
+    for(const field of activeBoxes){
+      if(!field.heightfield||x<field.xMin||x>field.xMax||z<field.zMin||z>field.zMax)continue;
+      const top=field.height(x,z),feet=rig.position.y;
+      if(feet>=top-.015&&feet+delta.y<top){delta.y=top+.001-feet;velocity.y=Math.max(0,velocity.y);}
+    }
+  }
   rig.position.add(delta);
   worldHead.copy(head).applyAxisAngle(up,yaw).add(rig.position);
   grounded=false;
   walkingSupport.normal.set(0,0,0);walkingSupport.surface=null;
-  if(settings.collisions){
+  if(settings.collisions&&!riddenVehicle){
     // Le solveur conserve trois sphères, avec un décalage horizontal piloté par le torse.
     bodyCollisionBack.set(0,-1,0).applyQuaternion(monkey.quaternion);
     bodyCollisionBack.y=0;
@@ -1549,7 +1589,8 @@ function character(frame,space,pose,dt,inputDt=dt){
       prior.copy(point);
       grounded=solve(point,radius,arena.boxes,velocity,0,3+settings.grip,dt,i===0?walkingSupport:null)||grounded;
       if(settings.objects)for(const object of blockers){
-        if(object.blocksPlayer&&!object.owner&&playerObjectContact(point,radius,object,velocity,playerNormal)&&playerNormal.y>.6)grounded=true;
+        const heldSupport=!inVR&&i===0&&object.owner===desktopActor&&!object.toolHold&&!!object.spec.supportAxis;
+        if((!object.owner||heldSupport)&&playerObjectContact(point,radius,object,velocity,playerNormal,heldSupport)&&playerNormal.y>.6)grounded=true;
       }
       solve(point,radius,arena.boxes,velocity,0,3+settings.grip,dt);
       scratch.subVectors(point,prior);
@@ -1780,10 +1821,10 @@ renderer.setAnimationLoop((time,frame)=>{
     else if(interact){
       const hosting=spectator.role==='vr';
       const request=spectator.guestActive?id=>spectator.sendAction({type:'hinge',objectId:id}):null;
-      const reaction=maps.interactReaction(raySource,forward,ownsReactionDoors);
+      const reaction=riddenVehicle?null:maps.interactReaction(raySource,forward,ownsReactionDoors);
       if(reaction)notifyMapTrigger(reaction);
       else {
-        const door=maps.interactHinge(raySource,forward,ownsReactionDoors,request,hosting);
+        const door=riddenVehicle?false:maps.interactHinge(raySource,forward,ownsReactionDoors,request,hosting);
         if(door)showGameHint(door);
         else if(!grabFlat(raySource,forward))fixtureRay(raySource,forward,true);
       }

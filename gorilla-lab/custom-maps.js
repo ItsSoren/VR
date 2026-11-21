@@ -5,7 +5,7 @@ import * as T from 'three';
 import {shouldKeepArenaAsset} from './arena-map-pieces.js';
 import {tiledBox,transformUVs,decorPrimitiveGeometry,rampGeometry} from './texture-geometry.js';
 import {terrainGeometry,applyTerrainProjection,terrainCollider,terrainVegetation,terrainInstanceBoxes,disposeVegetation,sculptTerrain,normalizeTerrain,resizeTerrain} from './terrain-edit.js';
-import {applyHinge,hingeAngle} from './model-hinge.js';
+import {applyMechanism} from './model-hinge.js';
 import {boxCollider,colliderFor} from './physics.js';
 import {createModelUnitGeometry,createModelMaterial,modelCollisionZones,modelCollisionGeometry,disposeModelMaterial,createModelPartGeometry,createModelPartMaterial,modelBounds} from './model-pack.js';
 import {mapCode,maxSyncedHinges} from './cloud-link.js';
@@ -82,12 +82,12 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   function moveHinges(row){
     row.mesh.updateMatrixWorld(true);
     for(const hinge of row.hinges){
-      applyHinge(hinge.mesh,hinge.pivot,neutralPosition,neutralRotation,hingeAngle(hinge.config,hinge.progress));
-      if(!hinge.collider)continue;
-      const {collider,center}=hinge;
-      collider.position.copy(center).applyQuaternion(hinge.mesh.quaternion).add(hinge.mesh.position)
-        .applyMatrix4(row.mesh.matrixWorld);
-      row.mesh.getWorldQuaternion(collider.quaternion).multiply(hinge.mesh.quaternion);
+      for(const {mesh,collider,center} of [hinge,...hinge.children]){
+        applyMechanism(mesh,hinge.pivot,neutralPosition,neutralRotation,hinge.config,hinge.progress,hinge.distanceScale);
+        if(!collider)continue;
+        collider.position.copy(center).applyQuaternion(mesh.quaternion).add(mesh.position).applyMatrix4(row.mesh.matrixWorld);
+        row.mesh.getWorldQuaternion(collider.quaternion).multiply(mesh.quaternion);
+      }
     }
     row.mesh.updateMatrixWorld(true);
   }
@@ -103,6 +103,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     const articulated=model.parts.some(part=>part.hinge);
     const zones=modelCollisionZones(articulated?{...model,partCollisions:true}:model,dimensions);
     if(zones===null)row.colliders.push(globalModelCollider(piece,dimensions,root));
+    const attached=[];
     let zoneIndex=0;
     root.updateMatrixWorld(true);
     for(const [partIndex,part] of model.parts.entries()){
@@ -133,13 +134,18 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
           row.colliders.push(collider);
         }
       }
+      if(part.group&&!part.hinge&&part.zone!=='trigger')attached.push({group:part.group,mesh,collider,center:zone?.center});
       if(part.hinge){
         const pivot=new T.Vector3(...part.hinge.pivot).sub(center).multiply(ratio);
         const id=index*100+partIndex+1;
-        const hinge={id,mesh,pivot,collider,center:zone?.center,config:part.hinge,progress:0,target:0,remoteProgress:0};
+        const hinge={id,mesh,pivot,collider,group:part.group,children:[],center:zone?.center,config:part.hinge,distanceScale:ratio[part.hinge.axis??'y'],progress:0,target:0,remoteProgress:0};
         row.hinges.push(hinge);hingeById.set(id,hinge);mesh.userData.hingeId=id;
         if(part.actionId)row.targets.get(part.actionId).hinge=hinge;
       }
+    }
+    for(const child of attached){
+      const parent=row.hinges.find(hinge=>hinge.group===child.group);
+      if(parent){parent.children.push(child);child.mesh.userData.hingeId=parent.id;}
     }
     moveHinges(row);
     return row;
@@ -156,6 +162,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
         }
         const goal=enabled?hinge.target:0;
         if(!enabled)hinge.target=0;
+        if(hinge.holdUntil&&performance.now()>=hinge.holdUntil){hinge.target=0;hinge.holdUntil=0;}
         if(hinge.progress===goal)continue;
         const step=dt/hinge.config.seconds;
         hinge.progress=goal?Math.min(goal,hinge.progress+step):Math.max(0,hinge.progress-step);
@@ -176,7 +183,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   let hasUseReaction=false;
   function performReaction(row,reaction,position,ownsDoors){
     const door=row.targets.get(reaction.door)?.hinge;
-    if(door&&ownsDoors)door.target=reaction.doorState==='toggle'?1-door.target:Number(reaction.doorState==='open');
+    if(door&&ownsDoors&&reaction.doorState!=='hold')door.target=reaction.doorState==='toggle'?1-door.target:Number(reaction.doorState==='open');
     const light=row.targets.get(reaction.light);
     if(light?.originalEmission){
       light.lightOn=reaction.lightState==='toggle'?!light.lightOn:reaction.lightState==='on';
@@ -184,13 +191,14 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
       if(light.lightOn)color.set(reaction.lightColor);
       else color.copy(light.originalEmission);
     }
-    return reaction.sound?{cue:{name:reaction.sound,volume:reaction.soundVolume,at:position.toArray()}}:{};
+    return reaction.sound?{cue:{name:reaction.sound,volume:reaction.soundVolume,at:position.toArray()}}:door||light?.originalEmission?{}:null;
   }
   function interactReaction(origin,direction,ownsDoors){
     if(!hasUseReaction)return null;
     const hit=pickPiece(origin,direction),source=hit?.object.userData.reaction;
     if(!source)return null;
-    return {phase:'use',part:source.part.name,...performReaction(source.row,source.part.reaction,hit.point,ownsDoors)};
+    const reaction=performReaction(source.row,source.part.reaction,hit.point,ownsDoors);
+    return reaction?{phase:'use',part:source.part.name,...reaction}:null;
   }
   function toggleHinge(hinge,online){
     if(online&&hingeById.size>maxSyncedHinges)return 'Trop de portes à synchroniser sur cette carte.';
@@ -294,7 +302,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     group.add(mesh);
     const half=new T.Vector3(piece.w/2,piece.h/2,piece.d/2);
     const collider={mesh,position:mesh.position,quaternion:mesh.quaternion,half,min:half.clone().negate(),
-      shape:piece.primitive==='ramp'?colliderFor(geometry):boxCollider(half),friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:true,type:piece.material};
+      convex:piece.primitive==='ramp',shape:piece.primitive==='ramp'?colliderFor(geometry):boxCollider(half),friction:piece.grip,gravity:piece.gravity,bounce:piece.bounce,zone:true,type:piece.material};
     if(!piece.terrain)return {mesh,collider,custom,ownTexture};
     const vegetation=terrainVegetation(piece);
     if(vegetation)mesh.add(vegetation);
@@ -535,11 +543,11 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     applyMap(previous.map);
     inform(previous.map?'Carte locale restaurée · '+previous.map.name:'Arène locale restaurée');
   }
-  async function roomMapSource(){
+  async function roomMapSource(forRoom=false){
     if(!map)return 'arena';
     if(loadedSource?.signature===signature&&loadedSource.url.startsWith('https:'))return loadedSource.url;
     if(typeof CompressionStream==='undefined')return null;
-    const packed=await encodeRoomMapLink(map);
+    const packed=await encodeRoomMapLink(map,forRoom);
     return packed;
   }
   const triggerRay=new T.Ray(),triggerEnd=new T.Vector3(),triggerHit=new T.Vector3();
@@ -554,6 +562,10 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
       if(row.bounds.containsPoint(triggerRay.origin)||row.bounds.containsPoint(triggerEnd)||
         hit&&triggerHit.distanceToSquared(triggerRay.origin)<=1.45**2){
         inside.add(row);
+        if(ownsDoors&&row.reaction?.doorState==='hold'){
+          const door=row.sourceRow?.targets.get(row.reaction.door)?.hinge;
+          if(door){door.target=1;door.holdUntil=performance.now()+row.reaction.doorDelay*1000;}
+        }
         if(!insideTriggers.has(row))events.push({phase:'enter',part:row.name,model:row.model,...(row.notice?.phase==='enter'?{message:row.notice.text}:{}),...(row.portal?{portal:row.portal}:{}),...zoneReaction(row,'enter',ownsDoors)});
       }else if(insideTriggers.has(row))events.push({phase:'exit',part:row.name,model:row.model,...(row.notice?.phase==='exit'?{message:row.notice.text}:{}),...zoneReaction(row,'exit',ownsDoors)});
     }

@@ -1,9 +1,9 @@
-import {encodeRoomMapLink,decodeRoomMapLink} from '../gorilla-lab/room-map-link.js';
+import {encodeRoomMapLink,decodeRoomMapLink,splitRoomMap,receiveMapFragment} from '../gorilla-lab/room-map-link.js';
 import {avatarTemplateParts,createAvatarRig} from '../gorilla-lab/avatar-rig.js';
 import {palmCenter,palmHalfExtent} from '../gorilla-lab/hand-skin.js';
 import {createSettings,readScreenRenderSettings,saveScreenRenderSettings} from '../gorilla-lab/game-settings.js';
 import {GorillaLocomotion} from '../gorilla-lab/locomotion.js';
-import {boxCollider,colliderFor,palmContact,playerObjectContact,penetration} from '../gorilla-lab/physics.js';
+import {boxCollider,colliderFor,solveObjects,palmContact,playerObjectContact,penetration} from '../gorilla-lab/physics.js';
 import {createCloudClient,createObjectFeed,encodePose,encodeAvatar,decodeAvatar} from '../gorilla-lab/cloud-link.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -1257,4 +1257,31 @@ test('entry opens its instance door and turns its lamp on while exit does not re
   maps.updateHinges(1,true);assert.equal(maps.hingeSnapshot().length,0);
   assert.equal(lamps[0].material.emissive.getHexString(),'000000');
  }finally{globalThis.document=original;}
+});
+
+test('a prop lands on a meshless model volume and a ramp rejects empty space',()=>{
+  const v=(x,y,z)=>new T.Vector3(x,y,z),half=v(1,.2,1);
+  const platform={position:v(0,0,0),quaternion:new T.Quaternion(),half,min:half.clone().negate(),shape:boxCollider(half),friction:.8};
+  const mesh=new T.Mesh(new T.BoxGeometry(.3,.3,.3));
+  mesh.position.y=1;
+  const shape=colliderFor(mesh.geometry);
+  const body={mesh,shape,radius:shape.radius,mass:1,velocity:v(0,0,0),angular:v(0,0,0)};
+  for(let i=0;i<180;i++)solveObjects([body],[platform],1/120,9.81,0);
+  assert.ok(Math.abs(mesh.position.y-.35)<.015,mesh.position.y);
+  const ramp={...platform,half:v(2,1,3),convex:true,shape:colliderFor(rampGeometry(4,2,6))};
+  assert.equal(penetration(v(0,.3,2),.18,ramp,v(0,0,0)),0);
+  const normal=v(0,0,0);
+  assert.ok(penetration(v(0,.08,0),.18,ramp,normal)>0);
+  assert.ok(normal.y>.8&&normal.z>.1);
+});
+
+test('room map fragments recover a missed first packet and decode in order',async()=>{
+  let seed=77,text='';
+  for(let i=0;i<20000;i++){seed=(Math.imul(seed,1664525)+1013904223)>>>0;text+=(seed>>>24).toString(36).padStart(2,'0');}
+  const map={text},source=await encodeRoomMapLink(map,true),fragments=splitRoomMap(source),transfer={};
+  assert.ok(fragments.length>1);
+  for(const frame of fragments.slice(1).reverse())assert.equal(receiveMapFragment(frame,transfer),null);
+  assert.equal(receiveMapFragment(fragments[1],transfer),null);
+  const complete=receiveMapFragment(fragments[0],transfer);
+  assert.deepEqual(JSON.parse(await decodeRoomMapLink(complete,100000)),map);
 });

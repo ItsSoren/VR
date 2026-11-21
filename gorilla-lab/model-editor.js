@@ -13,7 +13,7 @@ import {openTextureStudio} from './texture-studio.js';
 import {openShapeStudio} from './shape-studio.js';
 import {modelFacePosition,modelGroupTransform,scaleHandleSigns} from './editor-scale.js';
 import {avatarJoints,avatarTemplateParts,avatarReady,createAvatarRig,normalizeAvatarJoint,normalizeAvatarRig} from './avatar-rig.js';
-import {applyHinge,hingeAngle,normalizeHinge} from './model-hinge.js';
+import {applyMechanism,normalizeHinge} from './model-hinge.js';
 import {startingSketch} from './custom-shape.js';
 
 // GORILLA / FOUNDRY. Geometry remains in the Gorilla model-pack v1 format:
@@ -293,6 +293,8 @@ function updateInspector(){
     const physics=modelPhysics(model);
     for(const key of ['gravity','bounce'])if(document.activeElement!==$('model-'+key))$('model-'+key).value=physics[key];
     $('in-game').checked=model.inGame;
+    $('drivable').checked=model.properties.drivable===true;
+    $('drivable').disabled=model.kind!=='prop';
     const destination='./editor.html?model='+encodeURIComponent(model.id);
     for(const id of ['send-to-map','quick-send-to-map'])$(id).href=destination;
     const returnToInstance=fromCards&&model.id===contextModel;
@@ -438,12 +440,12 @@ for(const button of document.querySelectorAll('.tab')){
 
 let hingeFrame=0;
 const hingeBase=new T.Vector3(),hingePivot=new T.Vector3(),hingeBasis=new T.Quaternion(),hingeEuler=new T.Euler();
-const hingeKeys=['closed','open','seconds'],hingeAxes=['x','y','z'];
+const hingeKeys=['closed','open','seconds','travel'],hingeAxes=['x','y','z'];
 function stopHingePreview(){
   cancelAnimationFrame(hingeFrame);hingeFrame=0;$('hinge-preview').value=0;
   $('hinge-play').textContent='Lire';
 }
-const reactionFields=['phase','door','doorState','light','lightState','lightColor','sound','soundVolume'];
+const reactionFields=['phase','door','doorState','doorDelay','light','lightState','lightColor','sound','soundVolume'];
 function updateReactionInspector(){
   const model=currentModel(),part=currentPart();
   const eligible=part&&model.kind==='structure'&&(part.zone!=='trigger'||model.partCollisions&&model.properties.collidable);
@@ -462,7 +464,9 @@ function updateReactionInspector(){
   options('door',value=>Boolean(value.hinge));
   options('light',value=>value.zone!=='trigger');
   setOptions($('reaction-sound'),[['','Aucun'],...Object.entries(actionSounds)],reaction.sound??'');
+  $('reaction-doorState').querySelector('[value=hold]').hidden=part.zone!=='trigger';
   $('reaction-doorState').value=reaction.doorState??'open';
+  $('reaction-doorDelay').value=reaction.doorDelay??1.25;
   $('reaction-lightState').value=reaction.lightState??'on';
   $('reaction-lightColor').value=reaction.lightColor??'#ffbd54';
   $('reaction-soundVolume').value=reaction.soundVolume??.6;
@@ -480,6 +484,7 @@ for(const field of reactionFields)$('reaction-'+field).onchange=()=>{
     value[key]=target.actionId;
   }
   value.soundVolume=$('reaction-soundVolume').valueAsNumber;
+  value.doorDelay=$('reaction-doorDelay').valueAsNumber;
   const reaction=normalizePartReaction(value,part.zone);
   if(reaction)part.reaction=reaction;
   else delete part.reaction;
@@ -495,13 +500,16 @@ function updateHingeInspector(){
     eligible?'Articule le panneau sélectionné. Le modèle devient un décor.':'Sélectionne une pièce solide ou traversable du décor.';
   if(!hinge)return;
   hingeAxes.forEach((key,index)=>$(`hinge-${key}`).value=hinge.pivot[index]);
-  for(const key of hingeKeys)$(`hinge-${key}`).value=hinge[key];
+  for(const key of hingeKeys)$(`hinge-${key}`).value=hinge[key]??1;
+  $('hinge-mode').value=hinge.mode??'pivot';$('hinge-direction').value=hinge.axis??'y';
+  $('hinge-travel').disabled=!hinge.mode;
 }
 function saveHingeChange(){
   const part=currentPart();
   if(!part?.hinge)return;
   remember();
   part.hinge=normalizeHinge({
+    mode:$('hinge-mode').value,axis:$('hinge-direction').value,
     pivot:hingeAxes.map(key=>$(`hinge-${key}`).valueAsNumber),
     ...Object.fromEntries(hingeKeys.map(key=>[key,$(`hinge-${key}`).valueAsNumber])),
   });
@@ -600,17 +608,21 @@ function previewEffectFrame(now){
   if(now-previousEffectFrame>=32){previousEffectFrame=now;render();}
   else if($('model-inspector').dataset.tab==='animation')effectFrame=requestAnimationFrame(previewEffectFrame);
 }
+$('hinge-mode').onchange=saveHingeChange;
+$('hinge-direction').onchange=saveHingeChange;
 function render(){
   const model=currentModel(),parts=model?.parts??[];
   const animate=$('model-inspector').dataset.tab==='animation'&&model?.kind==='structure';
   for(let index=0;index<previews.children.length;index++){
     const mesh=previews.children[index],part=parts[index];
-    if(!part?.hinge||part.zone==='trigger')continue;
+    if(!part||part.zone==='trigger')continue;
+    const parent=part.hinge?part:part.group?parts.find(p=>p.group===part.group&&p.hinge):null;
+    if(!parent)continue;
     if(!animate&&!mesh.userData.hingePreview)continue;
     mesh.userData.hingePreview=animate;
-    const position=hingeBase.fromArray(part.position),pivot=hingePivot.fromArray(part.hinge.pivot);
+    const position=hingeBase.fromArray(part.position),pivot=hingePivot.fromArray(parent.hinge.pivot);
     const rotation=hingeBasis.setFromEuler(hingeEuler.set(...part.rotation.map(T.MathUtils.degToRad),'ZYX'));
-    applyHinge(mesh,pivot,position,rotation,animate?hingeAngle(part.hinge,index===partIndex?+$('hinge-preview').value:0):0);
+    applyMechanism(mesh,pivot,position,rotation,parent.hinge,animate&&parts[partIndex]===parent?+$('hinge-preview').value:0);
   }
   updateSkeletonGuide();
   setModelEffectTime(performance.now()*.001);
@@ -1389,6 +1401,12 @@ $('model-kind').onchange=event=>{
 };
 $('in-game').onchange=event=>{
   beforeChange(event.target);currentModel().inGame=event.target.checked;markDirty();
+};
+$('drivable').onchange=event=>{
+  const model=currentModel();if(model?.kind!=='prop')return;
+  beforeChange(event.target);
+  if(event.target.checked)model.properties.drivable=true;else delete model.properties.drivable;
+  markDirty();
 };
 for(const key of Object.keys(defaultModelProperties)){
   $(key).onchange=event=>{
