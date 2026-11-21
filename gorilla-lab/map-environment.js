@@ -2,15 +2,15 @@ export const environmentPresets=['Jour','Coucher de soleil','Nuit'];
 export const defaultEnvironment={
   preset:0,sky:'preset',rotation:0,skyTint:'#ffffff',skyColor:'#a6d4ea',skyImage:null,
   fog:true,fogColor:'#a6d4ea',fogNear:55,fogFar:135,
-  azimuth:-131,elevation:50,sunColor:'#fff0d0',sunPower:3,sunDiameter:3.3,sunHalo:1,sunStarburst:0,shadowRange:0,
+  azimuth:-131,elevation:50,sunColor:'#fff0d0',sunPower:3,sunDiameter:3.3,sunHalo:1,sunRadiance:7.5,shadowRange:0,
   ambientColor:'#daeaff',groundColor:'#88724c',ambientPower:2.25,
 };
 const presets=[
   defaultEnvironment,
   {...defaultEnvironment,preset:1,skyColor:'#ec986e',fogColor:'#ec986e',azimuth:-144,elevation:13,
-    sunColor:'#ff9c51',sunPower:3.25,ambientColor:'#d8b6dc',groundColor:'#b37762',ambientPower:1.15},
+    sunColor:'#ff9c51',sunPower:3.25,sunRadiance:9,ambientColor:'#d8b6dc',groundColor:'#b37762',ambientPower:1.15},
   {...defaultEnvironment,preset:2,skyColor:'#0b1020',fogColor:'#0b1020',azimuth:-39,elevation:35,
-    sunColor:'#879eff',sunPower:.35,ambientColor:'#708edc',groundColor:'#292e44',ambientPower:.35},
+    sunColor:'#879eff',sunPower:.35,sunRadiance:1,ambientColor:'#708edc',groundColor:'#292e44',ambientPower:.35},
 ];
 export function environmentPreset(index){return {...(presets[index]??defaultEnvironment)};}
 export const maxSkyFileBytes=5_000_000;
@@ -33,7 +33,7 @@ export function normalizeEnvironment(value){
     azimuth:number(value.azimuth,-360,360,defaults.azimuth),elevation:number(value.elevation,-89,89,defaults.elevation),
     sunColor:color(value.sunColor,defaults.sunColor),sunPower:number(value.sunPower,0,12,defaults.sunPower),
     sunDiameter:number(value.sunDiameter,.1,12,defaults.sunDiameter),sunHalo:number(value.sunHalo,0,4,defaults.sunHalo),
-    sunStarburst:number(value.sunStarburst,0,2,0),
+    sunRadiance:number(value.sunRadiance,.1,100,Math.max(1,number(value.sunPower,0,12,defaults.sunPower)*2.5)),
     shadowRange:number(value.shadowRange,0,160,defaults.shadowRange),
     ambientColor:color(value.ambientColor,defaults.ambientColor),groundColor:color(value.groundColor,defaults.groundColor),
     ambientPower:number(value.ambientPower,0,12,defaults.ambientPower),

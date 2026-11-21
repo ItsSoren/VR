@@ -1,3 +1,4 @@
+import {createScreenBloom} from './hdr-bloom.js';
 import {environmentPreset,environmentPresets,maxSkyFileBytes,normalizeEnvironment} from './map-environment.js';
 import {readLocalMap,writeLocalMap} from './map-storage.js';
 import * as T from 'three';
@@ -393,6 +394,7 @@ scene.add(sun);
 const referenceScene=new T.Scene();
 referenceScene.fog=new T.Fog('#a6d4ea',55,135);
 const previewArena=buildArena(referenceScene,renderer);
+const previewBloom=createScreenBloom(renderer);
 previewArena.probe.userData.editorAssetId='chrome-sphere';
 const labFixtures=addLabFixtures(referenceScene,previewArena.boxes,{quality:()=> '7/10',resolution:()=> '7/10',textureSize:()=> '512 px'});
 const builtinByAsset=new Map(createBuiltinModelTemplates().map(model=>[model.assetId,model]));
@@ -441,7 +443,7 @@ arenaBackdrop.add(...[...referenceScene.children]);
 scene.add(arenaBackdrop,...previewArena.lighting);
 const previewHill=previewArena.boxes.find(box=>box.heightfield).mesh;
 previewHill.userData.editorAssetId='lab-hill';
-previewArena.visual(7,0,7,true,true,true,512,false);
+previewArena.visual(7,0,7,true,true,512,false);
 const environmentFields=[...document.querySelectorAll("[data-env]")];
 const environmentStatus=$('environment-status');
 
@@ -577,7 +579,7 @@ function queueRender() {
     camera.updateProjectionMatrix();
     previewArena.centerSky(camera.position,camera.far);
     const started=performance.now();
-    renderer.render(scene, camera);
+    if(!previewBloom.render(scene,camera,previewArena.sunDisk.visible?previewArena.bloomAmount:0))renderer.render(scene,camera);
     const elapsed=performance.now()-started;
     if(elapsed>25)editorFps=Math.min(editorFps,1000/elapsed);
     if(Math.abs(camera.far-desired)>3)queueRender();
@@ -1136,10 +1138,8 @@ function applyEnvironmentPreview(){
   const show=Boolean(map.arenaBase||map.environment);
   sun.visible=ambient.visible=!show;
   for(const light of previewArena.lighting)light.visible=show;
-  const {sunDisk,sunHalo,sunGlare}=previewArena;
+  const {sunDisk}=previewArena;
   sunDisk.visible=show&&(map.environment?.sunPower??3)>0;
-  sunHalo.visible=sunDisk.visible&&(map.environment?.sunHalo??1)>0;
-  sunGlare.visible=sunHalo.visible&&(map.environment?.sunStarburst??0)>0;
   scene.background=show?referenceScene.background:neutralBackground;
   scene.backgroundRotation.copy(referenceScene.backgroundRotation);
   scene.fog=show&&$('environment-fog-preview').checked?referenceScene.fog:null;

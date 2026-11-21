@@ -21,32 +21,8 @@ export function buildArena(scene,renderer) {
     g.addColorStop(0,'#fff');g.addColorStop(.65,'#fff');g.addColorStop(.88,'rgba(255,255,255,.72)');g.addColorStop(1,'rgba(255,255,255,0)');
     ctx.fillStyle=g;ctx.fillRect(0,0,w,w);
   });
-  const disk=new T.Sprite(new T.SpriteMaterial({map:diskTexture,alphaTest:.15,depthWrite:false,fog:false,toneMapped:false}));
+  const disk=new T.Sprite(new T.SpriteMaterial({map:diskTexture,alphaTest:.15,depthWrite:false,fog:false}));
   scene.add(disk);
-  const haloTexture=canvasTexture(128,128,(ctx,w)=>{
-    const g=ctx.createRadialGradient(w/2,w/2,0,w/2,w/2,w/2);
-    g.addColorStop(0,'rgba(255,255,255,.96)');
-    g.addColorStop(.11,'rgba(255,255,255,.67)');
-    g.addColorStop(.28,'rgba(255,255,255,.22)');
-    g.addColorStop(.64,'rgba(255,255,255,.055)');
-    g.addColorStop(1,'rgba(255,255,255,0)');
-    ctx.fillStyle=g;ctx.fillRect(0,0,w,w);
-  });
-  const halo=new T.Sprite(new T.SpriteMaterial({map:haloTexture,blending:T.AdditiveBlending,depthWrite:false,fog:false,toneMapped:false}));
-  scene.add(halo);
-  const glareMap=canvasTexture(256,256,(ctx,w)=>{
-    const p=ctx.createImageData(w,w);
-    for(let y=0;y<w;y++)for(let x=0;x<w;x++){
-      const dx=(x+.5-w/2)/(w/2),dy=(y+.5-w/2)/(w/2),r=Math.hypot(dx,dy),a=Math.atan2(dy,dx);
-      const points=Math.pow(Math.max(0,Math.cos(a*8+.43)),Math.min(100,6+r*82));
-      const streak=Math.pow(Math.max(0,Math.cos(a*2-.1)),32)*.19;
-      const alpha=(points*.74+streak)*Math.pow(Math.max(0,1-r),2.7);
-      p.data.set([255,255,255,Math.min(255,255*alpha)],4*(x+y*w));
-    }
-    ctx.putImageData(p,0,0);
-  });
-  const glare=new T.Sprite(new T.SpriteMaterial({map:glareMap,blending:T.AdditiveBlending,depthWrite:false,fog:false,toneMapped:false}));
-  scene.add(glare);
   const skyEnvironment=sky.clone();
   skyEnvironment.mapping=T.EquirectangularReflectionMapping;
   skyEnvironment.needsUpdate=true;
@@ -64,7 +40,7 @@ export function buildArena(scene,renderer) {
   scene.add(ambient,sun,sun.target);
   const lightOffset=new T.Vector3();
 
-  let mood=0,environment=null,skyQuality=true,source=null,importedSky=null,hasBloom=true,skyLoading=false;
+  let mood=0,environment=null,skyQuality=true,source=null,importedSky=null,skyLoading=false;
   let baseReflection=0,skyRequest=0;
   const direction=new T.Vector3();
   let tinted=null,tintSource=null,tintColor=null,pixelSky=null,pixelSource=null,retro=false,lastShadowLevel=0;
@@ -119,14 +95,8 @@ export function buildArena(scene,renderer) {
     sun.color.set(light.sunColor);
     sun.intensity=light.sunPower;
     sun.position.copy(sun.target.position).add(lightOffset);
-    disk.material.color.set(light.sunColor);
+    disk.material.color.set(light.sunColor).multiplyScalar(light.sunRadiance??Math.max(1,light.sunPower*2.5));
     disk.visible=light.sunPower>0;
-    halo.material.color.set(light.sunColor);
-    halo.material.opacity=Math.min(1,light.sunHalo*.48)*[1,.93,.45][light.preset];
-    halo.visible=hasBloom&&disk.visible&&light.sunHalo>0;
-    glare.visible=halo.visible&&light.sunStarburst>0;
-    glare.material.color.set(light.sunColor);
-    glare.material.opacity=Math.min(1,light.sunStarburst);
     const panorama=light.sky==='image'&&importedSky?importedSky:panoramas[light.preset];
     const colored=tintPanorama(panorama,light.skyTint);
     scene.background=light.sky==='color'||!skyQuality?backgroundColor.set(light.skyColor):retro&&!colored.isDataTexture?pixelateSky(colored):colored;
@@ -156,10 +126,7 @@ export function buildArena(scene,renderer) {
     const light=environment??environmentPreset(mood),distance=far*.96;
     const size=2*distance*Math.tan(T.MathUtils.degToRad(light.sunDiameter/2));
     disk.position.copy(point).addScaledVector(direction,distance);
-    halo.position.copy(point).addScaledVector(direction,distance*.999);
-    disk.scale.setScalar(size);halo.scale.setScalar(size*(3+light.sunHalo*2));
-    glare.position.copy(point).addScaledVector(direction,distance*.998);
-    glare.scale.setScalar(size*(7+light.sunStarburst*6));
+    disk.scale.setScalar(size);
   }
   // Centre la zone d’ombres près du joueur par pas de quatre mètres pour stabiliser la projection.
   function centerShadows(point){
@@ -384,7 +351,7 @@ export function buildArena(scene,renderer) {
   const shadowGeo=new T.CircleGeometry(1,12).rotateX(-Math.PI/2);
   const shadowMaterial=new T.MeshBasicMaterial({color:0x564b38,transparent:true,opacity:.13,depthWrite:false});
   function shadow(r) {const mesh=new T.Mesh(shadowGeo,shadowMaterial);mesh.scale.setScalar(r);scene.add(mesh);return mesh;}
-  function visual(level,shadows,lighting,reflections,bloom,textures,size,baked) {
+  function visual(level,shadows,lighting,reflections,textures,size,baked) {
     const expensive=shadows>=3;
     renderer.shadowMap.enabled=expensive;
     sun.castShadow=expensive;
@@ -395,7 +362,6 @@ export function buildArena(scene,renderer) {
     sun.shadow.radius=.65+shadows*.12;
     lastShadowLevel=shadows;
     if(sun.shadow.mapSize.x!==shadowSize){sun.shadow.map?.dispose();sun.shadow.map=null;sun.shadow.mapSize.set(shadowSize,shadowSize);}
-    hasBloom=bloom;
     if(size!==textureSize){
       textureSize=size;
       tiles.forEach((m,i)=>{
@@ -429,5 +395,5 @@ export function buildArena(scene,renderer) {
     skyQuality=level>=2;
     setTimeOfDay(mood);
   }
-  return {boxes,floors,probe,display,visual,shadow,setTimeOfDay,setEnvironment,centerSky,setRetroSky(value){if(retro!==value){retro=value;setTimeOfDay(mood);}},sunDirection:()=>direction.clone(),centerShadows,lighting:[ambient,sun,sun.target,halo,disk,glare],sunDisk:disk,sunHalo:halo,sunGlare:glare,get skyLoading(){return skyLoading;},get hillSeed(){return hillSeed;},setHillSeed,bakeLightmap,mapMaterial:(i,level)=>level>=4?tiles[i]:alt[i],builtObjects:[...boxes.map(b=>b.mesh).filter(m=>m?.isObject3D),probe,...props],materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
+  return {boxes,floors,probe,display,visual,shadow,setTimeOfDay,setEnvironment,centerSky,setRetroSky(value){if(retro!==value){retro=value;setTimeOfDay(mood);}},sunDirection:()=>direction.clone(),centerShadows,lighting:[ambient,sun,sun.target,disk],sunDisk:disk,get bloomAmount(){return (environment??environmentPreset(mood)).sunHalo*.19;},get skyLoading(){return skyLoading;},get hillSeed(){return hillSeed;},setHillSeed,bakeLightmap,mapMaterial:(i,level)=>level>=4?tiles[i]:alt[i],builtObjects:[...boxes.map(b=>b.mesh).filter(m=>m?.isObject3D),probe,...props],materials:[...tiles,...alt],focus(enabled,intensity,radius){focusAmount.value=enabled?intensity*.75:0;focusRadius.value=.07+radius*.058;}};
 }

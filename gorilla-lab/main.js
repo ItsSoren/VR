@@ -1,3 +1,4 @@
+import {createScreenBloom} from './hdr-bloom.js';
 import {readTurnAxis,consumeSnap} from './snap-turn.js';
 import {createDiagnostics} from './diagnostics.js';
 import {restoreObject,outsideObjectWorld} from './object-lifecycle.js';
@@ -69,6 +70,7 @@ const camera=new T.PerspectiveCamera(70,1,.035,210);
 rig.add(eye);eye.add(camera);scene.add(rig);
 const arena=buildArena(scene,renderer);
 const vrEffects=createVrEffects(renderer);
+const screenBloom=createScreenBloom(renderer);
 const vrFovMask=createVrFovMask();
 scene.add(vrFovMask);
 const updateRayProbe=addRayProbe(arena.probe);
@@ -318,7 +320,7 @@ function lightLevel(){return useQualityBudget()?Math.min(settings.lightQuality,l
 // La qualité automatique borne les niveaux numériques. Les interrupteurs restent indépendants.
 function applyVisual(){
   const effectiveTexture=settings.texturePower;
-  arena.visual(liveLevel,settings.shadows?shadowLevel():0,lightLevel(),settings.reflections,settings.bloom,settings.textures,2**(effectiveTexture-1),settings.lightmap);
+  arena.visual(liveLevel,settings.shadows?shadowLevel():0,lightLevel(),settings.reflections,settings.textures,2**(effectiveTexture-1),settings.lightmap);
   maps.refreshMaterials?.();
   renderer.shadowMap.needsUpdate=true;
   arena.setTimeOfDay(spectator.remoteLight??settings.timeOfDay-1);
@@ -373,7 +375,7 @@ const renderGroups=[
   ['Image',[['Shader','shaderMode'],['Ambiance','timeOfDay'],['FOV PC / mobile','viewFov'],['FOV VR','vrFov'],['Exposition','exposure'],['Contraste','contrast'],
     ['Saturation','saturation'],['Chaleur','warmth'],['Corps du singe','body'],['Mains','hands']]],
   ['Lumière',[['Ombres','shadows'],['Qualité des ombres','shadowQuality'],['Qualité des lumières','lightQuality'],
-    ['Carte de lumière','lightmap'],['Reflets','reflections'],['Qualité miroir','mirrorQuality'],['Bloom du soleil','bloom']]],
+    ['Carte de lumière','lightmap'],['Reflets','reflections'],['Qualité miroir','mirrorQuality'],['Bloom HDR','bloom']]],
   ['Performance',[['Préréglage','preset'],['Qualité automatique','auto'],['Qualité manuelle','quality'],
     ['Résolution XR','resolution'],['Textures','textures'],['Max. textures','texturePower']]],
   ['Effets',[['Post FX VR','post'],['Ray tracing VR','rayTrace'],['Activer le focus','focus'],
@@ -1927,7 +1929,7 @@ renderer.setAnimationLoop((time,frame)=>{
   const useVrTrace=inVR&&settings.rayTrace;
   updateRayProbe(useVrTrace,objects);
   const visibleField=settings.vrFov/100;
-  if(!useVrPost||!vrEffects.render(scene,camera,{bloom:settings.bloom,visibleField})){
+  if(!useVrPost||!vrEffects.render(scene,camera,{bloom:settings.bloom?arena.bloomAmount:0,visibleField})){
     vrFovMask.material.uniforms.visibleField.value=visibleField;
     vrFovMask.visible=inVR&&visibleField<1;
     const bodyVisible=monkey.visible,rigVisible=pcAvatar?.root.visible;
@@ -1935,7 +1937,9 @@ renderer.setAnimationLoop((time,frame)=>{
       if(pitch<-.52){monkey.visible=false;if(pcAvatar)pcAvatar.root.visible=false;}
       if(pcAvatar)pcAvatar.bones.head.visible=false;
     }
-    try{renderer.render(scene,camera);}finally{
+    try{
+      if(inVR||!settings.bloom||!screenBloom.render(scene,camera,arena.bloomAmount))renderer.render(scene,camera);
+    }finally{
       vrFovMask.visible=false;monkey.visible=bodyVisible;
       if(pcAvatar){pcAvatar.root.visible=rigVisible;pcAvatar.bones.head.visible=true;}
     }
