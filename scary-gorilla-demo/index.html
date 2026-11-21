@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="fr">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Scary Gorilla — Station Écho</title>
+<style>#map-access summary{cursor:pointer;margin:.65rem 0}#map-access input{max-width:100%;margin:.35rem 0}#map-access a{color:#ffe6ac}
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;color:#faf0da;background:#87c4e7;font:15px system-ui,sans-serif}html,body{width:100%;height:100%;overflow:hidden}#game{position:fixed;inset:0;display:block;width:100%;height:100%;touch-action:none}
+aside{position:fixed;left:max(clamp(10px,2vw,24px),env(safe-area-inset-left));top:max(clamp(10px,2vw,24px),env(safe-area-inset-top));width:min(342px,calc(100vw - 20px));max-height:calc(100vh - 30px);overflow:auto;padding:19px 19px 16px;background:#192934f3;border:1px solid #a1b3ac;border-radius:12px;box-shadow:0 16px 52px #17324455}
+a{color:#ffe6ac}h1{font-size:30px;letter-spacing:-.04em;margin:0}h2{font-size:17px;margin:.85rem 0 .35rem}p{line-height:1.4;margin:.55rem 0;color:#d4dfdf}small{color:#c2d0d3}button{font:inherit;padding:.35rem .62rem;background:#385363;color:#fff2d6;border:1px solid #6b8285;border-radius:5px;cursor:pointer}
+button:focus-visible{outline:2px solid #ffe6a5}button:hover{background:#4d6b78}button:disabled{opacity:.55;cursor:default}#vr{background:#ffe6ac;color:#28343d;font-weight:750;margin:.5rem 0;width:100%;padding:.65rem}nav{display:flex;flex-wrap:wrap;gap:5px;margin-top:12px}nav button{flex:1}nav button[aria-pressed="true"]{background:#586d53;border-color:#a7bb8d}#settings nav{margin:0 0 .45rem}
+.setting{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:34px;border-bottom:1px solid #41515a;font-size:14px}.setting button{font-size:13px;padding:.22rem .42rem;min-width:29px}.setting span{white-space:nowrap;font-variant-numeric:tabular-nums}#restore{margin-top:10px}.immersive aside,.immersive #open-settings,.immersive #flat-actions,.immersive #crosshair,.immersive #game-hint{display:none}
+[hidden]{display:none!important}#close-settings{float:right}#open-settings{position:fixed;top:max(14px,env(safe-area-inset-top));left:max(14px,env(safe-area-inset-left))}
+#game-hint{position:fixed;top:15px;left:50%;transform:translateX(-50%);background:#243944f0;padding:.5rem .8rem;border-radius:5px;pointer-events:none}
+#crosshair{pointer-events:none;position:fixed;left:50%;top:50%;width:6px;height:6px;border-radius:50%;transform:translate(-50%,-50%);background:#fff4d1;box-shadow:0 0 4px #071219}
+#flat-actions{display:none;position:fixed;right:max(12px,env(safe-area-inset-right));bottom:max(12px,env(safe-area-inset-bottom));gap:8px;max-width:200px;flex-wrap:wrap;justify-content:flex-end}
+.cloud-grid[hidden],.cloud-grid button[hidden]{display:none}.cloud-card{padding:.7rem;margin:.55rem 0;background:#223844;border:1px solid #48616a;border-radius:8px}.cloud-card h3{margin:0 0 .4rem;font-size:15px}.cloud-card input{width:100%;margin:.3rem 0 .55rem;padding:.45rem;font:inherit;text-transform:uppercase}.cloud-card button{min-height:37px}.cloud-grid{display:grid;grid-template-columns:1fr 1fr;gap:.35rem}.cloud-room-row{display:grid;grid-template-columns:1fr auto auto;gap:.35rem;align-items:center;margin:.35rem 0}#cloud-status{padding:.55rem .65rem;background:#142630;border-radius:5px}
+#flat-actions button{min-height:45px;background:#273c4bb5;touch-action:none}
+@media (any-pointer:coarse){#flat-actions{display:flex}aside{max-height:calc(100dvh - 125px)}}
+</style><link rel="icon" href="data:,"><link rel="stylesheet" href="./bunker.css"></head>
+<body><canvas id="game" data-loading="true" tabindex="0" aria-label="Station Écho en 3D"></canvas>
+<button id="open-settings" aria-label="Ouvrir le menu" hidden>Station Écho · Menu</button><div id="crosshair" aria-hidden="true"></div>
+<div id="game-hint" role="status" hidden></div>
+<div id="flat-actions" aria-label="Commandes tactiles">
+<button data-flat-action="interact">Saisir</button><button data-flat-action="jump">Sauter</button>
+<button type="button" id="demo-lamp">Lampe</button><button type="button" id="demo-crouch">S’accroupir</button>
+<button data-flat-action="spawn">Objet</button><button data-flat-action="camera">Caméra</button><button id="touch-fire">Tirer</button>
+</div>
+<aside id="game-settings"><button id="close-settings" aria-label="Fermer les réglages">Fermer</button><h1>Scary Gorilla</h1><p id="readings" role="status">Mesure des performances…</p>
+<button id="vr" disabled>Entrer en VR</button><small id="status">Mode PC. Pour la VR, ouvrir en HTTPS sur le casque.</small>
+<p class="demo-subtitle">Station Écho</p>
+<p>Traverse la passerelle, lance la purge dans la salle des pompes et regagne le refuge.</p>
+<div class="demo-buttons"><button id="demo-play">Jouer sur écran</button><button id="demo-restart">Recommencer</button></div>
+<label class="demo-adjust" for="demo-grain">Grain de film <input id="demo-grain" type="range" min="0" max="60" value="19"></label>
+<label class="demo-adjust" for="demo-mute">Couper les sons de la démo <input id="demo-mute" type="checkbox"></label>
+<details class="demo-controls"><summary>Commandes</summary><p>VR · Appuis avec les mains ou stick gauche. Stick droit pour tourner. Grip pour la lampe et la vanne. Gâchette pour la lampe, A pour le grain.</p><p>PC · ZQSD ou WASD, glisser pour regarder. E pour interagir, F pour la lampe, C pour s’accroupir, Espace pour sauter.</p></details>
+<details class="lab-settings"><summary>Réglages de locomotion et de rendu</summary>
+<nav aria-label="Réglages"><button data-page>Locomotion</button><button data-page>Objets</button><button data-page>Rendu</button><button data-page>Spawn</button><button data-page>Carte</button><button data-page>En ligne</button><button data-page>Debug</button></nav>
+<p><a href="./floor-plan.html" target="_blank" rel="noopener">Plan de l’arène</a></p><h2 id="section">Locomotion</h2><div id="settings"></div>
+<button id="restore">Réglages par défaut</button>
+<p><button id="capture-report">Capturer le rapport</button> <button id="download-report" disabled>JSON</button></p><section id="cloud-access" aria-label="Salons" hidden>
+<p id="cloud-status" role="status">Hors ligne</p>
+<div id="cloud-map-transfer" hidden>
+  <progress id="cloud-map-progress" max="1" aria-label="Chargement de la carte du salon" style="display:block;width:100%"></progress>
+  <output id="cloud-map-eta"></output>
+  <button id="cloud-map-cancel">Annuler le chargement</button>
+</div>
+<button id="cloud-map-resume" hidden>Reprendre le chargement</button>
+<output id="cloud-telemetry"></output>
+<button id="cloud-import" hidden>Charger le JSON du salon</button>
+<input id="cloud-map-file" type="file" accept=".json,application/json" hidden>
+<button id="cloud-export" hidden>Exporter la carte du salon</button>
+<div id="cloud-private-start" class="cloud-card">
+<button id="cloud-new">Héberger ma carte</button>
+<label>Code d’invitation <input id="cloud-room" maxlength="12" autocomplete="off" spellcheck="false"></label>
+<button id="cloud-player">Rejoindre le salon</button>
+</div>
+<div id="cloud-private-active" class="cloud-grid" hidden><button id="cloud-copy" hidden>Copier l’invitation</button><button id="cloud-leave">Quitter</button></div>
+<details class="cloud-card"><summary>Salons publics et mode spectateur</summary>
+<div class="cloud-room-row"><span>Arène 1</span><button id="public-join-0">Rejoindre</button><button id="public-host-0">Héberger</button></div>
+<div class="cloud-room-row"><span>Arène 2</span><button id="public-join-1">Rejoindre</button><button id="public-host-1">Héberger</button></div>
+<div class="cloud-room-row"><span>Arène 3</span><button id="public-join-2">Rejoindre</button><button id="public-host-2">Héberger</button></div>
+<div class="cloud-grid"><button id="cloud-pc">Spectateur</button><button id="cloud-camera">Caméra : Libre</button></div>
+</details>
+</section><details id="map-access"><summary>Cartes et éditeur</summary><p><a href="./editor.html">Ouvrir l’atelier PC / mobile</a></p><label>Importer un fichier <input id="map-file" type="file" accept=".json,application/json"></label><label>URL de map <input id="map-url" type="url" placeholder="https://…/map.gorilla.json"></label><button id="map-load-url">Charger URL</button> <button id="map-export">Exporter JSON</button> <button id="map-reset">Arène</button><p id="map-note" role="status"></p></details><p><small>La résolution XR s’applique à la prochaine entrée en VR.</small></p>
+</details></aside>
+<output id="demo-objective" aria-live="polite"></output>
+<script defer src="./bunker.js"></script></body></html>
+

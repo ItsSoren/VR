@@ -1,0 +1,88 @@
+:root {
+  color-scheme: dark;
+  --paper: #ebe0c9;
+  --ink: #141715;
+}
+
+body { background: #111719; }
+body:has(#game[data-loading]) #demo-play { pointer-events: none; opacity: .55; }
+#game:focus { outline: 0; }
+
+#game-settings {
+  width: min(385px, calc(100vw - 24px));
+  padding: 22px;
+  background: #171d1bea;
+  border-color: #77735d;
+  border-radius: 8px;
+  color: var(--paper);
+  box-shadow: 0 18px 50px #0008;
+}
+
+#game-settings h1 {
+  margin-top: 8px;
+  font-size: clamp(34px, 7vw, 48px);
+  font-weight: 800;
+  letter-spacing: -.065em;
+  line-height: .99;
+}
+
+.demo-subtitle {
+  color: #d1a86c;
+  font-weight: 600;
+  margin-top: .2rem;
+}
+
+#game-settings #readings {
+  font-size: .82rem;
+  color: #a0aaa4;
+  margin-top: .5rem;
+}
+
+#game-settings button, #open-settings, #flat-actions button {
+  background: #303b37;
+  color: var(--paper);
+  border-color: #58645c;
+  min-height: 36px;
+}
+
+#game-settings #vr {
+  background: #e4bd7d;
+  color: var(--ink);
+  border-color: #e1bd85;
+  font-size: 1rem;
+  margin-top: .45rem;
+}
+
+.demo-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 14px; }
+.demo-buttons button:first-child { flex: 1; }
+.demo-adjust { display: flex; justify-content: space-between; align-items: center; min-height: 38px; gap: 10px; }
+.demo-adjust input { accent-color: #e4bd7d; }
+.demo-controls, .lab-settings { margin-top: 10px; border-top: 1px solid #363e37; padding-top: 8px; }
+.lab-settings summary, .demo-controls summary { cursor: pointer; }
+.lab-settings nav [data-page]:nth-child(n+2):not(:nth-child(3)):not(:nth-child(7)),
+.lab-settings a[href$="floor-plan.html"], .lab-settings #map-access, .lab-settings #cloud-access,
+#flat-actions [data-flat-action="spawn"], #flat-actions [data-flat-action="camera"], #flat-actions #touch-fire { display: none; }
+
+#demo-objective {
+  position: fixed;
+  right: max(12px, env(safe-area-inset-right));
+  top: max(12px, env(safe-area-inset-top));
+  max-width: min(calc(100vw - 24px), 34ch);
+  padding: 9px 13px;
+  border: 1px solid #6c6657;
+  border-radius: 6px;
+  color: var(--paper);
+  background: #171d1be8;
+  font-size: 15px;
+  pointer-events: none;
+}
+
+.immersive #demo-objective, body:has(#game-settings:not([hidden])) #demo-objective { display: none; }
+@media (max-width: 600px) {
+  #demo-objective { top: 60px; left: 12px; right: auto; }
+}
+
+@media (any-pointer: coarse) {
+  #flat-actions { pointer-events: auto; }
+  #flat-actions button { touch-action: none; }
+}
