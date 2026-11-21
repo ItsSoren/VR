@@ -16,7 +16,7 @@ export function createArenaObjectSpecs(){
     ['Tétraèdre',new T.TetrahedronGeometry(.29),'#d8ae53',0,1],
     ['Brique',new T.BoxGeometry(.56,.19,.28),'#b35a71',0,1.5],
     ['Grand rectangle',new T.BoxGeometry(1.42,.75,.88),'#738aa5',0,4.2],
-    ['Grande sphère',new T.IcosahedronGeometry(.60,4),'#dbab58',.60,3.7],
+    ['Grande sphère',new T.IcosahedronGeometry(.60,2),'#dbab58',.60,3.7],
   ].map(([name,geo,color,sphere,mass])=>({name,geo,mass,shape:colliderFor(geo,sphere),
     material:new T.MeshStandardMaterial({color,roughness:.44,metalness:.1,flatShading:true}),
     lowShape:sphere?null:boxCollider(geo.computeBoundingBox()??geo.boundingBox.getSize(new T.Vector3()).multiplyScalar(.5)),

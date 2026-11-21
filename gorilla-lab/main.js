@@ -121,7 +121,6 @@ function shape(parent,material,x,y,z,sx,sy,sz) {
 const modelPack=readModelPack(localStorage);
 const synchronizedModels=modelPack.models.filter(model=>model.kind!=='avatar'&&model.inGame&&model.parts.length).slice(0,36);
 const equippedRig=modelPack.models.find(model=>model.id===modelPack.avatarId&&model.kind==='avatar'&&avatarReady(model));
-const modelSignature=synchronizedModels.length?'|atelier-'+mapCode(JSON.stringify(synchronizedModels)):'';
 const pcAvatar=equippedRig?createAvatarRig(equippedRig,part=>{
   const mesh=new T.Mesh(createModelPartGeometry(part),createModelPartMaterial(part));
   mesh.castShadow=true;mesh.receiveShadow=true;
@@ -189,16 +188,18 @@ const {props:animatedProps,animate:animateProps}=makeAnimatedProps();
 const workshopProps=createModelPropDefinitions({models:synchronizedModels});
 const animatedTypes=[],workshopTypes=[];
 // L’index du catalogue sert aussi d’identifiant de type dans les paquets réseau.
-function registerProps(specs,types){
+function registerProps(specs,types,first=objectSpecs.length){
   for(const {collisionGeo,sphere=0,...spec} of specs){
     const shape=colliderFor(collisionGeo??spec.geo,sphere);
-    types.push(objectSpecs.length);
-    objectSpecs.push({...spec,shape,lowShape:shape});
+    const index=first+types.length;
+    types.push(index);
+    objectSpecs[index]={...spec,shape,lowShape:shape};
   }
 }
 registerProps(animatedProps,animatedTypes);
-registerProps(workshopProps,workshopTypes);
 const firstPlacedModelType=objectSpecs.length;
+const workshopTypeBase=1024;
+registerProps(workshopProps,workshopTypes,workshopTypeBase);
 const spawnTypes=[...basicTypes,...detailTypes,...animatedTypes,...workshopTypes];
 objectSpecs[8].properties={supportWhileHeld:true};
 objectSpecs[11].properties={supportWhileHeld:true};
@@ -232,7 +233,7 @@ function makePropMesh(type,ownMaterial=false){
 let maps=null;
 const objects=[],noBodies=[];
 const desktopActor={held:null},remoteActors=new Map();
-let remoteHeld=0,riddenVehicle=null,driveSpeed=0,driveHeading=0;
+let riddenVehicle=null,driveSpeed=0,driveHeading=0;
 let nextNetId=1;
 const gripRotation=new T.Quaternion(), inverseGrip=new T.Quaternion();
 const spawnPoint=new T.Vector3(),spawnDirection=new T.Vector3(),spawnOrigin=new T.Vector3(),spawnHit=new T.Vector3(),spawnNormal=new T.Vector3();
@@ -376,10 +377,10 @@ const renderGroups=[
   ['Image',[['Shader','shaderMode'],['Ambiance','timeOfDay'],['FOV PC / mobile','viewFov'],['FOV VR','vrFov'],['Exposition','exposure'],['Contraste','contrast'],
     ['Saturation','saturation'],['Chaleur','warmth'],['Corps du singe','body'],['Mains','hands']]],
   ['Lumière',[['Ombres','shadows'],['Qualité des ombres','shadowQuality'],['Qualité des lumières','lightQuality'],
-    ['Carte de lumière','lightmap'],['Reflets','reflections'],['Qualité miroir','mirrorQuality'],['Bloom HDR','bloom']]],
+    ['Carte de lumière','lightmap'],['Reflets','reflections'],['Qualité miroir','mirrorQuality']]],
   ['Performance',[['Préréglage','preset'],['Qualité automatique','auto'],['Qualité manuelle','quality'],
     ['Résolution XR','resolution'],['Textures','textures'],['Max. textures','texturePower']]],
-  ['Effets',[['Post FX VR','post'],['Ray tracing VR','rayTrace'],['Activer le focus','focus'],
+  ['Effets',[['Bloom HDR (PC et VR)','bloom'],['Post FX VR','post'],['Ray tracing VR','rayTrace'],['Activer le focus','focus'],
     ['Intensité du focus','focusStrength'],['Zone nette du focus','focusSize']]],
 ];
 function currentRows(){return page===2?renderGroups[renderPage][1]:page===3?spawnGroups[spawnPage][1]:page===4?mapGroups[mapPage][1]:sections[page][1];}
@@ -760,15 +761,15 @@ function spawnPlacedModels(){
       const collisionGeo=modelCollisionGeometry(piece.model,dimensions);
       const shape=colliderFor(collisionGeo);
       collisionGeo.dispose();
-      type=objectSpecs.length;
-      objectSpecs.push({
+      type=firstPlacedModelType+placedModelTypes.size;
+      objectSpecs[type]={
         id:piece.model.id,name:piece.model.name,geo,material:createModelMaterial(piece.model),
         shape,lowShape:shape,
         assetId:piece.model.assetId??null,
         physics:modelPhysics({physics:{gravity:piece.gravity,bounce:piece.bounce}}),
         properties:{...piece.model.properties,grabbable:piece.model.properties.grabbable!==false},
         mass:T.MathUtils.clamp(piece.w*piece.h*piece.d*9,.18,12)
-      });
+      };
       placedModelTypes.set(key,type);
     }
     const body=spawnObject(type,new T.Vector3(piece.x,piece.y,piece.z),null,true);
@@ -781,8 +782,10 @@ function spawnPlacedModels(){
 }
 maps=connectMaps({scene,arena,boot,onReset:angle=>{
   clearObjects();spectator.clearMapReplicas();
-  for(const spec of objectSpecs.splice(firstPlacedModelType)){
+  for(const index of placedModelTypes.values()){
+    const spec=objectSpecs[index];
     spec.geo.dispose();disposeModelMaterial(spec.material);
+    delete objectSpecs[index];
   }
   placedModelTypes.clear();
   resetPlayer();yaw=T.MathUtils.degToRad(angle);
@@ -791,12 +794,12 @@ maps=connectMaps({scene,arena,boot,onReset:angle=>{
 },onVisual:applyVisual,
   getLevel:()=>liveLevel,defaultObjects:[...arena.builtObjects,...scene.children.filter(n=>!beforeFixtures.has(n)),mirrorBacking],
 });
-const spectator=addSpectator({scene,localColor:avatarColor,currentMap:()=>(maps.signature||'arena-r25-'+arena.hillSeed)+modelSignature,
+const spectator=addSpectator({scene,localColor:avatarColor,currentMap:()=>maps.signature||'arena-r25-'+arena.hillSeed,
   seedArena:seed=>arena.setHillSeed(seed),
-  onRoomMap:(value,expected,active,progress)=>maps.loadRoomMap(value,candidate=>{
+  onRoomMap:(value,expected,active,progress,signal)=>maps.loadRoomMap(value,candidate=>{
     const signature=candidate?'custom-'+mapCode(JSON.stringify(candidate)):'arena-r25-'+arena.hillSeed;
-    return active()&&mapCode(signature+modelSignature)===expected;
-  },progress),
+    return active()&&mapCode(signature)===expected;
+  },progress,signal),
   restoreRoomMap:()=>maps.leaveRoomMap(),
   exportRoomMap:()=>maps.save(),
   hingeSnapshot:()=>maps.hingeSnapshot(),
@@ -916,6 +919,7 @@ function clearSpawnBank(){requestObjectChange(0,clearObjects);}
 function requestResetObjects(){requestObjectChange(1,resetObjects);}
 function requestSpawn(index,origin=null){
   settings.objects=true;
+  if(index>=workshopTypeBase&&spectator.role){showGameHint('Intègre ce modèle à la carte pour le partager dans le salon.');return;}
   if(spectator.role==='pc'){showGameHint('Commence par rejoindre le salon en joueur.');return;}
   if(spectator.guestActive){
     if(!spectator.sendAction({type:'spawn',typeId:index}))showGameHint('Attends la connexion à l’hôte.');
@@ -955,7 +959,11 @@ function handleNetworkAction(action,peer){
   if(hand&&!handPose)return;
   const origin=spawnOrigin.copy(handPose?.position??(action.type==='tool'?peer.avatar?.tool?.position:null)??peer);
   const distance=hand?distanceToObject(origin,body):origin.distanceTo(body.mesh.position);
-  if(distance>(hand ? .34 : 10)||handContact(origin,body.mesh.position,.01,activeBoxes,spawnHit,spawnNormal))return;
+  if(distance>(hand ? .42 : 10))return;
+  const clearDistance=Math.max(0,distanceToObject(origin,body)-.015);
+  spawnDirection.subVectors(body.mesh.position,origin).normalize();
+  if(clearDistance>.035&&handContact(origin,toolObstruction.copy(origin).addScaledVector(spawnDirection,clearDistance),
+    .006,activeBoxes,spawnHit,spawnNormal))return;
   if(actor){
     const rotation=handPose?.quaternion??peer.avatar?.tool?.quaternion??peer.avatar?.head;
     if(rotation)actor.controllerRotation.copy(rotation);
@@ -982,8 +990,11 @@ function updateHeldBodies(dt){
     const aim=handPose?.quaternion??peer.avatar?.tool?.quaternion??peer.avatar?.head;
     if(aim)actor.controllerRotation.copy(aim);
     spawnOrigin.copy(handPose?.position??peer.avatar?.tool?.position??peer);
+    actor.position??=spawnOrigin.clone();
+    if(actor.position.distanceToSquared(spawnOrigin)>2.25)actor.position.copy(spawnOrigin);
+    else actor.position.lerp(spawnOrigin,1-Math.exp(-dt*24));
     spawnDirection.set(0,0,-1).applyQuaternion(actor.controllerRotation);
-    driveHeldObject(body,spawnOrigin,spawnDirection,actor.controllerRotation,dt);
+    driveHeldObject(body,actor.position,spawnDirection,actor.controllerRotation,dt);
   }
   const body=desktopActor.held;
   if(body){
@@ -1045,13 +1056,15 @@ function manipulateBody(body,mode,actor,heldAt){
     body.owner=actor;actor.held=body;
     return;
   }
-  if(!body||body.owner)return;
-  if(mode===2){
-    body.frozen=!body.frozen;body.velocity.set(0,0,0);body.angular.set(0,0,0);
-  }else if(mode===3&&!body.protected){
+  if(!body)return;
+  if(mode===3&&!body.protected){
+    if(body.owner)release(body.owner,false);
     scene.remove(body.mesh,body.shadow);
     if(body.customMaterial)for(const mat of Array.isArray(body.mesh.material)?body.mesh.material:[body.mesh.material])mat.dispose();
     objects.splice(objects.indexOf(body),1);
+  }else if(body.owner)return;
+  else if(mode===2){
+    body.frozen=!body.frozen;body.velocity.set(0,0,0);body.angular.set(0,0,0);
   }else if(mode===4&&!body.protected){
     toolPosition.copy(body.mesh.position).addScaledVector(up,body.radius*2+.08);
     const duplicate=spawnObject(body.netType,toolPosition);
@@ -1079,7 +1092,7 @@ function useToolRay(origin,direction,activate,hand){
   const onlinePlayer=spectator.guestActive;
   toolTargets.length=0;
   if(onlinePlayer)spectator.forEachReplica(mesh=>toolTargets.push(mesh));
-  else for(const body of objects)if(!body.owner&&body.mesh.visible)toolTargets.push(body.mesh);
+  else for(const body of objects)if((!body.owner||settings.toolMode===3)&&body.mesh.visible)toolTargets.push(body.mesh);
   const hit=findToolTarget(origin,direction,toolTargets);
   toolState.mode=settings.toolMode;
   if(hand){
@@ -1092,11 +1105,14 @@ function useToolRay(origin,direction,activate,hand){
   toolVisual.update(toolState);
   if(!activate)return;
   if(onlinePlayer){
-    if(settings.toolMode===1&&remoteHeld){
-      spectator.sendAction({type:'release',objectId:remoteHeld});remoteHeld=0;
+    if(settings.toolMode===1&&desktopActor.remoteHeld){
+      spectator.sendAction({type:'release',objectId:desktopActor.remoteHeld});desktopActor.remoteHeld=0;
     }else if(hit){
       const objectId=hit.object.userData.netId;
-      if(spectator.sendAction({type:'tool',mode:settings.toolMode,objectId})&&settings.toolMode===1)remoteHeld=objectId;
+      if(spectator.sendAction({type:'tool',mode:settings.toolMode,objectId})&&settings.toolMode===1){
+        startReplicaGrip(desktopActor,hit.object,toolOrigin,toolRotationWorld,
+          T.MathUtils.clamp(toolOrigin.distanceTo(hit.object.position),1.1,5),true);
+      }
     }
     return;
   }
@@ -1149,7 +1165,18 @@ function drawPanel(){
     c.fillText('Salon privé',25,390);
     item(25,405,286,44,'Rejoindre le code saisi',()=>spectator.connect('player'));
     item(325,405,287,44,'Créer un salon privé',()=>document.querySelector('#cloud-new').click());
-    c.font='17px system-ui';c.fillText('Pour saisir un autre code, utilise le panneau du navigateur.',25,489,587);
+    c.font='17px system-ui';c.fillText('Pour saisir un autre code, utilise le panneau du navigateur.',25,473,587);
+    if(spectator.downloadCaption){
+      c.fillText(spectator.downloadCaption,25,511,275);
+      c.fillStyle='#344b59';c.fillRect(25,518,275,7);
+      if(spectator.downloadFraction!==null){
+        c.fillStyle='#8ac4bb';c.fillRect(25,518,275*spectator.downloadFraction,7);
+      }
+      item(325,486,287,40,'Annuler le chargement',spectator.cancelMapLoad);
+    }else if(spectator.canResumeMap){
+      item(325,486,287,40,'Reprendre le chargement',spectator.resumeMapLoad);
+    }
+    item(325,533,287,36,'Capturer le rapport',captureReport);
     item(25,579,286,44,'Déconnecter',()=>spectator.leave());
     item(325,579,287,44,'Fermer',()=>menu=false);
     panel.texture.needsUpdate=true;
@@ -1260,8 +1287,8 @@ function grabFlat(origin,direction){
   }
   if(!settings.objects)return false;
   const online=spectator.guestActive;
-  if(online&&remoteHeld){
-    spectator.sendAction({type:'release',objectId:remoteHeld});remoteHeld=0;return true;
+  if(online&&desktopActor.remoteHeld){
+    spectator.sendAction({type:'release',objectId:desktopActor.remoteHeld});desktopActor.remoteHeld=0;return true;
   }
   if(desktopActor.held){releaseFlat(true);return true;}
   toolTargets.length=0;
@@ -1271,7 +1298,11 @@ function grabFlat(origin,direction){
   if(!hit||hit.distance>2.8)return false;
   if(online){
     const objectId=hit.object.userData.netId;
-    if(spectator.sendAction({type:'hold',objectId}))remoteHeld=objectId;
+    if(spectator.sendAction({type:'hold',objectId})){
+      camera.getWorldQuaternion(toolRotationWorld);
+      startReplicaGrip(desktopActor,hit.object,origin,toolRotationWorld,
+        T.MathUtils.clamp(origin.distanceTo(hit.object.position),1.1,5));
+    }
   }else{
     const body=objects.find(o=>o.mesh===hit.object);
     if(!spectator.role&&body?.spec.properties?.drivable&&!body.frozen){
@@ -1360,6 +1391,7 @@ function surfaceAt(p){
 // Convertit les poses du repère du casque dans le monde avant les tests de saisie et d’appui.
 function trackRemoteGrip(hand,grip){
   const side=hand.side==='left'?1:2;
+  if(hand.remoteHeld&&!spectator.replica(hand.remoteHeld))hand.remoteHeld=0;
   if(!grip&&hand.remoteHeld){
     spectator.sendAction({type:'release',objectId:hand.remoteHeld,hand:side});
     hand.remoteHeld=0;
@@ -1375,8 +1407,40 @@ function trackRemoteGrip(hand,grip){
   });
   if(closest){
     const objectId=closest.userData.netId;
-    if(spectator.sendAction({type:'hold',objectId,hand:side}))hand.remoteHeld=objectId;
+    if(spectator.sendAction({type:'hold',objectId,hand:side})){
+      startReplicaGrip(hand,closest,hand.target,hand.mesh.quaternion);
+    }
   }
+}
+function startReplicaGrip(actor,mesh,origin,rotation,distance=null,tool=false){
+  actor.remoteHeld=mesh.userData.netId;
+  inverseGrip.copy(rotation).invert();
+  actor.replicaOffset??=new T.Vector3();
+  actor.replicaRotation??=new T.Quaternion();
+  if(distance===null)actor.replicaOffset.copy(mesh.position).sub(origin).applyQuaternion(inverseGrip);
+  else actor.replicaOffset.set(0,0,-distance);
+  actor.replicaRotation.multiplyQuaternions(inverseGrip,mesh.quaternion);
+  actor.replicaConfirmed=false;actor.replicaRequestedAt=performance.now();actor.replicaTool=tool;
+}
+function predictRemoteGrip(actor,position,rotation){
+  if(!actor.remoteHeld)return;
+  const mesh=spectator.replica(actor.remoteHeld);
+  if(!mesh||!mesh.visible){actor.remoteHeld=0;return;}
+  const waited=performance.now()-actor.replicaRequestedAt;
+  const side=actor.side??'tool';
+  if(mesh.userData.held){
+    if(!actor.replicaConfirmed)diagnostics.record('remote-grip-confirmed',{waitMs:Math.round(waited),side});
+    actor.replicaConfirmed=true;
+  }else if(actor.replicaConfirmed||waited>1800){
+    if(!actor.replicaConfirmed)diagnostics.record('remote-grip-timeout',{side});
+    actor.remoteHeld=0;return;
+  }
+  heldPosition.copy(actor.replicaOffset).applyQuaternion(rotation).add(position);
+  const sphere=objectSpecs[mesh.userData.netType]?.shape.sphereRadius;
+  if(sphere&&handContact(mesh.position,heldPosition,sphere,activeBoxes,spawnHit,spawnNormal))heldPosition.copy(spawnHit);
+  mesh.position.copy(heldPosition);
+  mesh.quaternion.multiplyQuaternions(rotation,actor.replicaRotation);
+  mesh.updateMatrixWorld(true);
 }
 // WebXR fournit les prises. xr-palm.js calcule leur pose dans l'arène avant
 // que locomotion.js ne les contraigne par la portée des bras et les contacts.
@@ -1607,7 +1671,8 @@ function character(frame,space,pose,dt,inputDt=dt){
     bodyCollisionBack.y=0;
     bodyCollisionBack.addScaledVector(bodyBack.set(0,0,1).applyAxisAngle(up,bodyYaw),.12);
     for(let i=0;i<3;i++){
-      const height=i===0?.18:i===1?Math.max(.26,head.y*.57):head.y;
+      const torsoHeight=inVR?head.y-.34:head.y*.57;
+      const height=i===0?.18:i===1?Math.max(.26,torsoHeight):head.y;
       const {radius}=bodyProxies[i];
       point.set(worldHead.x,rig.position.y+height,worldHead.z);
       if(i<2)point.add(bodyProxyOffset(inVR,bodyCollisionBack,Math.max(0,head.y-height),scratch));
@@ -1648,13 +1713,13 @@ function character(frame,space,pose,dt,inputDt=dt){
   for(const h of hands){
     if(inVR&&h.valid){
       const onSurface=h.surface||h.groundContact;
-      h.mesh.position.copy(onSurface?h.anchor:h.held?h.target:h.locomotionTarget).addScaledVector(appliedMove,onSurface?0:1);
+      h.mesh.position.copy(onSurface?h.anchor:h.held||h.remoteHeld?h.target:h.locomotionTarget).addScaledVector(appliedMove,onSurface?0:1);
       h.gripPosition.add(appliedMove);
     }
     if(!inVR)h.mesh.visible=false;
   }
   const bodyScale=.72+settings.size*.05;
-  const torsoScale=(armSegmentLength()*2)*(2/3)/.82*(inVR?.87:1);
+  const torsoScale=bodyScale*(inVR ? .59 : .68);
   monkey.visible=settings.body&&(inVR||!pcAvatar);
   avatarHead.position.copy(worldHead);
   if(inVR)avatarHead.quaternion.copy(headRotation).premultiply(spin.setFromAxisAngle(up,yaw));
@@ -1812,7 +1877,7 @@ renderer.setAnimationLoop((time,frame)=>{
   }
   // En spectateur ou joueur invité, les objets reçus sont dessinés comme répliques du monde VR.
   const remoteWorld=spectating||spectator.guestActive;
-  if(!spectator.guestActive){remoteHeld=0;for(const h of hands)h.remoteHeld=0;}
+  if(!spectator.guestActive){desktopActor.remoteHeld=0;for(const h of hands)h.remoteHeld=0;}
   if(!remoteWorld){updateHeldBodies(dt);maintainSpectatorCamera();}
 
   physicsCpuMs=0;
@@ -1895,6 +1960,16 @@ renderer.setAnimationLoop((time,frame)=>{
   });
   spectator.update({inVR,time,dt:inputDt,position:worldHead,yaw:spectating?yaw:bodyYaw,pitch,camera,rig,keys,actions,flat,avatar:captureNetworkAvatar,
     bodies:settings.objects?objects:noBodies});
+  if(spectator.guestActive){
+    if(inVR)for(const hand of hands)if(hand.valid)predictRemoteGrip(hand,hand.mesh.position,hand.mesh.quaternion);
+    if(desktopActor.remoteHeld){
+      if(desktopActor.replicaTool&&toolState.mode)predictRemoteGrip(desktopActor,toolOrigin,toolRotationWorld);
+      else if(!inVR){
+        camera.getWorldQuaternion(toolRotation);
+        predictRemoteGrip(desktopActor,worldHead,toolRotation);
+      }
+    }
+  }
   actions.clear();
   const debugStart=performance.now();
   debugView.update({settings,boxes:activeBoxes,bodies:remoteWorld?(settings.debugHitboxes?replicaBlockers():noBodies):objects,hands,locomotion,velocity,
@@ -1938,11 +2013,12 @@ renderer.setAnimationLoop((time,frame)=>{
   }
   updateMirror(time,pose);
   const renderStart=performance.now();
-  const useVrPost=inVR&&settings.post;
+  const bloomProfile=settings.bloom?arena.bloomProfile:null;
+  const useVrPost=inVR&&(settings.post||bloomProfile?.strength>0);
   const useVrTrace=inVR&&settings.rayTrace;
   updateRayProbe(useVrTrace,objects);
   const visibleField=settings.vrFov/100;
-  if(!useVrPost||!vrEffects.render(scene,camera,{bloom:settings.bloom?arena.bloomProfile:null,visibleField})){
+  if(!useVrPost||!vrEffects.render(scene,camera,{bloom:bloomProfile,visibleField})){
     vrFovMask.material.uniforms.visibleField.value=visibleField;
     vrFovMask.visible=inVR&&visibleField<1;
     const bodyVisible=monkey.visible,rigVisible=pcAvatar?.root.visible;

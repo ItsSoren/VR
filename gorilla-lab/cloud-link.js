@@ -543,7 +543,7 @@ export function createObjectFeed(){
     for(const body of bodies){
       if(!body.mesh.visible)continue;
       const id=body.netId,prior=previous.get(id);
-      const fast=body.radius<=smallObjectRadius&&!body.frozen&&(
+      const fast=Boolean(body.owner)||body.radius<=smallObjectRadius&&!body.frozen&&(
         body.velocity.lengthSq()>=fastObjectSpeed**2||
         body.angular.lengthSq()*body.radius**2>=fastObjectSpeed**2
       );

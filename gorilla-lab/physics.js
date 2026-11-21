@@ -306,7 +306,31 @@ function shapeContact(body,box,outNormal,outPoint) {
 const palmHull=colliderFor(new T.OctahedronGeometry(1,0).scale(...palmHalfExtent));
 const palmBody={mesh:{position:new T.Vector3(),quaternion:new T.Quaternion()},shape:palmHull,radius:palmHull.radius,precise:true};
 const palmPrevious=new T.Vector3(),palmOffset=new T.Vector3(),palmSweepPoint=new T.Vector3();
+const palmLocalFrom=new T.Vector3(),palmLocalTo=new T.Vector3(),palmBoxHalf=new T.Vector3(),palmAxis=new T.Vector3();
 const palmOffsets=palmHull.vertices.map(()=>new T.Vector3());
+function thinBoxCrossing(from,to,box,out,hitNormal){
+  qInv.copy(box.quaternion).invert();
+  palmLocalFrom.copy(from).sub(box.position).applyQuaternion(qInv);
+  palmLocalTo.copy(to).sub(box.position).applyQuaternion(qInv);
+  for(let axis=0;axis<3;axis++){
+    palmAxis.set(0,0,0).setComponent(axis,1).applyQuaternion(box.quaternion);
+    palmBoxHalf.setComponent(axis,box.half.getComponent(axis)+support(palmBody,palmAxis));
+  }
+  let enter=-Infinity,exit=1,hitAxis=-1,side=0;
+  for(let axis=0;axis<3;axis++){
+    const start=palmLocalFrom.getComponent(axis),d=palmLocalTo.getComponent(axis)-start,h=palmBoxHalf.getComponent(axis);
+    if(Math.abs(d)<1e-9){if(Math.abs(start)>h)return false;continue;}
+    const sign=Math.sign(d);
+    const arrival=(-sign*h-start)/d;
+    if(arrival>enter){enter=arrival;hitAxis=axis;side=-sign;}
+    exit=Math.min(exit,(sign*h-start)/d);
+    if(enter>exit)return false;
+  }
+  if(hitAxis<0||enter<0||enter>1)return false;
+  hitNormal.set(0,0,0).setComponent(hitAxis,side).applyQuaternion(box.quaternion);
+  out.lerpVectors(from,to,enter).addScaledVector(hitNormal,.001);
+  return true;
+}
 function thinPalmCrossing(from,to,field,out,hitNormal){
   if(Math.max(from.x,to.x)+palmHull.radius<field.xMin||Math.min(from.x,to.x)-palmHull.radius>field.xMax||
       Math.max(from.z,to.z)+palmHull.radius<field.zMin||Math.min(from.z,to.z)-palmHull.radius>field.zMax)return false;
@@ -315,14 +339,17 @@ function thinPalmCrossing(from,to,field,out,hitNormal){
     const x0=from.x+offset.x,z0=from.z+offset.z,x1=to.x+offset.x,z1=to.z+offset.z;
     if(Math.min(x0,x1)<field.xMin||Math.max(x0,x1)>field.xMax||
         Math.min(z0,z1)<field.zMin||Math.max(z0,z1)>field.zMax)continue;
-    const start=from.y+offset.y-field.height(x0,z0),end=to.y+offset.y-field.height(x1,z1);
+    let start=from.y+offset.y-field.height(x0,z0),end=to.y+offset.y-field.height(x1,z1);
+    const plane=field.thickness>0&&start<=-field.thickness?-field.thickness:0;
+    start-=plane;end-=plane;
+    if(field.thickness>0&&(plane===0?start<0:start>0))continue;
     if(start*end>0||start===end)continue;
     const approach=Math.sign(start)||-Math.sign(end);
     let low=0,high=1;
     for(let i=0;i<7;i++){
       const t=(low+high)*.5;
       palmSweepPoint.lerpVectors(from,to,t).add(offset);
-      if((palmSweepPoint.y-field.height(palmSweepPoint.x,palmSweepPoint.z))*approach>0)low=t;
+      if((palmSweepPoint.y-field.height(palmSweepPoint.x,palmSweepPoint.z)-plane)*approach>0)low=t;
       else high=t;
     }
     if(high>=first)continue;
@@ -336,7 +363,8 @@ function thinPalmCrossing(from,to,field,out,hitNormal){
   return true;
 }
 export function palmContact(from,to,rotation,boxes,out,hitNormal){
-  const steps=Math.min(48,Math.max(1,Math.ceil(from.distanceTo(to)/.021)));
+  const distance=from.distanceTo(to);
+  const steps=Math.min(48,Math.max(1,Math.ceil(distance/.021)));
   const r=palmHull.radius;
   sweepCandidates.length=0;
   for(const box of boxes){
@@ -348,7 +376,7 @@ export function palmContact(from,to,rotation,boxes,out,hitNormal){
   }
   palmBody.mesh.quaternion.copy(rotation);
   const center=palmBody.mesh.position;
-  if(sweepCandidates.some(box=>box.heightfield&&!(box.thickness>0))){
+  if(sweepCandidates.some(box=>box.heightfield)){
     for(let i=0;i<palmOffsets.length;i++)palmOffsets[i].copy(palmHull.vertices[i]).applyQuaternion(rotation);
   }
   palmPrevious.copy(from);
@@ -359,7 +387,9 @@ export function palmContact(from,to,rotation,boxes,out,hitNormal){
       if(object&&(object.owner||center.distanceToSquared(object.mesh.position)>(r+object.radius)**2))continue;
       // Retenir le côté d'où vient la paume, même si un sommet a franchi
       // toute la surface fine entre deux échantillons.
-      if(box.heightfield&&!(box.thickness>0)&&thinPalmCrossing(palmPrevious,center,box,out,hitNormal))return box;
+      if(box.heightfield&&thinPalmCrossing(palmPrevious,center,box,out,hitNormal))return box;
+      if(!object&&!box.heightfield&&!box.convex&&Math.min(box.half.x,box.half.y,box.half.z)<=.03&&
+          distance>.02&&thinBoxCrossing(palmPrevious,center,box,out,hitNormal))return box;
       const depth=object?sat(palmBody,object,normal):shapeContact(palmBody,box,normal);
       if(depth>0){
         out.copy(center).addScaledVector(normal,depth+.0005);
@@ -402,7 +432,7 @@ export function moveKinematic(body,targetPosition,targetRotation,boxes,dt){
   const angle=rotationDelta(kinematicRotation,targetRotation,turn);
   const travel=kinematicStep.length()+angle*shape.radius;
   const stride=travelLimit(shape);
-  const count=Math.max(1,Math.min(MAX_SUBSTEPS,Math.ceil(travel/stride)));
+  const count=Math.max(1,Math.min(12,Math.ceil(travel/stride)));
   const fraction=travel>0?Math.min(1,count*stride/travel):1;
   const radiansPerStep=angle*fraction/count;
   kinematicSpin.set(turn.x,turn.y,turn.z).normalize();
@@ -657,7 +687,7 @@ export function solveObjects(objects,boxes,dt,gravity,rebound,surfaceAt,onImpact
     if(dynamic&&!nearArena&&!nearObject){body.sleeping=false;body.quietTime=0;free.push(body);continue;}
     if(dynamic&&!body.sleeping){
       const angularSpeed=Math.min(body.angular.length(),30);
-      const speed=body.velocity.length()+angularSpeed*body.shape.radius+Math.abs(gravity*body.sweepGravity)*dt;
+      const speed=body.velocity.length()+(body.shape.sphereRadius?0:angularSpeed*body.shape.radius)+Math.abs(gravity*body.sweepGravity)*dt;
       count=Math.max(count,Math.ceil(speed*dt/travelLimit(body.shape)));
     }
     const state={body,inverseMass:dynamic?1/body.mass:0,held:body.owner&&!body.frozen,

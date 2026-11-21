@@ -58,7 +58,8 @@ export class GorillaLocomotion {
 
   sweep(state, from, to) {
     let boxes = this.boxes;
-    if (state.releaseTime > 0 && boxes.includes(state.releaseSurface)) {
+    if (state.releaseTime > 0 && this.handMotion.subVectors(to,from).dot(state.normal)>=0 &&
+        boxes.includes(state.releaseSurface)) {
       this.castBoxes.length = 0;
       for (const box of boxes) if (box !== state.releaseSurface) this.castBoxes.push(box);
       boxes = this.castBoxes;
@@ -86,9 +87,17 @@ export class GorillaLocomotion {
       hand.surface = null;
       hand.groundContact = false;
       state.releaseTime = Math.max(0, state.releaseTime - dt);
-      state.eligible = hand.valid && (!hand.held||hand.hasSupport) && settings.movement !== false;
+      state.eligible = hand.valid && ((!hand.held&&!hand.remoteHeld)||hand.hasSupport) && settings.movement !== false;
       if (!hand.valid) continue;
-      const target = hand.locomotionTarget.subVectors(hand.target, head).clampLength(0, reach).add(head);
+      const target = hand.locomotionTarget.subVectors(hand.target, head);
+      let reachAssist=0;
+      if(state.eligible&&!hand.held){
+        // Map the lowered controller to the longer virtual arm while keeping horizontal reach intact.
+        const lower=Math.min(1,Math.max(0,(-target.y-.39)/.33));
+        reachAssist=lower*lower*(3-2*lower)*(.02+(settings.arms??5)*.016);
+        target.y-=reachAssist;
+      }
+      target.clampLength(0, reach).add(head);
       if(hand.hasSupport)offset.copy(hand.supportOffset);
       else offset.copy(palmCenter).applyQuaternion(hand.mesh.quaternion);
       if (!state.eligible) continue;
@@ -168,7 +177,9 @@ export class GorillaLocomotion {
       hand.surface = surface;
       hand.groundContact = normal.y > .55;
       this.contacts++;
-      if (state.tracked) {
+      // Initial contact from the reach assist can brace the hand without creating a jump by itself.
+      const assistedContact=!priorActive&&hand.groundContact&&reachAssist*normal.y>correction.dot(normal);
+      if (state.tracked&&!assistedContact) {
         const intent = this.handMotion.subVectors(state.previousTarget, target);
         const push = intent.dot(normal);
         intent.multiplyScalar(1 - slip).addScaledVector(normal, Math.max(0, push) - push * (1 - slip));
@@ -259,8 +270,8 @@ export class GorillaLocomotion {
       if (!surface) continue;
       state.releaseSurface = surface;
       state.releaseTime = RELEASE_SECONDS;
+      // Keep the last safe palm position until the next sweep.
       state.hand.surface = null;
-      state.previousPalm.copy(state.previousTarget).add(state.offset);
     }
     this.clearHistory();
     result.launched = true;

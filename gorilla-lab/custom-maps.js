@@ -434,7 +434,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   function recenter(x,y,z,yaw){
     if(!map)return;
     memo();
-    map.spawn={x,y,z,yaw:T.MathUtils.radToDeg(yaw)};
+    map.spawn={x,y,z,yaw:T.MathUtils.radToDeg(T.MathUtils.euclideanModulo(yaw+Math.PI,2*Math.PI)-Math.PI)};
     boot.set(x,y,z);
     rebuild();inform('Point de départ mémorisé.');
   }
@@ -501,7 +501,8 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
       if(blocked)return inform('Déplace-toi : la pièce toucherait ton corps.');
       if(moving<0&&map.pieces.length>=maxPieces)return inform('Limite de '+maxPieces+' pièces atteinte.');
       memo();
-      if(moving>=0){map.pieces[moving]=next;moving=-1;}else map.pieces.push(next);
+      const [placed]=parseMap({format:'gorilla-lab-map',version:1,pieces:[next]}).pieces;
+      if(moving>=0){map.pieces[moving]=placed;moving=-1;}else map.pieces.push(placed);
       rebuild();inform('Pièce posée · '+map.pieces.length+' pièces');
     }
   }
@@ -517,12 +518,12 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     }catch(e){if(request===loadRequest)inform(e.message);}
   };
   // Une importation peut se terminer après un reset ou un autre import. Seule l’opération courante peut charger la carte.
-  async function fetchMap(value,httpsOnly,progress){
+  async function fetchMap(value,httpsOnly,progress,signal){
     const url=new URL(value,location.href);
     if(url.username||url.password||!(httpsOnly?url.protocol==='https:':['http:','https:'].includes(url.protocol)))
       throw Error(httpsOnly?'La carte du salon doit être accessible en HTTPS.':'Il faut une URL HTTP ou HTTPS.');
     const start=performance.now();
-    const response=await fetch(url,{credentials:'omit',referrerPolicy:'no-referrer'});
+    const response=await fetch(url,{credentials:'omit',referrerPolicy:'no-referrer',signal});
     if(!response.ok)throw Error('URL de map inaccessible ('+response.status+').');
     if(Number(response.headers.get('content-length'))>maxMapBytes)throw Error('Map trop lourde.');
     const reader=response.body.getReader(),decoder=new TextDecoder();
@@ -550,20 +551,20 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     }catch(e){if(request===loadRequest)inform(e.message);}
     return false;
   }
-  async function loadRoomMap(value,accepts,progress){
+  async function loadRoomMap(value,accepts,progress,signal){
     const request=++loadRequest;
     try{
       if(value instanceof Blob&&value.size>maxMapBytes)throw Error('Carte trop lourde.');
       const remote=value==='arena'?null:value instanceof Blob?parseMap(await value.text()):isEncodedRoomMap(value)?
-        parseMap(await decodeRoomMapLink(value,maxMapBytes)):(await fetchMap(value,true,progress)).map;
-      if(request!==loadRequest)return false;
+        parseMap(await decodeRoomMapLink(value,maxMapBytes,signal)):(await fetchMap(value,true,progress,signal)).map;
+      if(request!==loadRequest||signal?.aborted)return false;
       if(!accepts(remote))return false;
       roomBase??={map,history:history.slice(),source:loadedSource};
       history.length=0;applyMap(remote);
       inform(remote?'Carte du salon · '+remote.name:'Carte du salon · Arène intégrée');
       return true;
     }catch(e){
-      if(request===loadRequest)inform('Carte du salon indisponible · '+e.message);
+      if(request===loadRequest&&!signal?.aborted)inform('Carte du salon indisponible · '+e.message);
       return false;
     }
   }
@@ -578,7 +579,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   }
   async function roomMapSource(forRoom=false){
     if(!map)return 'arena';
-    if(loadedSource?.signature===signature&&loadedSource.url.startsWith('https:'))return loadedSource.url;
+    if(!forRoom&&loadedSource?.signature===signature&&loadedSource.url.startsWith('https:'))return loadedSource.url;
     if(typeof CompressionStream==='undefined')return null;
     const packed=await encodeRoomMapLink(map,forRoom);
     return packed;

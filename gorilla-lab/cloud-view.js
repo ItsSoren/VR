@@ -62,8 +62,11 @@ function makeAvatar(localColor){
     head.quaternion.slerp(goal,smooth);
     look.set(0,0,-1).applyQuaternion(head.quaternion);
     const lean=T.MathUtils.smoothstep(-look.y,.28,.94);
-    const stretch=Math.max(.38,data.armSpan*(2/3)/.82);
-    body.position.set(0,-.25-.24*stretch,.24*lean);body.rotation.x=-.5*lean;
+    const scale=T.MathUtils.clamp(.72+(data.height-.43)/.088*.05,.77,1.22);
+    const stretch=scale*.59;
+    body.rotation.x=-.5*lean;
+    body.position.set(0,-.145,.045).applyQuaternion(head.quaternion)
+      .sub(handPoint.set(0,.46*stretch,.04*scale).applyQuaternion(body.quaternion));
     torsoRelative.copy(body.quaternion).invert();
     const color=data.color??0;
     style.setColor(color===localColor?(color===1?2:1):color);
@@ -79,7 +82,7 @@ function makeAvatar(localColor){
       for(let j=0;j<3;j++)h.pressure[j]+=((state.pressure?.[j]??0)-h.pressure[j])*smooth;
       h.skin.pose(h.pressure,false);
     }
-    skin.pose(handPoses,data.armSpan*.5,.97,stretch,true);
+    skin.pose(handPoses,data.armSpan*.5,scale,stretch,true);
     if(data.gun){
       if(!gun){gun=createBlasterModel();gun.visible=false;toolRoot.add(gun);}
       const a=gun.visible?smooth:1;
@@ -109,9 +112,9 @@ function disposeArt(root){
   root.traverse(node=>{
     if(!node.isMesh)return;
     node.geometry.dispose();
-    materials.add(node.material);
+    for(const material of Array.isArray(node.material)?node.material:[node.material])materials.add(material);
   });
-  for(const material of materials)material.dispose();
+  for(const material of materials)material?.dispose();
 }
 
 export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,applyLight,onAction,onShot,onStatus,onRoomMap,restoreRoomMap,exportRoomMap,roomMapSource,hingeSnapshot,applyHinges}){
@@ -121,7 +124,7 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
     peers.delete(id);
   }
   let replicaHost=0,replicaMap=-1,replicaLight=-1,hasInitialWorld=false;
-  let sharedSourceMap=-1,sharedSource=null,sourceAt=-Infinity,mapFragments=null,fragmentIndex=0;
+  let sharedSourceMap=-1,sharedSource=null,sourceAt=-Infinity,mapFragments=null,fragmentIndex=0,fragmentCopy=0,sourceGeneration=0;
   let cachedMap='',cachedId=0;
   function localMap(){
     const name=currentMap();
@@ -134,7 +137,10 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
   }
   function removeReplica(id){
     const r=replicas.get(id);
-    if(r){scene.remove(r.mesh);r.mesh.material?.dispose();replicas.delete(id);}
+    if(!r)return;
+    scene.remove(r.mesh);
+    for(const material of Array.isArray(r.mesh.material)?r.mesh.material:[r.mesh.material])material?.dispose();
+    replicas.delete(id);
   }
   function clearReplicas(){
     for(const id of replicas.keys())removeReplica(id);
@@ -217,18 +223,23 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
   const start=$('#cloud-private-start'),active=$('#cloud-private-active');
   const copyButton=$('#cloud-copy'),playerButton=$('#cloud-player');
   const importButton=$('#cloud-import'),fileInput=$('#cloud-map-file'),exportButton=$('#cloud-export');
-  let mapLoadError='',downloadProgress=null;
+  let mapLoadError='',downloadProgress=null,downloadFraction=null;
   const progressPanel=$('#cloud-map-transfer'),progressBar=$('#cloud-map-progress'),progressEta=$('#cloud-map-eta');
   function transferProgress(data){
+    downloadFraction=null;
     progressPanel.hidden=!data;
     if(!data)return;
     const {loaded=0,total,seconds=0}=data;
-    if(!total){progressBar.removeAttribute('value');progressEta.textContent='Estimation en cours…';return;}
-    const fraction=Math.min(1,loaded/total);
+    if(!total){
+      progressBar.removeAttribute('value');
+      progressEta.textContent=loaded?Math.round(loaded/1024)+' Ko reçus · durée inconnue':'En attente des données de la carte…';
+      return;
+    }
+    const fraction=downloadFraction=Math.min(1,loaded/total);
     progressBar.value=fraction;
     const remaining=seconds>0&&loaded>0?Math.ceil((total-loaded)*seconds/loaded):null;
-    const time=remaining===null?'estimation en cours':remaining<60?'environ '+remaining+' s':
-      'environ '+Math.ceil(remaining/60)+' min';
+    const time=remaining===null?'estimation en cours':remaining<60?('environ '+remaining+' s'):
+      ('environ '+Math.ceil(remaining/60)+' min '+(Math.round(remaining/60)>=60?'(relais lent)':''));
     progressEta.textContent=Math.floor(fraction*100)+' % · '+(loaded>=total?'ouverture de la carte…':time);
   }
   function refreshRoomActions(){
@@ -259,7 +270,7 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
       if(!entry){entry={art:null,motion:new T.Vector3(),handMotion:[new T.Vector3(),new T.Vector3()]};peers.set(pose.id,entry);}
       const prior=entry.pose;
       if(client.role==='vr'&&readyHere(pose)&&(!readyHere(prior)||entry.inactive))feed.requestFull();
-      if(pose.role==='vr'&&pose.roomSource){
+      if(pose.role==='vr'&&pose.roomSource&&!mapPaused){
         let value=pose.roomSource;
         if(value.startsWith('part:')){
           if(entry.transfer?.map!==pose.map)entry.transfer={map:pose.map};
@@ -291,9 +302,25 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
   room.value=/^[A-Z0-9]{5,12}$/.test(roomFromURL)?roomFromURL:'';
   const invitedMap=new URLSearchParams(location.hash.slice(1)).get('roomMap')??
     new URLSearchParams(location.search).get('roomMap');
-  let roomMapPending=false,visit=0,lastMapAttempt=null,telemetryAt=-Infinity;
+  let roomMapPending=null,visit=0,lastMapAttempt=null,telemetryAt=-Infinity,mapPaused=false;
+  function stopMapLoad(){
+    visit++;
+    roomMapPending?.controller.abort();
+    roomMapPending=null;downloadProgress=null;
+  }
+  function cancelMapLoad(){
+    if(!client.role||client.role==='vr')return;
+    stopMapLoad();mapPaused=true;mapLoadError='';onStatus?.();
+  }
+  function resumeMapLoad(){
+    mapPaused=false;lastMapAttempt=null;mapLoadError='';onStatus?.();
+  }
+  $('#cloud-map-cancel').onclick=cancelMapLoad;
+  const resumeButton=$('#cloud-map-resume');
+  resumeButton.onclick=resumeMapLoad;
   function leave(){
-    visit++;roomMapPending=false;lastMapAttempt=null;mapLoadError='';client.leave();
+    stopMapLoad();resumeMapLoad();client.leave();
+    resumeButton.hidden=true;
     downloadProgress=null;transferProgress(null);
     sharedSourceMap=-1;sharedSource=null;sourceAt=-Infinity;
     for(const [id,entry] of peers)removePeer(id,entry);restoreRoomMap?.();refreshRoomActions();
@@ -330,20 +357,26 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
   fileInput.onchange=()=>{
     const file=fileInput.files[0],host=client.remote;
     fileInput.value='';
-    if(file&&client.role&&client.role!=='vr'&&host?.ready&&host.map!==localMap())loadRoomSource(file,host,true);
+    if(file&&client.role&&client.role!=='vr'&&host?.ready&&host.map!==localMap()){
+      resumeMapLoad();loadRoomSource(file,host,true);
+    }
   };
   async function loadRoomSource(source,host,manual=false){
     const attempt=++visit;
-    roomMapPending=true;
-    downloadProgress={};
+    const controller=new AbortController();
+    roomMapPending={id:host.id,map:host.map,controller};
+    downloadProgress=source.startsWith?.('gzip:')||manual?{loaded:1,total:1}:{};
     mapLoadError='';
     try{
-      const ok=await onRoomMap(source,host.map,()=>attempt===visit&&client.remote?.id===host.id&&client.remote?.map===host.map,progress=>{if(attempt===visit)downloadProgress=progress;});
+      const ok=await onRoomMap(source,host.map,()=>attempt===visit&&client.remote?.id===host.id&&client.remote?.map===host.map,
+        progress=>{if(attempt===visit)downloadProgress=progress;},controller.signal);
       if(attempt===visit&&!ok&&source!=='arena')mapLoadError=manual?
         'Ce fichier ne correspond pas à la carte du salon ou son import a échoué. Demande à l’hôte le JSON actuel.':
         'Carte inaccessible ou différente. Récupère le JSON actuel auprès de l’hôte.';
+    }catch(error){
+      if(attempt===visit)mapLoadError=error.message;
     }finally{
-      if(attempt===visit){roomMapPending=false;downloadProgress=null;}
+      if(attempt===visit){roomMapPending=null;downloadProgress=null;}
     }
   }
   $('#cloud-copy').onclick=async()=>{
@@ -425,18 +458,19 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
   }
   function updateStatus(localReady,now){
     const host=client.remote;
-    const peer=host&&peers.get(host.id),fragments=peer?.transfer;
-    const waiting=client.role&&client.role!=='vr'&&host?.ready&&host.map!==localMap()&&
-      !mapLoadError&&peer?.source?.value!=='file';
-    const assembled=fragments?.map===host?.map&&fragments?.total?
-      {loaded:fragments.fragments.size,total:fragments.total,seconds:(fragments.lastAt-fragments.firstAt)/1000}:null;
-    transferProgress(waiting?(assembled??downloadProgress??{}):null);
+    const fragments=host&&peers.get(host.id)?.transfer;
+    const needsMap=client.role&&client.role!=='vr'&&host?.ready&&host.map!==localMap();
+    const waiting=needsMap&&!mapLoadError&&!mapPaused;
+    resumeButton.hidden=!needsMap||(!mapPaused&&!mapLoadError);
+    transferProgress(waiting?(downloadProgress??(fragments?.map===host.map&&fragments.total?
+      {loaded:fragments.fragments.size,total:fragments.total,seconds:Math.max(0,fragments.lastAt-fragments.firstAt)/1000}:{})):null);
     if(now<copyUntil)return;
     let caption=networkCaption;
     if(client.state==='open'){
       const prefix='Salon '+client.code+' · ';
       const readyPeers=client.peers.filter(pose=>pose.ready);
-      if(roomMapPending)caption=prefix+'chargement de la carte du salon';
+      if(needsMap&&mapPaused)caption=prefix+'chargement annulé';
+      else if(roomMapPending)caption=prefix+'chargement de la carte du salon';
       else if(!localReady)caption=prefix+'quitte la session VR pour utiliser le mode spectateur';
       else if(client.role!=='vr'&&host&&host.map!==localMap()){
         const advertised=peers.get(host.id)?.source;
@@ -461,6 +495,7 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
       }
     }
     if(status.textContent!==caption){status.textContent=caption;onStatus?.();}
+    else if(waiting)onStatus?.();
   }
   function update(frame){
     const {inVR,time,dt,position,yaw,camera,rig,keys,avatar,bodies}=frame;
@@ -468,15 +503,18 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
     if(!client.role){clearReplicas();return;}
     const ready=client.role!=='pc'||!inVR,now=performance.now();
     const map=localMap(),host=client.role!=='vr'?client.remote:null;
-    if(ready&&client.state==='open'&&host?.ready&&host.map!==map&&onRoomMap&&!roomMapPending){
+    if(roomMapPending&&(host?.id!==roomMapPending.id||host?.map!==roomMapPending.map))stopMapLoad();
+    if(lastMapAttempt&&(host?.id!==lastMapAttempt.id||host?.map!==lastMapAttempt.map)){
+      mapLoadError='';lastMapAttempt=null;
+    }
+    if(ready&&client.state==='open'&&host?.ready&&host.map!==map&&onRoomMap&&!roomMapPending&&!mapPaused){
       const advertised=peers.get(host.id)?.source;
       const announcement=advertised?.map===host.map?advertised.value:null;
       const invite=client.code===roomFromURL?invitedMap:null;
-      const source=announcement==='file'?(invite??'file'):(announcement??invite??'arena');
-      const key=host.id+':'+host.map+':'+source;
-      if(lastMapAttempt!==key){
-        lastMapAttempt=key;
-        if(source!=='file')loadRoomSource(source,host);
+      const source=announcement==='file'?(invite??'file'):(announcement??invite);
+      if(source&&source!=='file'&&(lastMapAttempt?.id!==host.id||lastMapAttempt?.map!==host.map||lastMapAttempt?.source!==source)){
+        lastMapAttempt={id:host.id,map:host.map,source};
+        loadRoomSource(source,host);
       }
     }
     const showWorld=ready&&(client.role==='player'?guestActive():readyHere(host)&&hasInitialWorld);
@@ -502,33 +540,43 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
       }else fly(frame);
     }
     const hosting=ready&&client.role==='vr';
-    if(hosting&&sharedSourceMap!==map){
+    const needsUpload=hosting&&client.peers.some(p=>p.role!=='vr'&&p.ready&&p.map!==map);
+    if(needsUpload&&sharedSourceMap!==map){
       const code=client.code;
-      sharedSourceMap=map;sharedSource=null;sourceAt=-Infinity;mapFragments=null;fragmentIndex=0;
+      const generation=++sourceGeneration;
+      sharedSourceMap=map;sharedSource=null;sourceAt=-Infinity;mapFragments=null;fragmentIndex=fragmentCopy=0;
       Promise.resolve().then(()=>roomMapSource?.(true)).catch(()=>null).then(source=>{
-        if(client.role!=='vr'||client.code!==code||sharedSourceMap!==map)return;
+        if(client.role!=='vr'||client.code!==code||sourceGeneration!==generation)return;
         mapFragments=splitRoomMap(source);
         sharedSource=mapFragments?'fragments':source&&source.length<=maxRoomSourceLength?source:'file';
       });
     }
-    const share=hosting&&sharedSource&&now-sourceAt>=(mapFragments?650:1800)&&client.peers.some(p=>p.role!=='vr'&&p.map!==map);
-    const sent=client.tick({x:position.x,y:position.y,z:position.z,yaw,map,ready,avatar:ready&&client.role!=='pc'?avatar:null,
+    const share=needsUpload&&sharedSourceMap===map&&sharedSource&&now-sourceAt>=(mapFragments?100:500);
+    const sent=client.tick({x:position.x,y:position.y,z:position.z,yaw,map,ready:ready&&!mapPaused,avatar:ready&&client.role!=='pc'?avatar:null,
       roomSource:share?(mapFragments?.[fragmentIndex]??sharedSource):null,hinges:hosting?hingeSnapshot?.():null,
       objectFeed:hosting&&bodies?t=>feed.capture(t,bodies,true):null});
-    if(share&&sent){sourceAt=now;if(mapFragments)fragmentIndex=(fragmentIndex+1)%mapFragments.length;}
+    if(share&&sent){
+      sourceAt=now;
+      if(mapFragments&&++fragmentCopy===2){fragmentCopy=0;fragmentIndex=(fragmentIndex+1)%mapFragments.length;}
+    }
     if(now-statusAt>=150){statusAt=now;updateStatus(ready,now);}
     if(now-telemetryAt>=750){
       telemetryAt=now;
       const output=$('#cloud-telemetry'),timing=showWorld||client.role==='vr'?client.stats.peerTiming:null;
-      if(output)output.textContent=timing?'Mises à jour reçues · '+timing.intervalMs+' ms en moyenne · '+timing.p95IntervalMs+' ms au 95e percentile · variation '+timing.jitterMs+' ms':'Mises à jour reçues · en attente de mesures';
+      if(output)output.textContent=timing?'Intervalle entre paquets · '+timing.intervalMs+' ms en moyenne · '+timing.p95IntervalMs+' ms au 95e percentile · variation '+timing.jitterMs+' ms':'Intervalle entre paquets · en attente de mesures';
     }
   }
   function getPeer(id){const pose=peers.get(id)?.pose;return readyHere(pose)?pose:null;}
-  return {update,getPeer,connect,leave,clearMapReplicas:clearReplicas,get caption(){return status.textContent;},handMotion(id,index){return peers.get(id)?.handMotion[index];},sendAction(action){return client.sendAction(action,localMap());},
+  return {update,getPeer,connect,leave,cancelMapLoad,resumeMapLoad,
+    get downloadCaption(){return progressPanel.hidden?'':progressEta.textContent;},
+    get downloadFraction(){return downloadFraction;},
+    get canResumeMap(){return !resumeButton.hidden;},
+    clearMapReplicas:clearReplicas,get caption(){return status.textContent;},handMotion(id,index){return peers.get(id)?.handMotion[index];},sendAction(action){return client.sendAction(action,localMap());},
     sendShot(position,quaternion){client.queueShot(position,quaternion,localMap());},
     get stats(){return client.stats;},
     get role(){return client.role;},get connected(){return readyHere(client.remote)&&hasInitialWorld;},get guestActive(){return guestActive();},
     get remoteSpectator(){return client.peers.find(p=>p.role==='pc'&&readyHere(p))??null;},
     get remoteLight(){return replicaLight===-1?null:replicaLight;},get replicaCount(){return replicas.size;},
+    replica(id){return replicas.get(id)?.mesh??null;},
     forEachReplica(fn){for(const r of replicas.values())if(r.mesh.visible)fn(r.mesh);}};
 }

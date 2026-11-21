@@ -42,17 +42,20 @@ export function createVrEffects(renderer) {
     settings.exposure.value=renderer.toneMappingExposure;
     // La composition manipule l’état global du moteur. Le bloc finally le rétablit même en cas d’erreur.
     const original=renderer.getRenderTarget(),xrEnabled=renderer.xr.enabled;
+    // The eye framebuffer stays at native resolution. The intermediate HDR
+    // scene can be smaller to keep the blur and composite within the XR budget.
+    const scale=bloom?.strength>0 ? .8 : 1;
     const shadowUpdate=renderer.shadowMap.autoUpdate,autoReset=renderer.info.autoReset;
     renderer.info.reset();renderer.info.autoReset=false;
     try{
       renderer.xr.enabled=false;
       for(let i=0;i<eyes.length;i++){
         const eye=eyes[i];
-        const width=Math.max(32,Math.round(eye.viewport.z));
-        const height=Math.max(32,Math.round(eye.viewport.w));
+        const width=Math.max(32,Math.round(eye.viewport.z*scale));
+        const height=Math.max(32,Math.round(eye.viewport.w*scale));
         let target=targets[i];
         if(!target){
-          target=targets[i]=new T.WebGLRenderTarget(width,height,{type:half?T.HalfFloatType:T.UnsignedByteType,minFilter:T.NearestFilter,magFilter:T.NearestFilter,depthBuffer:true,stencilBuffer:false});
+          target=targets[i]=new T.WebGLRenderTarget(width,height,{type:half?T.HalfFloatType:T.UnsignedByteType,minFilter:T.LinearFilter,magFilter:T.LinearFilter,depthBuffer:true,stencilBuffer:false});
         }else if(target.width!==width||target.height!==height)target.setSize(width,height);
         camera.matrix.copy(eye.matrixWorld);camera.matrixWorld.copy(eye.matrixWorld);
         camera.matrixWorldInverse.copy(eye.matrixWorldInverse);

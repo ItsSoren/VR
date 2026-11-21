@@ -91,9 +91,14 @@ export function createBodySkin(material,handMeshes){
       else wrist.add(rest.set(base.x+arm.sign*.026,base.y-.43,base.z-.015));
       reach.subVectors(wrist,base);
       tangent.copy(reach).normalize();
-      bend.set(arm.sign*.38,-1,.27).addScaledVector(tangent,-tangent.dot(rest.set(arm.sign*.38,-1,.27))).normalize();
+      bend.set(arm.sign*.18,-.58,.78);
+      bend.addScaledVector(tangent,-tangent.dot(bend)).normalize();
       elbow.copy(base).addScaledVector(reach,.49);
-      if(tracked)elbow.addScaledVector(bend,Math.sqrt(Math.max(.007,segmentLength**2-reach.lengthSq()*.25))*.72);
+      if(tracked){
+        const bendDepth=Math.sqrt(Math.max(0,segmentLength**2-reach.lengthSq()*.25));
+        const hanging=T.MathUtils.smoothstep(-tangent.y,.6,.96);
+        elbow.addScaledVector(bend,bendDepth*T.MathUtils.lerp(.72,.31,hanging));
+      }
       armFrame.setFromUnitVectors(forward,tangent.subVectors(elbow,base).normalize());
       targetFrame.copy(hand?.quaternion??restHand);
       forearmFrame.setFromUnitVectors(forward,tangent.subVectors(wrist,elbow).normalize());

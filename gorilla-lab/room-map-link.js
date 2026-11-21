@@ -1,14 +1,14 @@
 const prefix='gzip:';
 const maxEncoded=16000;
 const fragmentSize=3900;
+// Derive the wire budget from the map format, including gzip and base64 overhead.
 export const roomMapImportBytes=16_000_000;
-// Reserve gzip framing overhead before converting the byte budget to base64.
 const maxPayload=Math.ceil((roomMapImportBytes+Math.ceil(roomMapImportBytes/100)+1024)*4/3);
 const maxFragments=Math.ceil(maxPayload/fragmentSize);
 export async function encodeRoomMapLink(map,forRoom=false){
-  const file=new Blob([JSON.stringify(map)]);
-  if(file.size>roomMapImportBytes)return null;
-  const stream=file.stream().pipeThrough(new CompressionStream('gzip'));
+  const document=new Blob([JSON.stringify(map)]);
+  if(document.size>roomMapImportBytes)return null;
+  const stream=document.stream().pipeThrough(new CompressionStream('gzip'));
   const bytes=new Uint8Array(await new Response(stream).arrayBuffer());
   if(bytes.length>(forRoom?maxPayload:maxEncoded)*3/4)return null;
   let binary='';
@@ -17,7 +17,8 @@ export async function encodeRoomMapLink(map,forRoom=false){
   return prefix+payload;
 }
 export function isEncodedRoomMap(source){return source.startsWith(prefix);}
-export async function decodeRoomMapLink(source,maxBytes){
+export async function decodeRoomMapLink(source,maxBytes,signal){
+  signal?.throwIfAborted();
   const payload=source.slice(prefix.length);
   if(!payload.length||payload.length>maxPayload||!/^[0-9a-z_-]+$/i.test(payload))
     throw Error('Lien de carte invalide.');
@@ -28,6 +29,7 @@ export async function decodeRoomMapLink(source,maxBytes){
   try{
     for(;;){
       const {done,value}=await reader.read();
+      if(signal?.aborted){await reader.cancel();signal.throwIfAborted();}
       if(done)break;
       bytes+=value.byteLength;
       if(bytes>maxBytes){await reader.cancel();throw Error('Carte du salon trop lourde.');}
