@@ -44,7 +44,7 @@ export function createVrEffects(renderer) {
     const original=renderer.getRenderTarget(),xrEnabled=renderer.xr.enabled;
     // The eye framebuffer stays at native resolution. The intermediate HDR
     // scene can be smaller to keep the blur and composite within the XR budget.
-    const scale=bloom?.strength>0 ? .8 : 1;
+    const scale=half&&bloom?.strength>0 ? .8 : 1;
     const shadowUpdate=renderer.shadowMap.autoUpdate,autoReset=renderer.info.autoReset;
     renderer.info.reset();renderer.info.autoReset=false;
     try{
@@ -80,7 +80,7 @@ export function createVrEffects(renderer) {
     for(const target of targets)target.dispose();
     targets.length=0;eyes=[];hdrBloom.dispose();
   });
-  return {render};
+  return {render,hdrBloomSupported:half};
 }
 
 export function addRayProbe(mesh){
