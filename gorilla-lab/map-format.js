@@ -50,7 +50,7 @@ export function parseMap(input){
     pieces:pieces.map((p,i)=>{
       if(!p||typeof p!=='object')throw Error('Pièce invalide : '+(i+1));
       const limit=p.terrain?maxTerrainSize:maxObjectSize;
-      const w=number(p.w,.05,limit,3),d=number(p.d,.05,limit,3);
+      const w=number(p.w,.01,limit,3),d=number(p.d,.01,limit,3);
       const flight=p.solid===false?normalizeFlight(p.flight):null;
       const surfaceSound=normalizeSurfaceSound(p.surfaceSound);
       const terrain=p.terrain&&typeof p.terrain==='object'?normalizeTerrain(p.terrain,w*d):null;
@@ -60,7 +60,7 @@ export function parseMap(input){
         name:text(p.name,36,'Pièce '+(i+1)),
         ...(typeof p.sceneryId==='string'&&/^[a-z0-9-]{1,48}$/i.test(p.sceneryId)?{sceneryId:p.sceneryId}:{}),
         x:number(p.x,-maxWorldReach,maxWorldReach,0),y:number(p.y,-maxWorldHeight,maxWorldHeight,0),z:number(p.z,-maxWorldReach,maxWorldReach,0),
-        w,h:number(p.h,.05,256,.5),d,
+        w,h:number(p.h,.01,256,.5),d,
         pitch:terrain?0:number(p.pitch,-180,180,0),yaw:terrain?terrainQuarterYaw(number(p.yaw,-360,360,0)):number(p.yaw,-360,360,0),roll:terrain?0:number(p.roll,-180,180,0),
         ...(terrain?{terrain}:{}),
         ...(flight?{flight}:{}),
@@ -110,6 +110,20 @@ export function exampleMap(){
   });
 }
 
+
+export function thinSurfaceCourse(){
+  return {
+    format:'gorilla-lab-map',version:1,name:'Parcours appuis fins',worldSize:36,
+    spawn:{x:0,y:.06,z:4,yaw:0},
+    pieces:[
+      makePiece({name:'Sol de récupération',x:0,y:-.25,z:-5,w:13,h:.5,d:26,material:9}),
+      makePiece({name:'Contrôle · dalle 20 cm',x:0,y:.32,z:0,w:2.8,h:.20,d:2.4,material:13,color:'#7effa2'}),
+      makePiece({name:'Dalle horizontale · 1 cm',x:0,y:.49,z:-3.2,w:2.8,h:.01,d:2.4,material:13,color:'#ffcd61'}),
+      makePiece({name:'Dalle inclinée · 1 cm',x:0,y:.55,z:-6.4,w:2.8,h:.01,d:2.4,pitch:-16,material:13,color:'#ff9d61'}),
+      makePiece({name:'Mur · 1 cm',x:0,y:1,z:-10,w:3.6,h:2,d:.01,material:13,color:'#62cad5'}),
+    ],
+  };
+}
 
 export function makePiece(fields={}){
   return {name:'Bloc',x:0,y:.25,z:0,w:2,h:.5,d:2,pitch:0,yaw:0,roll:0,material:0,color:'#ffffff',
