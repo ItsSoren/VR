@@ -2046,11 +2046,14 @@ renderer.setAnimationLoop((time,frame)=>{
   updateMirror(time,pose);
   const renderStart=performance.now();
   const bloomProfile=settings.bloom?arena.bloomProfile:null;
-  const useVrPost=inVR&&(settings.post||bloomProfile?.strength>0);
+  const vrBloomRequested=inVR&&settings.bloom;
+  const vrBloomProfile=vrEffects.hdrBloomSupported&&bloomProfile?.strength>0?bloomProfile:null;
+  const useVrPost=inVR&&(settings.post||vrBloomProfile!==null);
   const useVrTrace=inVR&&settings.rayTrace;
   updateRayProbe(useVrTrace,objects);
   const visibleField=settings.vrFov/100;
-  if(!useVrPost||!vrEffects.render(scene,camera,{bloom:bloomProfile,visibleField})){
+  const vrPostRendered=useVrPost&&vrEffects.render(scene,camera,{bloom:vrBloomProfile,visibleField});
+  if(!vrPostRendered){
     vrFovMask.material.uniforms.visibleField.value=visibleField;
     vrFovMask.visible=inVR&&visibleField<1;
     const bodyVisible=monkey.visible,rigVisible=pcAvatar?.root.visible;
@@ -2085,7 +2088,8 @@ renderer.setAnimationLoop((time,frame)=>{
     if(inVR)lastVR={
       refreshHz:renderer.xr.getSession()?.frameRate??null,targetFps:fpsGoal,supportedHz:refreshOptions.slice(),
       foveation:renderer.xr.getFoveation()??null,
-      visualEffects:{post:useVrPost,bloom:useVrPost&&settings.bloom,rayTrace:useVrTrace},
+      visualEffects:{post:vrPostRendered,bloom:vrPostRendered&&vrBloomProfile!==null,rayTrace:useVrTrace,
+        bloomRequested:vrBloomRequested,bloomSupported:vrEffects.hdrBloomSupported,bloomStrength:bloomProfile?.strength??0},
       eyeViewports:renderer.xr.getCamera().cameras.map(c=>({width:c.viewport?.z??null,height:c.viewport?.w??null})),
     };
     }
