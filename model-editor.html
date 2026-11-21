@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#191d23">
-<title>GORILLA / FOUNDRY · Atelier de modèles R39.9</title>
+<title>GORILLA / FOUNDRY · Atelier de modèles R40</title>
 <style>
 :root{color-scheme:dark;--ink:#e4e8eb;--soft:#a4adb5;--muted:#798790;--line:#39424a;
 --panel:#232a30;--panel-2:#1d252c;--bg:#151b20;--accent:#edac67;--blue:#77c7cc;
@@ -491,6 +491,7 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
             <h3>Propriétés de jeu</h3>
             <label class="check"><input id="grabbable" type="checkbox"> Saisissable</label>
             <label class="check"><input id="frozen" type="checkbox"> Figé à l’apparition</label>
+            <label class="check"><input id="drivable" type="checkbox"> Pilotable en solo sur PC et mobile</label>
             <p class="hint">La hitbox se règle dans l’onglet « Hitbox ».</p>
             <label class="check"><input id="supportWhileHeld" type="checkbox"> Appui pendant la prise</label>
             <div class="axes">
@@ -512,7 +513,8 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
               <label>Déclencheur <select id="reaction-phase"></select></label>
               <div class="axes">
                 <label>Porte <select id="reaction-door"></select></label>
-                <label>Mouvement <select id="reaction-doorState"><option value="open">Ouvrir</option><option value="close">Fermer</option><option value="toggle">Inverser</option></select></label>
+                <label>Mouvement <select id="reaction-doorState"><option value="open">Ouvrir</option><option value="close">Fermer</option><option value="toggle">Inverser</option><option value="hold">Ouvrir en présence</option></select></label>
+                <label>Attente avant fermeture (s)<input id="reaction-doorDelay" type="number" min=".25" max="10" step=".25" value="1.25"></label>
                 <label>Voyant <select id="reaction-light"></select></label>
                 <label>État <select id="reaction-lightState"><option value="on">Allumer</option><option value="off">Éteindre</option><option value="toggle">Inverser</option></select></label>
                 <label>Couleur du voyant <input id="reaction-lightColor" type="color" value="#ffbd54"></label>
@@ -524,7 +526,13 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
             <p class="hint" id="hinge-hint">Sélectionne le panneau de la porte.</p>
             <button id="hinge-add" type="button">Articuler la sélection</button>
             <div id="hinge-fields" hidden>
-              <h3>Pivot vertical</h3>
+              <h3>Mécanisme</h3>
+              <div class="axes">
+                <label>Mouvement<select id="hinge-mode"><option value="pivot">Pivot</option><option value="slide">Translation</option><option value="screw">Hélicoïdal</option></select></label>
+                <label>Axe<select id="hinge-direction"><option value="x">X</option><option value="y">Y</option><option value="z">Z</option></select></label>
+                <label>Course (m)<input id="hinge-travel" type="number" min="-16" max="16" step=".05"></label>
+              </div>
+              <h3>Centre du pivot</h3>
               <div class="axes">
                 <label>X (m)<input id="hinge-x" type="number" min="-6" max="6" step=".01"></label>
                 <label>Y (m)<input id="hinge-y" type="number" min="-6" max="6" step=".01"></label>
@@ -536,6 +544,7 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
                 <label>Ouverte (°)<input id="hinge-open" type="number" min="-180" max="180" step="1"></label>
                 <label>Durée (s)<input id="hinge-seconds" type="number" min=".1" max="6" step=".1"></label>
               </div>
+              <p class="hint">Groupe les pièces solidaires du même mécanisme pour les déplacer ensemble.</p>
               <label>Position entre les poses<input id="hinge-preview" type="range" min="0" max="1" step=".01" value="0"></label>
               <div class="inline-actions">
                 <button id="hinge-play" type="button">Lire</button>
@@ -561,6 +570,6 @@ body{overflow:auto}.topbar{height:auto!important;flex-wrap:wrap;min-height:52px}
   <button data-action="mirror">⥊ Miroir X</button><button data-action="ground">⤓ Poser sur la grille</button>
   <button data-action="focus">⊡ Cadrer</button><button data-action="delete">✕ Supprimer</button>
 </div>
-<script defer src="./gorilla-model-editor-r39.js?v=R39.9"></script>
+<script defer src="./gorilla-model-editor-r39.js?v=R40"></script>
 </body>
 </html>
