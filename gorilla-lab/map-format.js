@@ -42,6 +42,7 @@ export function parseMap(input){
   return {
     format:'gorilla-lab-map',version:1,...(input.arenaBase===true?{arenaBase:true}:{}),...(input.assetLayer===true?{assetLayer:true}:{}),...(input.editableArena===true?{editableArena:true}:{}),name:text(input.name,56,'Ma map'),
     worldSize:number(input.worldSize,24,2048,240),
+    ...(input.exercise==='boules'?{exercise:'boules'}:{}),
     ...(environment?{environment}:{}),
     ...(traffic.length?{traffic}:{}),
     ...(soundZones.length?{soundZones}:{}),...(soundAssets.length?{soundAssets}:{}),
@@ -110,6 +111,18 @@ export function exampleMap(){
   });
 }
 
+
+export function sphereTestCourse(){
+  return {
+    format:'gorilla-lab-map',version:1,exercise:'boules',name:'Banc d’essai des boules',worldSize:24,
+    spawn:{x:0,y:.04,z:2.3,yaw:0},
+    pieces:[
+      makePiece({name:'Sol du banc',x:0,y:-.25,z:-2,w:12,h:.5,d:12,material:9}),
+      makePiece({name:'Repère de départ',x:0,y:.002,z:2.3,w:1.35,h:.01,d:.58,material:13,color:'#73c8ff',solid:false}),
+      makePiece({name:'Zone d’empilement',x:-.84,y:.002,z:0,w:1.56,h:.01,d:1.56,material:13,color:'#ffcd69',solid:false}),
+    ],
+  };
+}
 
 export function thinSurfaceCourse(){
   return {
