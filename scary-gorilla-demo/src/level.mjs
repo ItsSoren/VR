@@ -14,6 +14,7 @@ export const locations = {
   water: {left:-4.05, right:1.5, near:-35.2, far:-45.8, surface:-.065, bed:-.62},
   refugeEnd: -4.78,
   archiveEntrance: -47.45,
+  archiveEncounter: -49.12,
 };
 
 export function createLevel(calibration) {

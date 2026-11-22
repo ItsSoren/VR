@@ -20,7 +20,7 @@ export function createExpedition() {
     advance(head) {
       if (complete) return null;
       if (!enteredShaft&&head.z < -13.32) {enteredShaft=true;return 'shaft';}
-      if (purge&&!sighting&&head.z<locations.archiveEntrance) {sighting=true;return 'sighting';}
+      if (purge&&!sighting&&head.z<locations.archiveEncounter&&head.z>-59.6&&Math.abs(head.x)<3.9) {sighting=true;return 'sighting';}
       if (sighting&&head.z>locations.refugeEnd&&Math.abs(head.x)<3.7&&head.y>0&&head.y<2.8) {
         complete=true;
         return 'returned';

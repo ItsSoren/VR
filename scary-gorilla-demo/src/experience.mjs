@@ -1,6 +1,7 @@
 import {locations} from './level.mjs';
 import {createExpedition,headUnderwater} from './expedition.mjs';
 import {createSoundscape} from './sound.mjs';
+import {createEncounter} from './rencontre.mjs';
 
 export function createExperience({T,scene,audioContext,announce,goHome}) {
   const mission = createExpedition();
@@ -171,13 +172,11 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
     const leg=box(creature,skin,side*.078,.23,.046,.099,.45,.13);
     limbs.push({arm,leg,side});
   }
-  const creatureStart=new T.Vector3(-2.74,0,-55.35);
-  const reveal=new T.Vector3(-.6,0,-54.65);
-  const retreat=new T.Vector3(-2.89,0,-58.5);
-  const creatureGoal=new T.Vector3();
-  creature.position.copy(creatureStart);
+  const encounter=createEncounter();
+  const creatureCenter=new T.Vector3();
+  const face=new T.Vector3();
   markerGroup.add(creature);
-  let creatureAge=-1, encounterEnded=false;
+  let stepsSinceCue=0, stridePhase=0;
   const progress=document.querySelector('#demo-objective');
   const grainControl=document.querySelector('#demo-grain');
   let lastMessage='';
@@ -269,23 +268,39 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
     sound.cue(name,pan);
   }
   function updateEncounter(dt,head,camera) {
-    if(creatureAge<0||encounterEnded)return;
-    creatureAge+=dt;
-    const watching=creatureAge<3.1;
-    const startled=creature.position.distanceToSquared(head)<1.5**2;
-    creatureGoal.copy(watching&&!startled?reveal:retreat);
-    creature.position.lerp(creatureGoal,1-Math.exp(-dt*(watching?1.9:1.55)));
-    creature.rotation.y=Math.atan2(head.x-creature.position.x,head.z-creature.position.z);
-    const stride=Math.sin(creatureAge*6.5);
+    if(encounter.phase==='hidden'||encounter.phase==='gone')return false;
+    creatureCenter.copy(creature.position).y+=.76;
+    face.copy(down).applyQuaternion(lamp.quaternion);
+    const lit=lampOn&&readableDirection(spot.position,creatureCenter,face,6.5,.92);
+    const {event,distance:travel}=encounter.update(dt,head,lit);
+    creatureCenter.set(encounter.position.x,0,encounter.position.z);
+    face.copy(creatureCenter).sub(creature.position);
+    if(face.lengthSq()>1e-8)creature.rotation.y=Math.atan2(-face.x,-face.z);
+    creature.position.copy(creatureCenter);
+    creature.visible=encounter.phase!=='gone';
+    stridePhase+=travel*8.4;
+    const stride=travel>1e-5?Math.sin(stridePhase):0;
     for(const {arm,leg,side} of limbs){
       arm.rotation.x=stride*.19*side-.07;
       leg.rotation.x=-stride*.17*side;
     }
-    skull.rotation.z=-.14+Math.sin(creatureAge*2.8)*.095;
-    if(creatureAge>6.5){
-      encounterEnded=true;
-      creature.visible=false;
+    skull.rotation.z=-.14+Math.sin(stridePhase*.3)*.095;
+    if(event==='pursuit'){
+      pannedCue('creature',creature.position,head,camera);
+      announce('Elle te suit. Regagne la sortie.');
     }
+    stepsSinceCue+=travel;
+    if(stepsSinceCue>.56&&encounter.phase==='pursuing'){
+      stepsSinceCue=0;
+      pannedCue('step',creature.position,head,camera);
+    }
+    if(event==='escaped')announce('Les pas s’arrêtent derrière le seuil. Regagne le refuge.');
+    if(event!=='caught')return false;
+    sound.cue('creature');
+    reset();
+    goHome();
+    announce('Rattrapé dans les archives. Retour au refuge.');
+    return true;
   }
   function reset() {
     mission.reset();
@@ -297,10 +312,10 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
     lamp.rotation.set(0,-.28,0);
     valveLamp.material=red;
     valve.rotation.x=0;
-    creatureAge=-1;
-    encounterEnded=false;
+    encounter.reset();
+    stepsSinceCue=stridePhase=0;
     creature.visible=false;
-    creature.position.copy(creatureStart);
+    creature.position.set(encounter.position.x,0,encounter.position.z);
     updateObjective();
   }
   function toggleGrain() {
@@ -333,20 +348,19 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
     const event=mission.advance(head);
     if(event==='shaft')pannedCue('metal',new T.Vector3(-4.13,1.5,-23.3),head,camera);
     if(event==='sighting'){
-      creature.visible=true;
-      creatureAge=0;
-      pannedCue('creature',creatureStart,head,camera);
-      announce('Quelque chose bouge dans les archives. Retour au refuge.');
+      encounter.start();
+      pannedCue('metal',creature.position,head,camera);
+      announce('Quelque chose bouge entre les rayonnages.');
     }
     if(event==='returned'){sound.cue('refuge');announce('Sortie terminée. Tu es revenu au refuge.');}
     if(mission.purge)valve.rotation.x=Math.min(Math.PI/2,valve.rotation.x+dt*2.2);
-    updateEncounter(dt,head,camera);
+    if(updateEncounter(dt,head,camera))return;
     updateObjective();
   }
   reset();
   return {reset,grip,toggleLamp,desktopInteract,update,toggleGrain,
     mute:muted=>sound.setEnabled(!muted),objective:()=>mission.objective(),state:()=>({
-      purge:mission.purge,sighting:mission.sighting,complete:mission.complete,submerged,
+      purge:mission.purge,sighting:mission.sighting,complete:mission.complete,submerged,encounter:encounter.phase,
       holding:held==='desktop'?'desktop':held?.side??null, lampOn,grain:Number(grainControl.value),
     })};
 }
