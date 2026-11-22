@@ -33,7 +33,7 @@ import { createBodySkin } from './body-skin.js';
 import { labMirror,labSpawn } from './lab-layout.js';
 import { readLocalMap } from './map-storage.js';
 import { connectMaps } from './custom-maps.js';
-import { arenaMap, thinSurfaceCourse, makePiece, mapMaterials, surfacePresets, storageKey, materialColors } from './map-format.js';
+import { arenaMap, thinSurfaceCourse, sphereTestCourse, makePiece, mapMaterials, surfacePresets, storageKey, materialColors } from './map-format.js';
 import { createVrEffects, addRayProbe } from './vr-effects.js';
 import { createVrFovMask } from './vr-fov.js';
 import { addLabFixtures } from './fixtures.js';
@@ -302,6 +302,7 @@ function release(hand,launch=true) {
   if(launch) object.angular.clampLength(0,24); else object.angular.set(0,0,0);
 }
 function resetObjects(){
+  if(maps?.exercise==='boules')diagnostics.record('sphere-test-reset',{objects:objects.length});
   releaseAll();
   for(const object of objects){
     restoreObject(object);object.frozen=Boolean(object.spec.properties?.frozen);
@@ -433,7 +434,7 @@ function saveReport(mode, automatic=false){
     haptics:hands.map(h=>({side:h.side,tracked:Boolean(h.valid),...h.hapticStats})),
     debug:lastPlayerDiagnostics,audio:{volume:settings.stepVolume,enabled:settings.stepAudio,clipsPlayed:steps.count,state:steps.state,...mapAudio.diagnostics},
     performance:{fps,frames:captured.frames.length,frameMs:captured.metrics.frameMs},
-    xr:mode==='VR'?lastVR:null,previousVR:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes}:null,objects:{physics:{...objectPhysicsStats},total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},cloud:{role:spectator.role,connected:spectator.connected,replicas:spectator.replicaCount,...spectator.stats},locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop,underSurfaceCrouch},
+    xr:mode==='VR'?lastVR:null,previousVR:lastVR,renderer:renderStats,terrainSeed:arena.hillSeed,map:maps.active?{name:maps.name,pieces:maps.nodes,...(maps.exercise?{exercise:maps.exercise}:{})}:null,objects:{physics:{...objectPhysicsStats},total:objects.length,held:objects.filter(o=>o.owner).length,frozen:objects.filter(o=>o.frozen).length},cloud:{role:spectator.role,connected:spectator.connected,replicas:spectator.replicaCount,...spectator.stats},locomotion:{trackedFrames,contactFrames,launchCount,lastLaunch,standingHeight:Number.isFinite(standingHeight)?standingHeight:null,viewOffset:drop,underSurfaceCrouch},
   };
   document.querySelector('#download-report').disabled=false;
   hudDirty=true;
@@ -463,6 +464,7 @@ const mapGroups=[['Construction',[
   ['Éditeur VR','mapEdit'],['Action','mapMode'],['Pièce','mapShape'],['Matériau','mapMaterial'],['Surface','mapSurface'],['Rotation','mapTurn'],['Texture raccordable','mapTexture'],
   ['Créer atelier vide',()=>{maps.blank();settings.mapEdit=true;}],['Annuler placement',()=>maps.undo()],
   ['Parcours appuis fins',()=>{maps.load(thinSurfaceCourse());settings.mapEdit=false;}],
+  ['Banc d’essai des boules',()=>{maps.load(sphereTestCourse());settings.mapEdit=false;}],
 ]],['Terrain',[
   ['Détail du maillage','terrainResolution'],['Amplitude du bruit','terrainAmplitude'],['Fréquence du bruit','terrainFrequency'],
   ['Graine','terrainSeed'],['Herbe','terrainGrass'],['Buissons','terrainShrub'],['Rayon de la brosse','brushRadius'],['Force de la brosse','brushStrength'],
@@ -795,6 +797,14 @@ maps=connectMaps({scene,arena,boot,onReset:angle=>{
   placedModelTypes.clear();
   resetPlayer();yaw=T.MathUtils.degToRad(angle);
   if(maps.builtIn)spawnSamples();
+  if(maps.exercise==='boules'){
+    settings.objects=true;
+    for(const [type,x] of [[5,-.84],[1,.72]]){
+      const centerY=objectSpecs[type].shape.radius+.003;
+      spawnObject(type,new T.Vector3(x,centerY,0),null,true);
+    }
+    diagnostics.record('sphere-test-ready',{objects:2});
+  }
   spawnPlacedModels();
 },onVisual:applyVisual,
   getLevel:()=>liveLevel,defaultObjects:[...arena.builtObjects,...scene.children.filter(n=>!beforeFixtures.has(n)),mirrorBacking],
@@ -1829,6 +1839,7 @@ async function restoreStartingMap(){
   try{
     if(mapQuery.has('map'))await maps.loadURL(mapQuery.get('map'));
     else if(mapQuery.get('exercise')==='appuis')maps.load(thinSurfaceCourse());
+    else if(mapQuery.get('exercise')==='boules')maps.load(sphereTestCourse());
     else{
       const saved=await readLocalMap(storageKey);
       if(saved&&!maps.active)maps.load(saved);
