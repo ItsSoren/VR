@@ -826,6 +826,9 @@ const spectator=addSpectator({scene,localColor:avatarColor,currentMap:()=>maps.s
     const signature=candidate?'custom-'+mapCode(JSON.stringify(candidate)):'arena-r25-'+arena.hillSeed;
     return active()&&mapCode(signature)===expected;
   },progress,signal),
+  roomMapIdentity:()=>maps.roomMapId,
+  onRoomCore:(value,expected,active)=>maps.loadRoomCore(value,expected,active),
+  onRoomImage:(index,source,expected)=>maps.loadRoomImage(index,source,expected),
   restoreRoomMap:()=>maps.leaveRoomMap(),
   exportRoomMap:()=>maps.save(),
   hingeSnapshot:()=>maps.hingeSnapshot(),

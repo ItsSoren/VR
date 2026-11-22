@@ -136,3 +136,147 @@ test('the sphere benchmark measures baseline and six drops separately',()=>{
   assert.equal(bench.sample(frame),null);
   assert.equal(bench.snapshot().baseline.samples,1);
 });
+
+test('direct map signalling uses the existing numeric room packet for offers and answers',async()=>{
+  const {encodeMapSignal,decodeMapSignal}=await import('../gorilla-lab/direct-map.js');
+  const {encodeAvatar,decodeAvatar,encodePose}=await import('../gorilla-lab/cloud-link.js');
+  const stamp=Date.now();
+  const base=encodePose({time:stamp,id:1234567,x:0,y:0,z:0,yaw:0,map:4321},true);
+  for(const type of ['offer','answer']){
+    const description={type,sdp:'v=0\r\na=group:BUNDLE 0\r\n'};
+    const signal=encodeMapSignal(3456789,4321,description);
+    const value=encodeAvatar(base,null,null,{version:6,ready:true,roomSource:signal});
+    assert.match(value,/^\d+$/);
+    assert.deepEqual(decodeMapSignal(decodeAvatar(value,stamp).roomSource),{target:3456789,map:4321,description});
+  }
+  assert.equal(decodeMapSignal('rtc:1234567:1:o:%%%'),null);
+});
+
+test('direct map chunks preserve the encoded document and reject excessive data',async()=>{
+  const {createMapReceiver}=await import('../gorilla-lab/direct-map.js');
+  const source='gzip:'+'a'.repeat(3_160_000);
+  const receiver=createMapReceiver();
+  assert.equal(receiver.push('size:'+source.length),null);
+  let complete;
+  for(let i=0;i<source.length;i+=16384)complete=receiver.push(source.slice(i,i+16384));
+  assert.equal(complete,source);
+  assert.equal(receiver.progress.loaded,source.length);
+  assert.throws(()=>receiver.push('a'));
+  assert.throws(()=>createMapReceiver().push('size:99999999'));
+});
+
+test('an authored terrain catches palms crossing diagonally near its edge, from both sides',async()=>{
+  const {terrainCollider}=await import('../gorilla-lab/terrain-edit.js');
+  for(const thickness of [0,.01]){
+    const field=terrainCollider({x:0,y:0,z:0,w:512,d:512,yaw:0,terrain:{detail:64,amplitude:0,seed:1,frequency:.02,octaves:1,thickness}},null);
+    const rotation=new Quaternion(),point=new Vector3(),normal=new Vector3();
+    for(const side of [-1,1]){
+      const plank=side<0?-thickness:0;
+      assert.equal(palmContact(new Vector3(256.05,plank+side*.24,0),new Vector3(255.93,plank-side*.24,0),rotation,[field],point,normal),field);
+      assert.ok(normal.y*side>.99);
+      assert.ok((point.y-plank)*side>0);
+    }
+  }
+});
+
+test('progressive transfer sends collision geometry before sorted original-size images',async()=>{
+  const {prepareProgressiveMap,decodeMapCore,putMapImage}=await import('../gorilla-lab/progressive-map.js');
+  const floorTexture='data:image/webp;base64,UklGRg==';
+  const skyImage='data:image/png;base64,'+'a'.repeat(200);
+  const full=parseMap({format:'gorilla-lab-map',version:1,name:'Lune',
+    environment:{sky:'image',skyImage},
+    pieces:[makePiece({texture:floorTexture}),makePiece({terrain:{detail:16,amplitude:0}})]});
+  const staged=prepareProgressiveMap(full);
+  const {map:core,images}=await decodeMapCore(await staged.core);
+  const base=parseMap(core);
+  assert.deepEqual(images,[0,-1]);
+  assert.equal(base.pieces[0].texture,null);
+  assert.equal(base.environment.sky,'preset');
+  assert.deepEqual(base.pieces[1],full.pieces[1]);
+  assert.equal(putMapImage(base,0,'file:///example.png'),false);
+  for(const item of staged.images)assert.equal(putMapImage(base,item.index,item.source),true);
+  assert.deepEqual(base,full);
+  assert.equal(mapCode(JSON.stringify(base)),mapCode(JSON.stringify(full)));
+});
+
+test('the guest becomes ready on the core and applying the panorama does not rebuild physics',async()=>{
+  const T=await import('three');
+  const {connectMaps}=await import('../gorilla-lab/custom-maps.js');
+  const {prepareProgressiveMap}=await import('../gorilla-lab/progressive-map.js');
+  const original=globalThis.document;
+  globalThis.document={querySelector:()=>({})};
+  try{
+    let resets=0,environment;
+    const arena={boxes:[],bakeLightmap(){},setEnvironment(value){environment=value;},mapMaterial:()=>new T.MeshStandardMaterial()};
+    const maps=connectMaps({scene:new T.Scene(),arena,boot:new Vector3(),onReset(){resets++;},onVisual(){},getLevel:()=>0,defaultObjects:[]});
+    const image='data:image/png;base64,'+'a'.repeat(200);
+    const map=parseMap({format:'gorilla-lab-map',version:1,name:'Lune',environment:{sky:'image',skyImage:image},pieces:[makePiece()]});
+    const transfer=prepareProgressiveMap(map),id=mapCode('custom-'+mapCode(JSON.stringify(map)));
+    assert.equal(await maps.loadRoomCore(await transfer.core,id,()=>true),1);
+    assert.equal(maps.roomMapId,id);
+    assert.equal(environment.sky,'preset');
+    assert.equal(resets,1);
+    const collider=arena.boxes[0];
+    assert.equal(maps.loadRoomImage(-1,image,id),true);
+    assert.equal(arena.boxes[0],collider);
+    assert.equal(resets,1);
+    assert.equal(maps.roomMapId,null);
+    assert.equal(mapCode(maps.signature),id);
+    assert.equal(environment.skyImage,image);
+  }finally{
+    if(original===undefined)delete globalThis.document;
+    else globalThis.document=original;
+  }
+});
+
+test('the direct channel waits for the core to be applied before sending lossless binary images',async()=>{
+  const {createDirectMapSession}=await import('../gorilla-lab/direct-map.js');
+  const original=globalThis.RTCPeerConnection;
+  const connections=[];
+  const channel=()=>({readyState:'connecting',bufferedAmount:0,close(){this.readyState='closed';},
+    send(data){queueMicrotask(()=>this.peer.onmessage?.({data}));}});
+  const down=channel(),up=channel();
+  down.peer=up;up.peer=down;
+  globalThis.RTCPeerConnection=class{
+    constructor(){connections.push(this);this.iceGatheringState='complete';}
+    async createOffer(){return {type:'offer',sdp:'offer'};}
+    async createAnswer(){return {type:'answer',sdp:'answer'};}
+    async setLocalDescription(data){this.localDescription=data;}
+    async setRemoteDescription(data){
+      if(data.type==='offer')this.ondatachannel({channel:up});
+      else{
+        down.readyState=up.readyState='open';
+        down.onopen();up.onopen();
+      }
+    }
+    createDataChannel(){return down;}
+    close(){}
+  };
+  const core='gzip:abc';
+  const image='data:image/png;base64,'+Buffer.alloc(25_003,177).toString('base64');
+  let host,guest,received;
+  try{
+    const parts=[];
+    const finished=new Promise(resolve=>{received=resolve;});
+    guest=createDirectMapSession({target:1234567,map:1,onSource:async(source,section)=>{
+      parts.push([section,source]);
+      if(section==='core')return 1;
+      received();
+      return true;
+    }});
+    host=createDirectMapSession({target:2345678,map:1,upload:{full:Promise.resolve(null),
+      progressive:{core:Promise.resolve(core),images:[{index:-1,source:image}]}}});
+    await host.accept({type:'offer',sdp:'offer'});
+    assert.equal(parts.length,0);
+    await guest.accept({type:'answer',sdp:'answer'});
+    let timer;
+    try{
+      await Promise.race([finished,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('No image arrived')),1000);})]);
+    }finally{clearTimeout(timer);}
+    assert.deepEqual(parts,[['core',core],['image:-1',image]]);
+  }finally{
+    guest?.close();host?.close();
+    if(original===undefined)delete globalThis.RTCPeerConnection;
+    else globalThis.RTCPeerConnection=original;
+  }
+});

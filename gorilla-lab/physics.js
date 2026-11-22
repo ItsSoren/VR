@@ -337,16 +337,29 @@ function thinPalmCrossing(from,to,field,out,hitNormal){
   let first=Infinity,side=1;
   for(const offset of palmOffsets){
     const x0=from.x+offset.x,z0=from.z+offset.z,x1=to.x+offset.x,z1=to.z+offset.z;
-    if(Math.min(x0,x1)<field.xMin||Math.max(x0,x1)>field.xMax||
-        Math.min(z0,z1)<field.zMin||Math.max(z0,z1)>field.zMax)continue;
-    let start=from.y+offset.y-field.height(x0,z0),end=to.y+offset.y-field.height(x1,z1);
+    let enter=0,exit=1;
+    const dx=x1-x0,dz=z1-z0;
+    if(dx===0){if(x0<field.xMin||x0>field.xMax)continue;}
+    else{
+      const a=(field.xMin-x0)/dx,b=(field.xMax-x0)/dx;
+      enter=Math.max(enter,Math.min(a,b));exit=Math.min(exit,Math.max(a,b));
+    }
+    if(dz===0){if(z0<field.zMin||z0>field.zMax)continue;}
+    else{
+      const a=(field.zMin-z0)/dz,b=(field.zMax-z0)/dz;
+      enter=Math.max(enter,Math.min(a,b));exit=Math.min(exit,Math.max(a,b));
+    }
+    if(enter>exit)continue;
+    const dy=to.y-from.y;
+    let start=from.y+offset.y+dy*enter-field.height(x0+dx*enter,z0+dz*enter);
+    let end=from.y+offset.y+dy*exit-field.height(x0+dx*exit,z0+dz*exit);
     const plane=field.thickness>0&&start<=-field.thickness?-field.thickness:0;
     start-=plane;end-=plane;
     if(field.thickness>0&&(plane===0?start<0:start>0))continue;
     if(start*end>0||start===end)continue;
     const approach=Math.sign(start)||-Math.sign(end);
-    let low=0,high=1;
-    for(let i=0;i<7;i++){
+    let low=enter,high=exit;
+    for(let i=0;i<9;i++){
       const t=(low+high)*.5;
       palmSweepPoint.lerpVectors(from,to,t).add(offset);
       if((palmSweepPoint.y-field.height(palmSweepPoint.x,palmSweepPoint.z)-plane)*approach>0)low=t;

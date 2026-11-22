@@ -288,7 +288,7 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
     const value=encodeAvatar(pose,avatar,delta,{
       version:protocolVersion,ready:data.ready!==false,actions:pendingActions,actionTarget:pendingActions[0]?.target??0,
       shots:pendingShots,score:data.score,
-      roomSource:role==='vr'?data.roomSource:null,hinges:role==='vr'?data.hinges:null,
+      roomSource:role==='vr'||data.roomSource?.startsWith('rtc:')?data.roomSource:null,hinges:role==='vr'?data.hinges:null,
     });
     lastSend=time;
     if(role==='vr')firstHostSend=Math.min(firstHostSend,time);
@@ -296,7 +296,7 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
     networkStats.sent++;networkStats.bytesSent+=value.length;
     return true;
   }
-  return {join,leave,tick,sendAction,queueShot,get stats(){return {...networkStats,peerTiming:peerTiming()};},get role(){return role;},get code(){return code;},get state(){return state;},
+  return {join,leave,tick,sendAction,queueShot,get stats(){return {...networkStats,peerTiming:peerTiming()};},get role(){return role;},get id(){return id;},get code(){return code;},get state(){return state;},
     get remote(){return remote;},get peers(){return peerPoses();}};
 }
 

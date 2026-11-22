@@ -1,4 +1,5 @@
 import {encodeRoomMapLink,decodeRoomMapLink,isEncodedRoomMap} from './room-map-link.js';
+import {prepareProgressiveMap,decodeMapCore,putMapImage} from './progressive-map.js';
 
 import {createTraffic} from './traffic.js';
 import {clearLocalMap,writeLocalMap} from './map-storage.js';
@@ -21,7 +22,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   const hingeById=new Map();
   let insideTriggers=new Set();
   const loader=new T.TextureLoader(), textures=new Map();
-  let loadRequest=0,roomBase=null,loadedSource=null;
+  let loadRequest=0,roomBase=null,loadedSource=null,progressiveRoom=null;
   let map=null, signature='', selection=-1,moving=-1,status='', lastGhostKey='';
   const slab=new T.BoxGeometry(1,1,1),ramp=rampGeometry();
   const ghost=new T.Mesh(slab,new T.MeshBasicMaterial({color:'#8be4b9',wireframe:true,transparent:true,opacity:.8,depthWrite:false}));
@@ -348,6 +349,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   let worldLimits=null;
   const worldBox=new T.Box3(),pieceBox=new T.Box3();
   function rebuild(){
+    progressiveRoom=null;
     for(const row of meshRows)removeRow(row);
     meshRows.length=hingeRows.length=0;hingeById.clear();
     flights.length=0;mirrorRows.length=0;triggerRows.length=0;insideTriggers.clear();hasUseReaction=false;
@@ -577,10 +579,60 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     applyMap(previous.map);
     inform(previous.map?'Carte locale restaurée · '+previous.map.name:'Arène locale restaurée');
   }
+  async function loadRoomCore(value,expected,active){
+    const request=++loadRequest;
+    const {map:data,images}=await decodeMapCore(value,maxMapBytes);
+    const remote=parseMap(data),fingerprint=JSON.stringify(remote);
+    if(request!==loadRequest||!active())return null;
+    if(progressiveRoom?.id===expected&&progressiveRoom.fingerprint===fingerprint){
+      progressiveRoom.pending=new Set(images);
+      return images.length;
+    }
+    roomBase??={map,history:history.slice(),source:loadedSource};
+    history.length=0;
+    applyMap(remote);
+    progressiveRoom={id:expected,fingerprint,pending:new Set(images)};
+    inform('Carte du salon · '+map.name+' · images en cours');
+    return images.length;
+  }
+  function loadRoomImage(index,source,expected){
+    if(progressiveRoom?.id!==expected||!progressiveRoom.pending.has(index))return false;
+    const record=index===-1?map.environment:map.pieces[index];
+    if(!record)return false;
+    const old=index===-1?{sky:record.sky,skyImage:record.skyImage}:{texture:record.texture};
+    if(!putMapImage(map,index,source))return false;
+    const last=progressiveRoom.pending.size===1;
+    if(last&&mapCode('custom-'+mapCode(JSON.stringify(map)))!==expected){
+      Object.assign(record,old);
+      return false;
+    }
+    if(index===-1)arena.setEnvironment(map.environment);
+    else if(old.texture!==source){
+      const row=meshRows[index],material=row.mesh.material;
+      if(!row.custom){
+        row.mesh.material=material.clone();
+        row.mesh.material.onBeforeCompile=material.onBeforeCompile;
+        row.mesh.material.customProgramCacheKey=material.customProgramCacheKey;
+        row.custom=true;
+      }
+      row.ownTexture?.materials.delete(row.mesh.material);
+      row.ownTexture=acquireTexture(source,row.mesh.material);
+      row.mesh.material.needsUpdate=true;
+      pruneTextures();
+    }
+    progressiveRoom.pending.delete(index);
+    if(last){
+      signature='custom-'+mapCode(JSON.stringify(map));
+      progressiveRoom=null;
+      inform('Carte du salon · '+map.name);
+    }
+    return true;
+  }
   async function roomMapSource(forRoom=false){
     if(!map)return 'arena';
     if(!forRoom&&loadedSource?.signature===signature&&loadedSource.url.startsWith('https:'))return loadedSource.url;
     if(typeof CompressionStream==='undefined')return null;
+    if(forRoom==='progressive')return prepareProgressiveMap(map);
     const packed=await encodeRoomMapLink(map,forRoom);
     return packed;
   }
@@ -612,7 +664,7 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
   document.querySelector('#map-load-url').onclick=()=>loadURL(url.value);
   document.querySelector('#map-export').onclick=save;
   document.querySelector('#map-reset').onclick=reset;
-  return {get trafficCount(){return traffic.count;},get soundZones(){return map?.soundZones;},get soundAssets(){return map?.soundAssets;},get boundary(){return map?.boundary??null;},updateFlights,checkTriggers,interactReaction,updateHinges,interactHinge,receiveHingeRequest,hingeSnapshot,receiveHinges,get worldLimits(){return worldLimits;},placedModels:()=>map?.pieces.filter(p=>p.model?.kind==='prop')??[],modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,loadRoomMap,leaveRoomMap,roomMapSource,reset,blank,undo,save,edit,recenter,inform,
+  return {get trafficCount(){return traffic.count;},get soundZones(){return map?.soundZones;},get soundAssets(){return map?.soundAssets;},get boundary(){return map?.boundary??null;},updateFlights,checkTriggers,interactReaction,updateHinges,interactHinge,receiveHingeRequest,hingeSnapshot,receiveHinges,get worldLimits(){return worldLimits;},placedModels:()=>map?.pieces.filter(p=>p.model?.kind==='prop')??[],modelPieces:()=>map?.pieces.filter(p=>!p.terrain&&p.name!=='Sol')??[],refreshMaterials,load,loadURL,loadRoomMap,loadRoomCore,loadRoomImage,leaveRoomMap,roomMapSource,reset,blank,undo,save,edit,recenter,inform,
     mirrors:()=>mirrorRows,
     get usesBuiltInMirror(){return !map||map.arenaBase&&!map.editableArena&&!map.pieces.some(piece=>piece.sceneryId==='lab-mirror');},
     clearGhost(){ghost.visible=false;},get active(){return Boolean(map);},get builtIn(){return !map||map.arenaBase===true;},get assetLayer(){return map?.assetLayer===true;},
@@ -620,6 +672,6 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     getAssetPiece(assetId){return map?.pieces.find(piece=>piece.model?.assetId===assetId)??null;},
     get status(){return status;},get yaw(){return map?.spawn.yaw??0;},
     get worldSize(){return map?.worldSize??0;},get fogDistance(){return map?.environment?.fog?map.environment.fogFar:0;},
-    get nodes(){return map?.pieces.length??0;},get name(){return map?.name??null;},get exercise(){return map?.exercise??null;},get signature(){return signature;},
+    get nodes(){return map?.pieces.length??0;},get name(){return map?.name??null;},get roomMapId(){return progressiveRoom?.id??null;},get exercise(){return map?.exercise??null;},get signature(){return signature;},
   };
 }
