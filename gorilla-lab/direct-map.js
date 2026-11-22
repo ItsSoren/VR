@@ -47,7 +47,7 @@ export function createDirectMapSession({target,map,upload,onProgress,onSource,on
   const connection=new RTCPeerConnection({iceServers});
   let receiver=upload?null:createMapReceiver();
   let section='full',remainingImages=0;
-  let channel,signal=null,closed=false,accepted=false,timer,iceTimer;
+  let channel,signal=null,closed=false,accepted=false,published=false,timer,iceTimer;
   function close(){
     if(closed)return;
     closed=true;clearTimeout(timer);clearTimeout(iceTimer);
@@ -58,7 +58,8 @@ export function createDirectMapSession({target,map,upload,onProgress,onSource,on
   }
   watchdog(12000);
   function publish(){
-    if(closed||signal||!connection.localDescription)return;
+    if(closed||published||!connection.localDescription)return;
+    published=true;
     signal=encodeMapSignal(target,map,connection.localDescription);
     if(!signal)close();
   }
