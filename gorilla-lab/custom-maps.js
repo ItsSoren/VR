@@ -620,6 +620,6 @@ export function connectMaps({scene,arena,boot,onReset,onVisual,getLevel,defaultO
     getAssetPiece(assetId){return map?.pieces.find(piece=>piece.model?.assetId===assetId)??null;},
     get status(){return status;},get yaw(){return map?.spawn.yaw??0;},
     get worldSize(){return map?.worldSize??0;},get fogDistance(){return map?.environment?.fog?map.environment.fogFar:0;},
-    get nodes(){return map?.pieces.length??0;},get name(){return map?.name??null;},get signature(){return signature;},
+    get nodes(){return map?.pieces.length??0;},get name(){return map?.name??null;},get exercise(){return map?.exercise??null;},get signature(){return signature;},
   };
 }
