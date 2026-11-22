@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {Euler, IcosahedronGeometry, Object3D, Quaternion, Vector3} from 'three';
 import {boxCollider, colliderFor, objectPhysicsStats, palmContact, solveObjects} from '../gorilla-lab/physics.js';
 import {createObjectFeed, mapCode} from '../gorilla-lab/cloud-link.js';
+import {createSphereBenchmark} from '../gorilla-lab/sphere-benchmark.js';
 import {GorillaLocomotion} from '../gorilla-lab/locomotion.js';
 import {makePiece, parseMap, snapPlacement} from '../gorilla-lab/map-format.js';
 import {decodeRoomMapLink, encodeRoomMapLink} from '../gorilla-lab/room-map-link.js';
@@ -83,4 +84,55 @@ test('an edited workshop can be serialized with the same room identity and its i
   assert.equal(mapCode(JSON.stringify(parseMap(raw))),mapCode(JSON.stringify(map)));
   const controller=new AbortController();controller.abort();
   await assert.rejects(decodeRoomMapLink(encoded,16_000_000,controller.signal),{name:'AbortError'});
+});
+
+test('a virtual crouch offsets hand intent but retains the last sweep origin',()=>{
+  const hand={mesh:{quaternion:new Quaternion()},valid:true,target:new Vector3(0,.4,0)};
+  const locomotion=new GorillaLocomotion(Vector3,[hand],()=>null);
+  const movement=new Vector3(),velocity=new Vector3();
+  locomotion.move({head:new Vector3(0,.85,0),dt:.012,gravity:0,settings:{arms:5},boxes:[],velocity,movement,reach:1});
+  locomotion.finish(movement,velocity,.024);
+  const state=locomotion.hands[0];
+  assert.ok(Math.abs(state.previousTarget.y-(hand.locomotionTarget.y-.024))<1e-10);
+  assert.ok(Math.abs(state.previousPalm.y-(hand.locomotionTarget.y+state.offset.y))<1e-10);
+});
+
+test('an untracked support discards its previous launch samples',()=>{
+  const hand={mesh:{quaternion:new Quaternion()},valid:false};
+  const locomotion=new GorillaLocomotion(Vector3,[hand],()=>null);
+  hand.surface={};
+  locomotion.hands[0].tracked=true;
+  locomotion.history[0].duration=.02;
+  locomotion.pushDuration=.02;
+  locomotion.move({head:new Vector3(),dt:.012,gravity:0,settings:{arms:5},boxes:[hand.surface],
+    velocity:new Vector3(),movement:new Vector3(),reach:1});
+  assert.equal(locomotion.history[0].duration,0);
+  assert.equal(locomotion.pushDuration,0);
+});
+
+test('the sphere benchmark measures baseline and six drops separately',()=>{
+  const bench=createSphereBenchmark();
+  bench.start('VR',{auto:true});
+  const frame={mode:'VR',frameMs:10,physicsCpuMs:1,physicsSubsteps:2,qualityActive:5};
+  assert.equal(bench.sample({...frame,mode:'PC',frameMs:1700}),null);
+  const commands=[];
+  for(let i=0;i<670;i++){
+    const command=bench.sample(i<160?frame:{...frame,physicsCpuMs:3,physicsSubsteps:6,qualityActive:4});
+    if(command)commands.push(command);
+  }
+  assert.deepEqual(commands,['drop','drop','drop','drop','drop','drop','complete']);
+  const result=bench.snapshot('VR');
+  assert.equal(result.status,'completed');
+  assert.equal(result.baseline.samples,160);
+  assert.equal(result.baseline.meanPhysicsMs,1);
+  assert.equal(result.collision.samples,510);
+  assert.equal(result.collision.maxSubsteps,6);
+  assert.equal(result.collision.meanPhysicsMs,3);
+  assert.deepEqual(result.collision.qualityRange,[4,4]);
+  assert.equal(bench.snapshot('PC'),null);
+  bench.start('VR',{auto:false});
+  bench.sample(frame);
+  assert.equal(bench.cancel('interrupted'),true);
+  assert.equal(bench.sample(frame),null);
+  assert.equal(bench.snapshot().baseline.samples,1);
 });

@@ -5,6 +5,7 @@ import {palmCenter} from './hand-skin.js';
 const HISTORY_SECONDS = .065;
 const RELEASE_SECONDS = .08;
 const MIN_PUSH_SECONDS = .020;
+export const TRACKING_GAP_SECONDS = .12;
 const STICK_DISTANCE = .035;
 const CONTACT_SKIN = .003;
 
@@ -55,9 +56,10 @@ export class GorillaLocomotion {
       state.hand.surface = null;
       state.released = state.releaseSurface = null;
       state.releaseTime = 0;
-      state.tracked = state.eligible = false;
+      state.tracked = state.eligible = state.hadContact = false;
     }
     this.dt = this.contacts = 0;
+    this.released = false;
   }
 
   clearHistory() {
@@ -97,6 +99,11 @@ export class GorillaLocomotion {
       hand.groundContact = false;
       state.releaseTime = Math.max(0, state.releaseTime - dt);
       state.eligible = hand.valid && ((!hand.held&&!hand.remoteHeld)||hand.hasSupport) && settings.movement !== false;
+      if (!state.eligible) {
+        if (state.tracked && (state.hadContact || previous || state.releaseSurface)) this.clearHistory();
+        state.releaseSurface = null;
+        state.releaseTime = 0;
+      }
       if (!hand.valid) continue;
       const target = hand.locomotionTarget.subVectors(hand.target, head);
       let reachAssist=0;
@@ -206,7 +213,7 @@ export class GorillaLocomotion {
     this.planned.copy(movement);
   }
 
-  finish(appliedMove, velocity) {
+  finish(appliedMove, velocity, viewOffsetDelta = 0) {
     const {result, dt, contacts, history} = this;
     result.contacts = contacts;
     result.launched = false;
@@ -217,9 +224,12 @@ export class GorillaLocomotion {
     for (const state of this.hands) {
       const {hand, previousPalm, previousTarget, offset} = state;
       state.tracked = state.eligible;
+      state.hadContact = Boolean(hand.surface);
       if (!hand.valid) continue;
       previousTarget.copy(hand.locomotionTarget).add(appliedMove);
       previousPalm.copy(previousTarget).add(offset);
+      // The next controller pose includes the new virtual crouch offset.
+      previousTarget.y -= viewOffsetDelta;
       if (hand.surface) {
         previousPalm.copy(hand.anchor).add(offset);
         hasContact = true;
@@ -242,7 +252,7 @@ export class GorillaLocomotion {
       this.pushDuration += this.inputDt;
       const aligned = this.intent.dot(appliedMove) / appliedMove.length();
       sample.distance.copy(appliedMove).clampLength(0, Math.min(aligned, this.planned.length()));
-    }
+    } else if (!this.released) this.pushDuration = 0;
 
     let remaining = HISTORY_SECONDS;
     this.average.set(0, 0, 0);

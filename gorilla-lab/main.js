@@ -2,6 +2,7 @@ import {createMapAudio} from './map-audio.js';
 import {createScreenBloom} from './hdr-bloom.js';
 import {readTurnAxis,consumeSnap} from './snap-turn.js';
 import {createDiagnostics} from './diagnostics.js';
+import {createSphereBenchmark} from './sphere-benchmark.js';
 import {restoreObject,outsideObjectWorld} from './object-lifecycle.js';
 import {calibratedHeight,torsoBend,removeInwardVelocity,bodyProxyOffset} from './player-pose.js';
 
@@ -12,7 +13,7 @@ import {normalizeTerrain} from './terrain-edit.js';
 import {texturePresets,seamlessTexture} from './seamless-texture.js';
 import {createFlatControls,createKeyboardState} from './flat-controls.js';
 import {screenPixelRatio} from './screen-render.js';
-import { GorillaLocomotion, updateUnderSurfaceCrouch } from './locomotion.js';
+import { GorillaLocomotion, TRACKING_GAP_SECONDS, updateUnderSurfaceCrouch } from './locomotion.js';
 import { updateGroundHaptics,pulseHand } from './ground-haptics.js';
 import { createToolVisual } from './tool-visual.js';
 import {createBlasterSystem,bindBlasterTrigger} from './blaster-system.js';
@@ -86,6 +87,8 @@ const steps=createStepSound(),mapAudio=createMapAudio(()=>steps.context);
 for(const event of ['pointerdown','keydown'])addEventListener(event,steps.unlock,{passive:true});
 const debugView=createDebugView(scene);
 const diagnostics=createDiagnostics();
+const sphereBenchmark=createSphereBenchmark();
+let sphereBenchPair=[];
 let physicsCpuMs=0,debugCpuMs=0,renderSubmissionCpuMs=0;
 addEventListener('error',event=>diagnostics.record('error',{message:String(event.message).slice(0,500)}));
 addEventListener('unhandledrejection',event=>diagnostics.record('rejection',{message:String(event.reason?.message??event.reason).slice(0,500)}));
@@ -302,6 +305,7 @@ function release(hand,launch=true) {
   if(launch) object.angular.clampLength(0,24); else object.angular.set(0,0,0);
 }
 function resetObjects(){
+  cancelSphereBenchmark('objets réinitialisés');
   if(maps?.exercise==='boules')diagnostics.record('sphere-test-reset',{objects:objects.length});
   releaseAll();
   for(const object of objects){
@@ -429,6 +433,7 @@ function saveReport(mode, automatic=false){
     game:'Gorilla Lab',version:labRelease.toLowerCase(),reportSchema:2,revision:'vr-session-report',time:new Date().toISOString(),
     mode,automatic,sessionHadVR:reportHadVR,settings:{...settings},qualityActive:liveLevel,
     diagnostics:captured,debugGeometry:{...debugView.stats},
+    sphereBenchmark:sphereBenchmark.snapshot(mode),
     scenario:document.querySelector('#report-note')?.value?.slice(0,500)??'',
     device:{userAgent:navigator.userAgent,cores:navigator.hardwareConcurrency??null,memoryGiB:navigator.deviceMemory??null,viewport:[innerWidth,innerHeight],pixelRatio:renderer.getPixelRatio()},
     haptics:hands.map(h=>({side:h.side,tracked:Boolean(h.valid),...h.hapticStats})),
@@ -463,8 +468,11 @@ sections.push(['Spawn',[]]);
 const mapGroups=[['Construction',[
   ['Éditeur VR','mapEdit'],['Action','mapMode'],['Pièce','mapShape'],['Matériau','mapMaterial'],['Surface','mapSurface'],['Rotation','mapTurn'],['Texture raccordable','mapTexture'],
   ['Créer atelier vide',()=>{maps.blank();settings.mapEdit=true;}],['Annuler placement',()=>maps.undo()],
+]],['Essais',[
   ['Parcours appuis fins',()=>{maps.load(thinSurfaceCourse());settings.mapEdit=false;}],
   ['Banc d’essai des boules',()=>{maps.load(sphereTestCourse());settings.mapEdit=false;}],
+  ['Mesurer les collisions',startSphereBenchmark],
+  ['Arrêter la mesure',()=>cancelSphereBenchmark('arrêt demandé',true)],
 ]],['Terrain',[
   ['Détail du maillage','terrainResolution'],['Amplitude du bruit','terrainAmplitude'],['Fréquence du bruit','terrainFrequency'],
   ['Graine','terrainSeed'],['Herbe','terrainGrass'],['Buissons','terrainShrub'],['Rayon de la brosse','brushRadius'],['Force de la brosse','brushStrength'],
@@ -788,6 +796,8 @@ function spawnPlacedModels(){
   }
 }
 maps=connectMaps({scene,arena,boot,onReset:angle=>{
+  cancelSphereBenchmark('carte changée');
+  sphereBenchPair=[];
   clearObjects();spectator.clearMapReplicas();
   for(const index of placedModelTypes.values()){
     const spec=objectSpecs[index];
@@ -801,7 +811,8 @@ maps=connectMaps({scene,arena,boot,onReset:angle=>{
     settings.objects=true;
     for(const [type,x] of [[5,-.84],[1,.72]]){
       const centerY=objectSpecs[type].shape.radius+.003;
-      spawnObject(type,new T.Vector3(x,centerY,0),null,true);
+      const ball=spawnObject(type,new T.Vector3(x,centerY,0),null,true);
+      if(ball)sphereBenchPair.push(ball);
     }
     diagnostics.record('sphere-test-ready',{objects:2});
   }
@@ -932,6 +943,52 @@ function requestObjectChange(typeId,local){
 }
 function clearSpawnBank(){requestObjectChange(0,clearObjects);}
 function requestResetObjects(){requestObjectChange(1,resetObjects);}
+function canRunSphereBenchmark(){
+  return maps.exercise==='boules'&&!spectator.role&&settings.objects&&objects.length===2&&
+    sphereBenchPair.length===2&&sphereBenchPair.every(ball=>objects.includes(ball)&&!ball.owner&&!ball.frozen);
+}
+function startSphereBenchmark(){
+  if(sphereBenchmark.active)return;
+  if(!canRunSphereBenchmark()){
+    showGameHint('Charge le banc en solo avec les deux boules libres.');
+    return;
+  }
+  for(const ball of sphereBenchPair)restoreObject(ball);
+  const mode=renderer.xr.isPresenting?'VR':'PC';
+  sphereBenchmark.start(mode,{auto:settings.auto,quality:liveLevel,preciseHitboxes:settings.preciseHitboxes,
+    gravity:settings.gravity,bounce:settings.bounce,refreshHz:renderer.xr.getSession()?.frameRate??null});
+  diagnostics.record('sphere-benchmark-start',{mode});
+  if(mode==='VR')menu=false;
+  showGameHint('Mesure en cours · laisse les boules libres.');
+}
+function cancelSphereBenchmark(reason,notify=false){
+  if(!sphereBenchmark.cancel(reason))return;
+  diagnostics.record('sphere-benchmark-cancelled',{reason});
+  if(notify)showGameHint('Mesure arrêtée · '+reason);
+}
+function sampleSphereBenchmark(frame){
+  if(!sphereBenchmark.active)return;
+  if(frame.mode!==sphereBenchmark.mode||!canRunSphereBenchmark()){
+    cancelSphereBenchmark('boules ou mode de jeu modifiés',true);
+    return;
+  }
+  const status=sphereBenchmark.sample(frame);
+  if(status==='drop'){
+    const [large,small]=sphereBenchPair;
+    restoreObject(large);
+    restoreObject(small);
+    small.mesh.position.copy(large.mesh.position);
+    small.mesh.position.x+=.028;
+    small.mesh.position.y+=large.radius+small.radius+.32;
+    small.mesh.updateMatrixWorld(true);
+    small.beforePhysics?.copy(small.mesh.position);
+  }else if(status==='complete'){
+    const result=sphereBenchmark.snapshot(frame.mode);
+    diagnostics.record('sphere-benchmark-completed',{mode:frame.mode,drops:result.drops});
+    saveReport(frame.mode,true);
+    showGameHint('Mesure terminée · '+result.baseline.fps+' / '+result.collision.fps+' FPS · JSON prêt');
+  }
+}
 function requestSpawn(index,origin=null){
   settings.objects=true;
   if(index>=workshopTypeBase&&spectator.role){showGameHint('Intègre ce modèle à la carte pour le partager dans le salon.');return;}
@@ -1405,6 +1462,7 @@ enter.onclick=async()=>{
   }
 };
 renderer.xr.addEventListener('sessionend',()=>{
+  cancelSphereBenchmark('session VR terminée');
   if(lastVR&&!capturedVRThisSession)saveReport('VR',true);
   enter.disabled=false;menu=false;vrRoomDraft=null;panel.mesh.visible=false;wrist.mesh.visible=false;
   document.body.classList.remove('immersive');resetPlayer();resize();
@@ -1743,8 +1801,17 @@ function character(frame,space,pose,dt,inputDt=dt){
   if(inVR){
     // L’impulsion utilise le déplacement réalisé, une fois les collisions du corps résolues.
     const bracedUnderSurface=locomotion.hands.some(({hand,normal})=>hand.surface&&normal.y<-.55);
-    underSurfaceCrouch=updateUnderSurfaceCrouch(underSurfaceCrouch,locomotion.planned.y,appliedMove.y,bracedUnderSurface,head.y,inputDt);
-    const result=locomotion.finish(appliedMove,velocity);
+    const previousCrouch=underSurfaceCrouch;
+    let nextCrouch=updateUnderSurfaceCrouch(previousCrouch,locomotion.planned.y,appliedMove.y,bracedUnderSurface,head.y,inputDt);
+    if(settings.collisions&&nextCrouch<previousCrouch){
+      candidate.copy(worldHead);candidate.y+=previousCrouch-nextCrouch;
+      const ceiling=handContact(worldHead,candidate,HEAD_RADIUS,activeBoxes,point,playerNormal);
+      if(ceiling&&playerNormal.y<-.35){
+        nextCrouch=previousCrouch-T.MathUtils.clamp(point.y-worldHead.y,0,previousCrouch-nextCrouch);
+      }
+    }
+    underSurfaceCrouch=nextCrouch;
+    const result=locomotion.finish(appliedMove,velocity,nextCrouch-previousCrouch);
     if(result.contacts)contactFrames++;
     if(result.launched){launchCount++;lastLaunch={handSpeed:result.launchSpeed,velocity:velocity.toArray(),t:performance.now()};}
   }
@@ -1883,7 +1950,11 @@ renderer.setAnimationLoop((time,frame)=>{
   const dt=inputDt*speed;
   const inVR=renderer.xr.isPresenting;
   const space=renderer.xr.getReferenceSpace(), pose=frame&&space&&frame.getViewerPose(space);
-  if(inVR&&!pose)return;
+  if(inVR&&(!pose||actual>TRACKING_GAP_SECONDS)){
+    locomotion.reset();
+    hasPreviousHead=false;
+    if(!pose)return;
+  }
   const guestActive=spectator.guestActive;
   if(guestActive&&!wasGuestActive)releaseAll();
   wasGuestActive=guestActive;
@@ -2084,11 +2155,13 @@ renderer.setAnimationLoop((time,frame)=>{
     }
   }
   renderSubmissionCpuMs=performance.now()-renderStart;
-  diagnostics.sample({mode:inVR?'VR':'PC',frameMs:actual*1000,physicsCpuMs,debugCpuMs,mirrorCpuMs,renderSubmissionCpuMs,objects:remoteWorld?spectator.replicaCount:objects.length,
+  const frameDiagnostics={mode:inVR?'VR':'PC',frameMs:actual*1000,physicsCpuMs,debugCpuMs,mirrorCpuMs,renderSubmissionCpuMs,objects:remoteWorld?spectator.replicaCount:objects.length,
     moving:remoteWorld?null:objects.filter(o=>!o.owner&&!o.frozen&&!o.sleeping&&o.velocity.lengthSq()>.0001).length,
     physicsSubsteps:simulatesObjects?objectPhysicsStats.substeps:null,
     activePhysicsObjects:simulatesObjects?objectPhysicsStats.active:null,
-    debugSegments:debugView.stats.segments});
+    debugSegments:debugView.stats.segments,qualityActive:liveLevel};
+  diagnostics.sample(frameDiagnostics);
+  sampleSphereBenchmark(frameDiagnostics);
   if(time-diagAt>350){
     debugReadout.hidden=!(settings.debugForces||debugView.stats.truncated);
     if(!debugReadout.hidden)debugReadout.textContent='Vitesse joueur : '+velocity.length().toFixed(2)+' m/s · Gravité : '+currentGravity.toFixed(2)+' m/s² · Segments : '+debugView.stats.segments+(debugView.stats.truncated?' (budget atteint : augmenter Budget debug ou réduire la portée)':'');
