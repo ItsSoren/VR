@@ -649,7 +649,7 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
     const share=needsUpload&&sharedSourceMap===map&&sharedSource&&now-sourceAt>=(mapFragments?100:500);
     const signals=hosting?[...directUploads.values()].map(session=>session.signal).filter(Boolean):
       directDownload?.session.signal?[directDownload.session.signal]:[];
-    const signal=signals.length&&now-signalledAt>=330?signals[signallingSlot%signals.length]:null;
+    const signal=signals.length&&now-signalledAt>=200?signals[signallingSlot%signals.length]:null;
     const sent=client.tick({x:position.x,y:position.y,z:position.z,yaw,map,ready:ready&&!mapPaused,avatar:ready&&client.role!=='pc'?avatar:null,
       roomSource:signal??(share?(mapFragments?.[fragmentIndex]??sharedSource):null),hinges:hosting?hingeSnapshot?.():null,
       objectFeed:hosting&&bodies?t=>feed.capture(t,bodies,true):null});

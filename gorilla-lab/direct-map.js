@@ -62,6 +62,9 @@ export function createDirectMapSession({target,map,upload,onProgress,onSource,on
     signal=encodeMapSignal(target,map,connection.localDescription);
     if(!signal)close();
   }
+  connection.onicecandidate=({candidate})=>{
+    if(candidate?.type==='srflx'&&connection.localDescription?.sdp.includes(' typ srflx'))publish();
+  };
   connection.onicegatheringstatechange=()=>{
     if(connection.iceGatheringState==='complete')publish();
   };
