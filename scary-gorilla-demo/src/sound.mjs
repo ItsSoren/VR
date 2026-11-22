@@ -48,6 +48,7 @@ export function createSoundscape(getContext) {
     const config = {
       valve: [.36, .17, 260, 94, 'triangle'],
       metal: [1.05, .23, 414, 109, 'sine'],
+      shaft: [2.8, .185, 72, 39, 'triangle'],
       creature: [1.35, .26, 104, 39, 'sawtooth'],
       step: [.19, .14, 94, 39, 'triangle'],
       splash: [.37, .11, 223, 80, 'sine'],
@@ -68,12 +69,12 @@ export function createSoundscape(getContext) {
     oscillator.connect(envelope).connect(stereo).connect(lowpass);
     oscillator.start(t);
     oscillator.stop(t+duration+.02);
-    if (kind==='splash'||kind==='creature'||kind==='metal') {
+    if (kind==='splash'||kind==='creature'||kind==='metal'||kind==='shaft') {
       const grit = context.createBufferSource();
       grit.buffer = noise(duration);
       const resonance = context.createBiquadFilter();
       resonance.type = 'bandpass';
-      resonance.frequency.value = kind==='splash'?760:kind==='metal'?1900:510;
+      resonance.frequency.value = kind==='shaft'?230:kind==='splash'?760:kind==='metal'?1900:510;
       const trim = context.createGain();
       trim.gain.setValueAtTime(volume*.7,t);
       trim.gain.exponentialRampToValueAtTime(.0001,t+duration);

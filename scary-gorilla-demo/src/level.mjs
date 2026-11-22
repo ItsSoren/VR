@@ -18,7 +18,9 @@ export const locations = {
 };
 
 export function createLevel(calibration) {
-  const openings = new Set(['Garde-corps du belvédère','Mur lointain du puits','Repère du mur lointain','Établi du refuge','Plan de travail']);
+  const openings = new Set(['Garde-corps du belvédère','Mur lointain du puits','Repère du mur lointain','Établi du refuge','Plan de travail',
+    'Pilier du puits','Paroi du puits','Fond du puits',
+  ]);
   const pieces = calibration.pieces.filter(piece => !openings.has(piece.name));
   const add = (name,x,y,z,w,h,d,material=concrete,color=gray,extra={}) => {
     if (![x,y,z,w,h,d].every(Number.isFinite) || Math.min(w,h,d)<.05) throw new Error(name);
@@ -32,6 +34,11 @@ export function createLevel(calibration) {
   beam('Établi du refuge',-2.21,.34,.90,1.30,.68,1.52);
   add('Plan de travail',-2.21,.68,.90,1.38,.10,1.65,5,'#88735d');
   add('Banc du refuge',2.23,.26,-1.62,1.9,.52,.58,5,'#615845');
+  add('Cloison du sas côté refuge',-.70,1.34,-6.95,1.88,2.68,.33);
+  add('Cloison du sas côté puits',.70,1.34,-9.20,1.88,2.68,.33);
+  for(const [x,z] of [[.235,-6.75],[-.235,-9.00]]){
+    add('Bande peinte du sas',x,1.07,z,.10,.73,.055,enamel,yellow,{solid:false});
+  }
   for (const side of [-1,1]) {
     beam('Cadre de porte',side*1.60,1.24,-12.95,.22,2.48,.32);
     beam('Conduite de la galerie',side*1.34,2.42,-9,.17,.17,7.9,{primitive:'cylinder',pitch:90});
@@ -46,6 +53,36 @@ export function createLevel(calibration) {
     beam('Conduite de service',side*1.36,2.40,-29.5,.16,.16,8.25,{primitive:'cylinder',pitch:90});
   }
   add('Plafond de galerie aval',0,2.80,-29.65,3.45,.24,8.7);
+
+  const distant={solid:false};
+  add('Radier du puits',0,-23.30,-25,34,.60,31,tile,'#252e34',distant);
+  add('Voile de fond du puits',0,-3,-39.8,34,37,.75,concrete,'#444e55',distant);
+  for(const side of [-1,1]){
+    add('Voile latéral du puits',side*16.6,-3,-25,.70,37,31,concrete,'#4c565b',distant);
+    for(const z of [-16,-22,-30,-37]){
+      add('Contrefort du puits',side*13.7,-3.6,z,2.8,35,2.05,concrete,'#606970',distant);
+    }
+    for(const y of [-5.3,-11.2,-17.1]){
+      beam('Niveau technique inférieur',side*12.7,y,-25,4.5,.42,29,distant);
+      add('Lisse du balcon inférieur',side*10.5,y+.86,-25,.09,.13,29,enamel,'#77704b',distant);
+      for(const z of [-16,-22,-28,-34]){
+        beam('Montant du balcon inférieur',side*10.5,y+.42,z,.12,.86,.12,distant);
+      }
+    }
+  }
+  for(const z of [-18.7,-29.9]){
+    beam('Poutre de pont roulant',0,8.75,z,32,.82,.72,distant);
+    beam('Rail de pont roulant',0,9.21,z,32,.14,.26,distant);
+  }
+  for(const x of [-8.4,8.4]){
+    beam('Suspente de turbine',x,4.66,-19.0,.11,8.15,.11,distant);
+    beam('Traversée de turbine',x,-.84,-20.7,5.5,.62,2.52,distant);
+    add('Anneau de turbine hors service',x,-1.22,-20.9,6.4,6.4,.86,enamel,'#68767a',{...distant,primitive:'torus'});
+    add('Moyeu de turbine',x,-1.22,-20.9,1.25,1.65,1.25,steel,'#566063',{...distant,primitive:'cylinder',pitch:90});
+    for(const roll of [0,60,120]){
+      beam('Aube de turbine',x,-1.22,-20.4,.45,4.8,.37,{...distant,roll});
+    }
+  }
 
   floor('Palier des pompes',0,-34.6,8.4,1.2);
   floor('Allée au sec',2.86,-40.5,2.72,10.6,0,steel);
@@ -92,7 +129,7 @@ export function createLevel(calibration) {
     ...calibration,
     name:'Scary Gorilla — Station Écho',
     worldSize:148,
-    environment:{...calibration.environment,ambientPower:.58,groundColor:'#685844',sunPower:.11,fogNear:7,fogFar:33},
+    environment:{...calibration.environment,ambientPower:.58,groundColor:'#685844',sunPower:.11,fogNear:7,fogFar:54},
     pieces,
     soundZones:[
       {name:'Ventilation de la galerie',clip:'district',x:0,y:1.1,z:-8.9,w:3.2,h:2.5,d:7.6,volume:.17},

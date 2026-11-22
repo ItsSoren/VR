@@ -30,7 +30,20 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
   lightStrip(0,2.19,-4.74,amber);
   lightStrip(0,2.14,-12.72,amber);
   lightStrip(0,2.34,-25.50,amber);
-  for(const z of [-17,-23,-29.5]) lightStrip(-4.27,1.16,z,red,.17);
+  lightStrip(.96,2.16,-6.72,amber,.39);
+  lightStrip(-.96,2.16,-8.97,amber,.39);
+  const depthLightGeometry=new T.BoxGeometry(.06,.14,.36);
+  const lightTransform=new T.Matrix4();
+  for(const [material,heights] of [[white,[-4.48,-10.38]],[red,[-16.28]]]){
+    const lights=new T.InstancedMesh(depthLightGeometry,material,heights.length*6);
+    let index=0;
+    for(const x of [-10.7,10.7])for(const y of heights)for(const z of [-17.5,-25,-32.5]){
+      lights.setMatrixAt(index++,lightTransform.makeTranslation(x,y,z));
+    }
+    markerGroup.add(lights);
+  }
+  lightStrip(-8.4,-.72,-20.44,red,.28);
+  lightStrip(8.4,-.72,-20.44,red,.28);
   for(const z of [-35.0,-40.5,-46.1]) lightStrip(0,2.84,z,white,1.04);
   lightStrip(0,2.43,-48.20,white,.58);
   lightStrip(-1.25,2.39,-57.1,red,.24);
@@ -57,10 +70,14 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
     markerGroup.add(sign);
   }
   label(['POSTE 01 / REFUGE','LAMPE SUR L’ÉTABLI'],1.24,-.94,1.26,-4.78);
+  label(['PUITS 03   >'],.96,-.60,1.03,-6.73);
+  label(['<   PUITS 03'],.96,.60,1.03,-8.98);
   label(['PUITS DE SERVICE'],1.07,-.88,1.71,-12.66);
   label(['POMPES / ARCHIVES'],1.10,0,2.08,-34.07);
   label(['02 / PURGE','GRIP OU E'],.89,3.86,1.23,-41.45,-Math.PI/2);
   label(['RÉCEPTION / RETOUR'],1.15,0,2.03,-13.22,Math.PI);
+  label(['REFUGE  >'],.92,.60,1.03,-9.42,Math.PI);
+  label(['<  REFUGE'],.92,-.60,1.03,-7.17,Math.PI);
 
   const practicals = [new T.PointLight('#ffb666',12,6,1.7),new T.PointLight('#ffb666',9,5,1.8)];
   scene.add(...practicals);
@@ -346,7 +363,7 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
     film.material.uniforms.strength.value=Number(grainControl.value)/100;
     film.visible=Number(grainControl.value)>0;
     const event=mission.advance(head);
-    if(event==='shaft')pannedCue('metal',new T.Vector3(-4.13,1.5,-23.3),head,camera);
+    if(event==='shaft')pannedCue('shaft',new T.Vector3(-8.4,-5.3,-20.9),head,camera);
     if(event==='sighting'){
       encounter.start();
       pannedCue('metal',creature.position,head,camera);
