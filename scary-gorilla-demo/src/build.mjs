@@ -43,12 +43,14 @@ game=edit(game,"const steps=createStepSound(),mapAudio=createMapAudio(()=>steps.
   "const steps=createStepSound(),mapAudio=createMapAudio(()=>steps.context);",
   "const demo=createExperience({T,scene,audioContext:()=>steps.context,announce:showGameHint,goHome:position=>{resetPlayer();if(position)rig.position.set(...position);}});",
   "document.querySelector('#demo-mute').onchange=({target})=>demo.mute(target.checked);",
-  "document.querySelector('#demo-restart').onclick=()=>{demo.reset();resetPlayer();};",
+  "function restartDemo(){demo.reset();resetPlayer();showGameHint('Nouvelle sortie.');}",
+  "document.querySelector('#demo-restart').onclick=restartDemo;",
   "document.querySelector('#demo-play').onclick=()=>toggleSettings(true);",
   "document.querySelector('#demo-lamp').onclick=()=>demo.toggleLamp('desktop');",
   "document.querySelector('#demo-crouch').onpointerdown=event=>{event.currentTarget.setPointerCapture(event.pointerId);keys.add('KeyC');};",
   "for(const event of ['pointerup','pointercancel','lostpointercapture'])document.querySelector('#demo-crouch').addEventListener(event,()=>keys.delete('KeyC'));",
-  "window.scaryGorillaStatus=()=>({...demo.state(),position: worldHead.toArray()});",
+  "let demoTime=0,wristObjective='',screenshotPending=false;",
+  "window.scaryGorillaStatus=()=>({...demo.state(),objective:demo.objective(),position:worldHead.toArray(),renderer:{...renderStats}});",
 ].join('\n'));
 game=replaceSection(game,"const mapQuery=new URLSearchParams(location.search);","function captureNetworkAvatar()",[
   "let startingMap=true;",
@@ -110,9 +112,60 @@ game=replaceSection(game,"    const interact=actions.delete('KeyE');","\n  }\n  
   "    if(actions.delete('KeyE'))demo.desktopInteract(raySource,forward);",
   "    if(actions.delete('KeyF'))demo.toggleLamp('desktop');",
 ].join('\n'));
-game=edit(game,"'B/Y : réglages   ·   A : Tool Gun'","'B/Y : réglages   ·   A : grain'");
+game=edit(game,"  settingsPanel.hidden=hidden;openSettings.hidden=!hidden;",[
+  "  settingsPanel.hidden=hidden;openSettings.hidden=!hidden;",
+  "  keyboard.clear();flat.clear();blasterTrigger.clear();demo.setPaused(!hidden&&!renderer.xr.isPresenting);",
+].join('\n'));
+game=edit(game,"canvas:renderer.domElement,enabled:()=>!renderer.xr.isPresenting,", "canvas:renderer.domElement,enabled:()=>!renderer.xr.isPresenting&&settingsPanel.hidden,");
+game=replaceSection(game,"addEventListener('keydown',e=>{","addEventListener('keyup',e=>keyboard.up(e.code));",[
+  "addEventListener('keydown',e=>{",
+  "  if(!renderer.xr.isPresenting&&(e.code==='Escape'||e.code==='Tab'&&settingsPanel.hidden)){",
+  "    e.preventDefault();if(!e.repeat)toggleSettings();return;",
+  "  }",
+  "  if(!settingsPanel.hidden||e.target.closest?.('button,select,input,textarea'))return;",
+  "  if(e.code==='Space')e.preventDefault();",
+  "  if(e.code==='KeyR'){if(!e.repeat)restartDemo();return;}",
+  "  if(e.code==='KeyP'){if(!e.repeat)screenshotPending=true;return;}",
+  "  keyboard.down(e.code,e.repeat);",
+  "});",
+  "",
+].join('\n'));
+game=edit(game,"  if(inVR&&!pose)return;",[
+  "  if(inVR&&!pose)return;",
+  "  const demoPaused=inVR?menu:!settingsPanel.hidden;",
+  "  if(!inVR&&demoPaused&&hasPreviousHead){demo.setPaused(true);renderer.render(scene,camera);return;}",
+].join('\n'));
+game=edit(game,"    if(actions.delete('KeyE'))demo.desktopInteract(raySource,forward);", "    if(!demoPaused&&actions.delete('KeyE'))demo.desktopInteract(raySource,forward);");
+game=edit(game,"    if(actions.delete('KeyF'))demo.toggleLamp('desktop');", "    if(!demoPaused&&actions.delete('KeyF'))demo.toggleLamp('desktop');");
+game=edit(game,"hintUntil=0;vrHint='';}","hintUntil=0;vrHint='';hudDirty=true;}");
+game=edit(game,"c.fillText('GORILLA LAB '+labRelease,25,42);","c.fillText('STATION ÉCHO',25,42);");
+game=edit(game,"item(25,579,286,44,'Réglages par défaut',restore);","item(25,579,286,44,'Recommencer la sortie',()=>{restartDemo();menu=false;});");
+game=replaceSection(game,"reportSnapshot?'Rapport capturé. Quitte la VR pour le télécharger.':", "),25,645,587);", "reportSnapshot?'Rapport capturé. Quitte la VR pour le télécharger.':demo.objective()");
+game=edit(game,"  const wristWasVisible=wrist.mesh.visible;",[
+  "  if(inVR&&wristObjective!==demo.objective()){wristObjective=demo.objective();hudDirty=true;}",
+  "  const wristWasVisible=wrist.mesh.visible;",
+].join('\n'));
+game=replaceSection(game,"      c.fillStyle='#fff0cf';c.font='bold 25px system-ui';c.fillText(fps+", "wrist.texture.needsUpdate=true;",[
+  "      c.fillStyle='#e4bd7d';c.font='bold 20px system-ui';c.fillText('STATION ÉCHO',17,30);",
+  "      c.fillStyle='#fff0cf';c.font='22px system-ui';c.fillText(vrHint||wristObjective,17,63,382);",
+  "      ",
+].join('\n'));
 game=edit(game,"  const renderStart=performance.now();",
-  "  if(!spectating)demo.update({head:worldHead,camera,dt:inputDt,time:time*.001});\n  const renderStart=performance.now();");
+  "  const pausedNow=inVR?menu:demoPaused;\n  if(!pausedNow)demoTime+=inputDt;\n  if(!spectating)demo.update({head:worldHead,camera,dt:inputDt,time:demoTime,paused:pausedNow});\n  const renderStart=performance.now();");
+game=edit(game,"  renderSubmissionCpuMs=performance.now()-renderStart;",[
+  "  renderSubmissionCpuMs=performance.now()-renderStart;",
+  "  if(!inVR&&screenshotPending){",
+  "    screenshotPending=false;",
+  "    renderer.domElement.toBlob(blob=>{",
+  "      if(!blob){showGameHint('Capture indisponible.');return;}",
+  "      const link=document.createElement('a');",
+  "      const url=URL.createObjectURL(blob);",
+  "      link.href=url;link.download='station-echo-'+Date.now()+'.png';link.click();",
+  "      setTimeout(()=>URL.revokeObjectURL(url),10000);",
+  "      showGameHint('Capture enregistrée.');",
+  "    },'image/png');",
+  "  }",
+].join('\n'));
 
 let html=await read(join(base,'gorilla-lab','index.html'));
 html=html.replace(/<title>[^<]+<\/title>/,'<title>Scary Gorilla — Station Écho</title>');
@@ -127,7 +180,7 @@ html=replaceSection(html,'<p>VR :','<nav aria-label="Réglages">',[
   '<div class="demo-buttons"><button id="demo-play">Jouer sur écran</button><button id="demo-restart">Recommencer</button></div>',
   '<label class="demo-adjust" for="demo-grain">Grain de film <input id="demo-grain" type="range" min="0" max="60" value="19"></label>',
   '<label class="demo-adjust" for="demo-mute">Couper les sons de la démo <input id="demo-mute" type="checkbox"></label>',
-  '<details class="demo-controls"><summary>Commandes</summary><p>VR · Appuis avec les mains ou stick gauche. Stick droit pour tourner. Grip pour interagir. Gâchette pour la lampe, A pour le grain.</p><p>PC · ZQSD ou WASD, glisser pour regarder. E pour interagir, F pour la lampe, C pour s’accroupir, Espace pour sauter.</p></details>',
+  '<details class="demo-controls"><summary>Commandes</summary><p>VR · Appuis avec les mains ou stick gauche. Stick droit pour tourner. Grip pour interagir. Gâchette pour la lampe, A pour le grain. B ou Y pour ouvrir le menu et mettre la mission en pause.</p><p>PC · ZQSD ou WASD, glisser pour regarder. E pour interagir, F pour la lampe, C pour s’accroupir, Espace pour sauter. Échap pour la pause, R pour recommencer, P pour une capture.</p></details>',
   '<details class="lab-settings"><summary>Réglages de locomotion et de rendu</summary>',
   '',
 ].join('\n'));

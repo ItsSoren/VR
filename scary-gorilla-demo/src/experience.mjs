@@ -9,7 +9,7 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
   const sound = createSoundscape(audioContext);
   const markerGroup = new T.Group();
   scene.add(markerGroup);
-  scene.add(new T.HemisphereLight('#d0d5da','#796f57',.71));
+  scene.add(new T.HemisphereLight('#d0d5da','#8b7964',.95),new T.AmbientLight('#9ba7a6',.42));
   const surface = (color,roughness=.82) => new T.MeshStandardMaterial({color,roughness});
   const flat = color => new T.MeshBasicMaterial({color});
   const box = (parent,material,x,y,z,w,h,d) => {
@@ -48,6 +48,7 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
   for(const z of [-35.0,-40.5,-46.1]) lightStrip(0,2.84,z,white,1.04);
   lightStrip(0,2.43,-48.20,white,.58);
   lightStrip(-1.25,2.39,-57.1,red,.24);
+  for(const x of [-2.20,2.20])lightStrip(x,2.55,-53.95,white,.43);
   for(const z of [-48.9,-44.7,-40.2,-35.7,-31.55])lightStrip(6.62,2.53,z,amber,.44);
 
   function label(lines,width,x,y,z,rotation=0) {
@@ -76,6 +77,8 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
   label(['<   PUITS 03'],.96,.60,1.03,-8.98);
   label(['PUITS DE SERVICE'],1.07,-.88,1.71,-12.66);
   label(['POMPES / ARCHIVES'],1.10,0,2.08,-34.07);
+  label(['ALLÉE SÈCHE →','VANNE À DROITE'],1.02,2.82,1.65,-34.19);
+  label(['BASSIN','RAMPE À GAUCHE'],.94,-2.82,1.65,-34.19);
   label(['02 / PURGE','GRIP OU E'],.89,3.86,1.23,-41.45,-Math.PI/2);
   label(['RÉCEPTION / RETOUR'],1.15,0,2.03,-13.22,Math.PI);
   label(['ACCÈS DE SERVICE  >'],1.02,3.88,1.22,-48.91,-Math.PI/2);
@@ -89,11 +92,11 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
   scene.add(...practicals);
   const lightZones = [
     [[-1.50,1.62,-.32,'#ffc076',12],[.1,1.75,-4.65,'#f0a251',9]],
-    [[0,1.79,-12.52,'#ffac50',11],[0,1.78,-25.52,'#ffc47b',8]],
+    [[0,1.79,-12.52,'#ffac50',11],[0,1.82,-23.7,'#b8c8d2',13]],
     [[0,1.84,-25.42,'#ffae65',10],[.10,2.15,-33.94,'#b4d1c9',13]],
     [[-1.6,2.16,-39.2,'#c1d5b8',15],[.3,2.03,-46.4,'#9cc3c7',11]],
-    [[.4,2.19,-49.02,'#a9ced3',13],[-1.2,2.11,-56.3,'#f0774d',8]],
-    [[6.67,2.16,-42.9,'#d99454',12],[5.8,2.03,-32.4,'#c7a786',11]],
+    [[-1.86,2.12,-50.85,'#a9ced3',12],[-1.2,2.11,-56.3,'#f0774d',11]],
+    [[6.57,1.84,-43.6,'#d99454',12],[5.8,1.74,-32.4,'#c7a786',11]],
   ];
   let lightingZone=-1;
   function placeLights(x,z){
@@ -118,6 +121,7 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
     spoke.rotation.z=i*Math.PI/3;
   }
   const valveLamp=box(markerGroup,red,3.833,1.0,-41.11,.06,.095,.14);
+  const pumpIndicators=[-37.3,-40.4,-43.5].map(z=>box(markerGroup,red,-2.37,.65,z,.04,.078,.15));
   const recorderPosition=new T.Vector3(...locations.recorder);
   const receiverPosition=new T.Vector3(...locations.receiver);
   const recorder=new T.Group();
@@ -128,6 +132,11 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
   box(recorder,frame,-.09,.052,.112,.047,.072,.027);
   const receiver=box(markerGroup,frame,...locations.receiver,.37,.19,.23);
   const receiverLight=box(receiver,red,0,.10,0,.13,.013,.102);
+
+  for(const z of [-46.8,-43.6,-40.4,-37.2,-34]){
+    box(markerGroup,frame,7.47,.23,z,.085,.16,.37);
+    box(markerGroup,amber,7.42,.23,z,.025,.056,.23);
+  }
 
   const lamp = new T.Group();
   const lampHome=new T.Vector3(...locations.lamp);
@@ -147,7 +156,9 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
   const down=new T.Vector3(0,0,-1);
   const lampDark=flat('#514f42');
 
-  const {left,right,near,far,bed}=locations.water;
+  const {left,right,near,far,bed,surface:fullWater}=locations.water;
+  const emptyWater=bed+.009;
+  let waterHeight=fullWater;
   const waterEffects=createWaterEffects(T,scene,locations.water);
   const underwaterFog=new T.Fog('#284d46',.10,5.3);
   let aboveWaterFog=null, submerged=false;
@@ -175,6 +186,9 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
   body.rotation.x=.25;
   const skull=box(creature,skin,.035,1.05,-.045,.23,.29,.23);
   skull.rotation.z=-.22;
+  const faceMaterial=surface('#5d5c50');
+  box(skull,faceMaterial,-.012,-.028,-.118,.15,.14,.023);
+  for(const x of [-.067,.041])box(skull,flat('#161a18'),x,.008,-.132,.023,.023,.008);
   const shoulder=box(creature,skin,0,.82,0,.40,.15,.20);
   shoulder.rotation.z=.11;
   const limbs=[];
@@ -208,9 +222,10 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
   function purge() {
     if(!mission.activatePurge()) return;
     valveLamp.material=green;
+    pumpIndicators.forEach(pump=>pump.material=amber);
     recorderLight.material=amber;
     sound.cue('valve');
-    announce('Purge lancée. Récupère l’enregistreur au fond des archives.');
+    announce('Purge lancée. Le bassin se vide.');
   }
   function collectRecorder() {
     if(!mission.collectRecorder()){
@@ -306,8 +321,9 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
     camera.getWorldDirection(aim);
     sideAxis.set(-aim.z,0,aim.x).normalize();
     targetPoint.subVectors(position,head);
-    const pan=targetPoint.dot(sideAxis)/Math.max(1,targetPoint.length());
-    sound.cue(name,pan);
+    const distance=targetPoint.length();
+    const pan=targetPoint.dot(sideAxis)/Math.max(1,distance);
+    sound.cue(name,pan,distance);
   }
   function updateEncounter(dt,head,camera) {
     if(encounter.phase==='hidden'||encounter.phase==='gone')return false;
@@ -338,7 +354,7 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
     }
     if(event==='escaped')announce('Les pas s’arrêtent derrière le seuil. Regagne le refuge.');
     if(event!=='caught')return false;
-    sound.cue('creature');
+    sound.cue('catch');
     reset(true);
     goHome(locations.checkpoint);
     announce('Rattrapé. Reprise au palier des pompes.');
@@ -361,6 +377,9 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
     receiverLight.material=red;
     encounter.reset();
     waterEffects.reset();
+    if(!checkpoint)waterHeight=fullWater;
+    waterEffects.setSurface(waterHeight);
+    pumpIndicators.forEach(pump=>pump.material=mission.purge?(waterHeight>emptyWater?amber:green):red);
     if(scene.fog===underwaterFog)scene.fog=aboveWaterFog;
     submerged=false;
     stepsSinceCue=stridePhase=0;
@@ -372,7 +391,9 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
     grainControl.value=Number(grainControl.value)>0?'0':'19';
     announce(Number(grainControl.value)>0?'Grain léger activé.':'Grain désactivé.');
   }
-  function update({head,camera,dt,time}) {
+  function update({head,camera,dt,time,paused=false}) {
+    sound.setPaused(paused);
+    if(paused)return;
     if(head.y< -2){
       reset();
       goHome();
@@ -381,16 +402,23 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
     }
     placeLights(head.x,head.z);
     updateLamp(camera,dt);
-    const wet=headUnderwater(head,submerged);
+    const draining=mission.purge&&waterHeight>emptyWater;
+    if(draining){
+      waterHeight=Math.max(emptyWater,waterHeight-dt*.09);
+      waterEffects.setSurface(waterHeight);
+      if(waterHeight===emptyWater)pumpIndicators.forEach(pump=>pump.material=green);
+    }
+    const wet=headUnderwater(head,submerged,waterHeight);
     const changed=wet!==submerged;
     if(changed){
       submerged=wet;
-      sound.cue('splash');
+      if(waterHeight>bed+.08)sound.cue('splash');
     }
     if(scene.fog!==underwaterFog)aboveWaterFog=scene.fog;
     scene.fog=submerged?underwaterFog:aboveWaterFog;
     waterEffects.update({head,time,submerged,changed});
-    sound.update(submerged,head.x<right+.8&&head.x>left-.5&&head.z<near+.5&&head.z>far-.55);
+    const nearBasin=head.x<4.1&&head.x>left-.5&&head.z<near+.5&&head.z>far-.55;
+    sound.update(submerged,nearBasin?(waterHeight-emptyWater)/(fullWater-emptyWater):0,draining&&nearBasin);
     film.position.copy(head);
     film.material.uniforms.age.value=time;
     film.material.uniforms.strength.value=Number(grainControl.value)/100;
@@ -407,9 +435,9 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
     updateObjective();
   }
   reset();
-  return {reset,grip,toggleLamp,desktopInteract,update,toggleGrain,
+  return {reset,grip,toggleLamp,desktopInteract,update,toggleGrain,setPaused:sound.setPaused,
     mute:muted=>sound.setEnabled(!muted),objective:()=>mission.objective(),state:()=>({
-      purge:mission.purge,sighting:mission.sighting,complete:mission.complete,hasRecorder:mission.hasRecorder,submerged,encounter:encounter.phase,
+      purge:mission.purge,sighting:mission.sighting,complete:mission.complete,hasRecorder:mission.hasRecorder,submerged,waterHeight,encounter:encounter.phase,
       holding:held==='desktop'?'desktop':held?.side??null, lampOn,grain:Number(grainControl.value),
     })};
 }

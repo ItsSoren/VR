@@ -6,6 +6,8 @@ export function createSoundscape(getContext) {
   let lastFrequency;
   let lastWater;
   let enabled = true;
+  let paused = false;
+  const applyVolume=()=>output?.gain.setTargetAtTime(enabled&&!paused?.72:0,context.currentTime,.07);
 
   function prepare() {
     const current = getContext();
@@ -13,7 +15,7 @@ export function createSoundscape(getContext) {
     if (current === context) return true;
     context = current;
     output = context.createGain();
-    output.gain.value = enabled ? .72 : 0;
+    output.gain.value = enabled&&!paused ? .72 : 0;
     output.connect(context.destination);
     lowpass = context.createBiquadFilter();
     lowpass.type = 'lowpass';
@@ -43,18 +45,20 @@ export function createSoundscape(getContext) {
     return buffer;
   }
 
-  function cue(kind, pan=0) {
-    if (!prepare() || !enabled) return;
+  function cue(kind, pan=0, distance=0) {
+    if (!prepare() || !enabled || paused) return;
     const config = {
       valve: [.36, .17, 260, 94, 'triangle'],
       metal: [1.05, .23, 414, 109, 'sine'],
       shaft: [2.8, .185, 72, 39, 'triangle'],
       creature: [1.35, .26, 104, 39, 'sawtooth'],
+      catch: [.62, .24, 390, 66, 'sawtooth'],
       step: [.19, .14, 94, 39, 'triangle'],
       splash: [.37, .11, 223, 80, 'sine'],
       refuge: [.60, .11, 190, 260, 'sine'],
     }[kind];
-    const [duration, volume, high, low, type] = config;
+    const [duration, peak, high, low, type] = config;
+    const volume=peak/Math.max(1,.73+distance*.21);
     const t = context.currentTime;
     const oscillator = context.createOscillator();
     oscillator.type = type;
@@ -69,12 +73,12 @@ export function createSoundscape(getContext) {
     oscillator.connect(envelope).connect(stereo).connect(lowpass);
     oscillator.start(t);
     oscillator.stop(t+duration+.02);
-    if (kind==='splash'||kind==='creature'||kind==='metal'||kind==='shaft') {
+    if (kind==='splash'||kind==='creature'||kind==='catch'||kind==='metal'||kind==='shaft') {
       const grit = context.createBufferSource();
       grit.buffer = noise(duration);
       const resonance = context.createBiquadFilter();
       resonance.type = 'bandpass';
-      resonance.frequency.value = kind==='shaft'?230:kind==='splash'?760:kind==='metal'?1900:510;
+      resonance.frequency.value = kind==='shaft'?230:kind==='splash'?760:kind==='metal'?1900:kind==='catch'?980:510;
       const trim = context.createGain();
       trim.gain.setValueAtTime(volume*.7,t);
       trim.gain.exponentialRampToValueAtTime(.0001,t+duration);
@@ -87,17 +91,24 @@ export function createSoundscape(getContext) {
     cue,
     setEnabled(value) {
       enabled = value;
-      if (output) output.gain.setTargetAtTime(enabled?.72:0, context.currentTime, .07);
+      applyVolume();
     },
-    update(submerged, nearWater) {
+    setPaused(value) {
+      if(paused===value)return;
+      paused=value;
+      applyVolume();
+    },
+    update(submerged, fraction, draining) {
       if (!prepare()) return;
       const frequency = submerged ? 370 : 7000;
-      const water = nearWater ? submerged ? .15 : .075 : 0;
+      const water = (submerged?.15:.075)*fraction+(draining?.085:0);
       const t = context.currentTime;
       if (lastFrequency!==frequency) lowpass.frequency.setTargetAtTime(frequency,t,.15);
-      if (lastWater!==water) waterGain.gain.setTargetAtTime(water,t,.16);
+      if (lastWater===undefined||Math.abs(lastWater-water)>.003||water===0&&lastWater!==0) {
+        waterGain.gain.setTargetAtTime(water,t,.16);
+        lastWater = water;
+      }
       lastFrequency = frequency;
-      lastWater = water;
     },
   };
 }

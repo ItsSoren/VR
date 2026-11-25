@@ -46,9 +46,9 @@ export function createExpedition() {
   };
 }
 
-export function headUnderwater(head, wasUnderwater) {
-  const {left,right,near,far,surface,bed} = locations.water;
+export function headUnderwater(head, wasUnderwater, surface=locations.water.surface) {
+  const {left,right,near,far,bed} = locations.water;
   const hysteresis = wasUnderwater ? .018 : -.018;
-  return head.x>left && head.x<right && head.z<near && head.z>far &&
+  return surface>bed+.025 && head.x>left && head.x<right && head.z<near && head.z>far &&
     head.y>bed-.06 && head.y<surface+hysteresis;
 }

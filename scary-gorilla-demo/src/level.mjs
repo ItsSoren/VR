@@ -157,6 +157,11 @@ export function createLevel(calibration) {
   add('Plafond coupe-feu de service',6.49,2.76,-40.20,2.30,.2,19.60);
   add('Plafond des jonctions de service',4.09,2.76,-31.525,5.08,.2,2.30);
   add('Plafond de la sortie des archives',5.11,2.76,-49,2.20,.2,2.03);
+  for(const z of [-46.35,-43.15,-39.95,-36.75,-33.55]){
+    add('Traverse de service',6.51,-.011,z,1.86,.05,.065,steel,'#776b53',{solid:false});
+    for(const x of [5.57,7.37])add('Bordure de service',x,-.011,z-1.24,.055,.05,2.43,enamel,yellow,{solid:false});
+    beam('Jambe de renfort de service',7.43,1.33,z,.09,2.56,.16,{solid:false});
+  }
   add('Mur du fond des archives',0,1.40,-59.63,8.4,2.8,.22);
   add('Plafond des archives',0,2.90,-53.35,8.4,.22,12.8);
   beam('Grille de ventilation',-2.87,.80,-59.48,1.32,1.0,.15,{solid:false});

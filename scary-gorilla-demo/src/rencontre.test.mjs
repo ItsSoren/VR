@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {existsSync,readFileSync} from 'node:fs';
 import test from 'node:test';
 import * as T from 'three';
 import {archiveLineClear,createEncounter} from './rencontre.mjs';
@@ -7,6 +8,32 @@ import {locations} from './level.mjs';
 
 const step=1/90;
 const player={x:0,y:.69,z:-50};
+
+test('the two archive routes have continuous floors and space for the player',()=>{
+  const published=new URL('../bunker.json',import.meta.url);
+  const map=JSON.parse(readFileSync(existsSync(published)?published:new URL('../site/bunker.json',import.meta.url),'utf8'));
+  const solids=map.pieces.filter(p=>p.solid!==false&&!p.pitch&&!p.yaw&&!p.roll).map(p=>({
+    name:p.name,box:new T.Box3().setFromCenterAndSize(new T.Vector3(p.x,p.y,p.z),new T.Vector3(p.w,p.h,p.d)),
+  }));
+  const paths=[
+    [[0,-31.55],[0,-34.7],[2.8,-34.7],[2.8,-46.45],[0,-46.45],[0,-51.6],[1.53,-51.6],[1.53,-56.45]],
+    [[1.53,-56.45],[1.55,-49],[6.3,-49],[6.3,-31.55],[0,-31.55]],
+    [[0,-46.13],[0,-49.01]],
+  ];
+  for(const route of paths)for(let i=1;i<route.length;i++){
+    const [xa,za]=route[i-1],[xb,zb]=route[i];
+    const count=Math.ceil(Math.hypot(xb-xa,zb-za)/.045);
+    for(let j=0;j<=count;j++){
+      const x=xa+(xb-xa)*j/count,z=za+(zb-za)*j/count;
+      assert(solids.some(({box})=>Math.abs(box.max.y)<.001&&x>=box.min.x&&x<=box.max.x&&z>=box.min.z&&z<=box.max.z),`Gap at ${x}, ${z}`);
+      for(const [y,radius] of [[.185,.178],[.694,.105]]){
+        const occupied=new T.Sphere(new T.Vector3(x,y,z),radius);
+        const obstruction=solids.find(({box})=>box.intersectsSphere(occupied));
+        assert(!obstruction,`${obstruction?.name} at ${x}, ${z}`);
+      }
+    }
+  }
+});
 
 function atPursuit() {
   const encounter=createEncounter();

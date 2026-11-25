@@ -11,6 +11,7 @@ const vertexShader = `
 const surfaceShader = `
   uniform float age;
   uniform float wet;
+  uniform float depth;
   uniform vec3 wake;
   varying vec2 vUv;
   varying vec3 vWorld;
@@ -43,7 +44,7 @@ const surfaceShader = `
     float rim=(1.0-smoothstep(.002,.012,border))*(.66+.15*a+.1*b);
     vec3 color=mix(vec3(.035,.103,.088),vec3(.19,.26,.24),fresnel);
     color=mix(color,vec3(.67,.73,.62),clamp(glare*.78+rim*.34+abs(ripple)*.08,0.0,1.0));
-    gl_FragColor=vec4(color,clamp(mix(.35,.68,fresnel)*(1.0-wet*.36)+glare*.16+rim*.12,0.0,.88));
+    gl_FragColor=vec4(color,clamp(mix(.35,.68,fresnel)*(1.0-wet*.36)+glare*.16+rim*.12,0.0,.88)*depth);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }
@@ -51,6 +52,7 @@ const surfaceShader = `
 
 const causticShader = `
   uniform float age;
+  uniform float depth;
   varying vec2 vUv;
   varying vec3 vWorld;
   void main(){
@@ -59,17 +61,17 @@ const causticShader = `
     float b=sin(dot(p,vec2(-7.0,13.0))-.67*age+.65*sin(p.x*9.0+age*.35));
     float net=pow(1.0-abs(a*b),8.0);
     float edge=min(min(vUv.x,1.0-vUv.x),min(vUv.y,1.0-vUv.y));
-    gl_FragColor=vec4(.30,.46,.35,net*smoothstep(.0,.08,edge)*.22);
+    gl_FragColor=vec4(.30,.46,.35,net*smoothstep(.0,.08,edge)*.22*depth);
     #include <colorspace_fragment>
   }
 `;
 
 export function createWaterEffects(T,scene,{left,right,near,far,surface,bed}) {
-  const age={value:0}, wet={value:0};
+  const age={value:0}, wet={value:0}, depth={value:1};
   const wake=new T.Vector3(0,0,-3);
   const material=new T.ShaderMaterial({
     side:T.DoubleSide,transparent:true,depthWrite:false,
-    uniforms:{age,wet,wake:{value:wake}},
+    uniforms:{age,wet,depth,wake:{value:wake}},
     vertexShader,fragmentShader:surfaceShader,
   });
   const sheet=new T.PlaneGeometry(right-left,near-far);
@@ -81,7 +83,7 @@ export function createWaterEffects(T,scene,{left,right,near,far,surface,bed}) {
 
   const reflections=new T.Mesh(sheet,new T.ShaderMaterial({
     transparent:true,depthWrite:false,blending:T.AdditiveBlending,
-    uniforms:{age},vertexShader,fragmentShader:causticShader,
+    uniforms:{age,depth},vertexShader,fragmentShader:causticShader,
   }));
   reflections.rotation.copy(water.rotation);
   reflections.position.copy(water.position).y=bed+.009;
@@ -89,15 +91,22 @@ export function createWaterEffects(T,scene,{left,right,near,far,surface,bed}) {
   scene.add(reflections);
   let wading=false;
 
+  function setSurface(height) {
+    water.position.y=height;
+    depth.value=Math.min(1,Math.max(0,(height-bed)/.24));
+    water.visible=reflections.visible=depth.value>.07;
+  }
+
   return {
-    reset() {wake.z=age.value-3;wading=false;wet.value=0;},
+    reset() {wake.z=age.value-3;wading=false;wet.value=0;setSurface(surface);},
+    setSurface,
     update({head,time,submerged,changed}) {
       age.value=time;
       wet.value=Number(submerged);
       const inside=head.x>left&&head.x<right&&head.z<near&&head.z>far;
-      const nearSurface=head.y>bed&&head.y<surface+.48;
+      const nearSurface=water.visible&&head.y>bed&&head.y<water.position.y+.48;
       const inWater=inside&&nearSurface;
-      const crossed=(changed||inWater&&!wading)&&inside;
+      const crossed=water.visible&&(changed||inWater&&!wading)&&inside;
       const moved=inWater&&time-wake.z>.24&&Math.hypot(head.x-wake.x,head.z-wake.y)>.27;
       if(crossed||moved)wake.set(head.x,head.z,time);
       wading=inWater;
