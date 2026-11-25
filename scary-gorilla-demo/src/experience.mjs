@@ -1,7 +1,7 @@
 import {locations} from './level.mjs';
 import {createExpedition,headUnderwater} from './expedition.mjs';
 import {createSoundscape} from './sound.mjs';
-import {createEncounter} from './rencontre.mjs';
+import {archiveLineClear,createEncounter} from './rencontre.mjs';
 import {createWaterEffects} from './bassin.mjs';
 
 export function createExperience({T,scene,audioContext,announce,goHome}) {
@@ -48,6 +48,7 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
   for(const z of [-35.0,-40.5,-46.1]) lightStrip(0,2.84,z,white,1.04);
   lightStrip(0,2.43,-48.20,white,.58);
   lightStrip(-1.25,2.39,-57.1,red,.24);
+  for(const z of [-48.9,-44.7,-40.2,-35.7,-31.55])lightStrip(6.62,2.53,z,amber,.44);
 
   function label(lines,width,x,y,z,rotation=0) {
     const canvas = document.createElement('canvas');
@@ -77,6 +78,10 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
   label(['POMPES / ARCHIVES'],1.10,0,2.08,-34.07);
   label(['02 / PURGE','GRIP OU E'],.89,3.86,1.23,-41.45,-Math.PI/2);
   label(['RÉCEPTION / RETOUR'],1.15,0,2.03,-13.22,Math.PI);
+  label(['ACCÈS DE SERVICE  >'],1.02,3.88,1.22,-48.91,-Math.PI/2);
+  label(['RETOUR AU SAS'],1.05,5.76,1.26,-30.57,Math.PI);
+  label(['RÉCEPTEUR • E / GRIP'],.76,1.21,1.03,1.05);
+  label(['JOURNAL DE STATION'],.82,1.58,1.12,-57.14);
   label(['REFUGE  >'],.92,.60,1.03,-9.42,Math.PI);
   label(['<  REFUGE'],.92,-.60,1.03,-7.17,Math.PI);
 
@@ -88,10 +93,11 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
     [[0,1.84,-25.42,'#ffae65',10],[.10,2.15,-33.94,'#b4d1c9',13]],
     [[-1.6,2.16,-39.2,'#c1d5b8',15],[.3,2.03,-46.4,'#9cc3c7',11]],
     [[.4,2.19,-49.02,'#a9ced3',13],[-1.2,2.11,-56.3,'#f0774d',8]],
+    [[6.67,2.16,-42.9,'#d99454',12],[5.8,2.03,-32.4,'#c7a786',11]],
   ];
   let lightingZone=-1;
-  function placeLights(z){
-    const zone = z> -7 ? 0 : z> -23.5 ? 1 : z> -34 ? 2 : z> -47.1 ? 3 : 4;
+  function placeLights(x,z){
+    const zone = x>4.32&&z< -30.4&&z> -50 ? 5 : z> -7 ? 0 : z> -23.5 ? 1 : z> -34 ? 2 : z> -47.1 ? 3 : 4;
     if(zone===lightingZone)return;
     lightingZone=zone;
     lightZones[zone].forEach(([x,y,at,color,intensity],i)=>{
@@ -112,6 +118,16 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
     spoke.rotation.z=i*Math.PI/3;
   }
   const valveLamp=box(markerGroup,red,3.833,1.0,-41.11,.06,.095,.14);
+  const recorderPosition=new T.Vector3(...locations.recorder);
+  const receiverPosition=new T.Vector3(...locations.receiver);
+  const recorder=new T.Group();
+  recorder.position.copy(recorderPosition);
+  markerGroup.add(recorder);
+  box(recorder,surface('#bd7439'),0,0,0,.30,.20,.20);
+  const recorderLight=box(recorder,red,0,.106,0,.17,.012,.11);
+  box(recorder,frame,-.09,.052,.112,.047,.072,.027);
+  const receiver=box(markerGroup,frame,...locations.receiver,.37,.19,.23);
+  const receiverLight=box(receiver,red,0,.10,0,.13,.013,.102);
 
   const lamp = new T.Group();
   const lampHome=new T.Vector3(...locations.lamp);
@@ -192,8 +208,30 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
   function purge() {
     if(!mission.activatePurge()) return;
     valveLamp.material=green;
+    recorderLight.material=amber;
     sound.cue('valve');
-    announce('Purge lancée. Continue vers les archives.');
+    announce('Purge lancée. Récupère l’enregistreur au fond des archives.');
+  }
+  function collectRecorder() {
+    if(!mission.collectRecorder()){
+      if(!mission.purge)announce('Alimente les archives avec la vanne de purge.');
+      return;
+    }
+    recorder.visible=false;
+    receiverLight.material=amber;
+    sound.cue('valve');
+    announce('Enregistreur rangé. Dépose-le au refuge. La galerie latérale contourne les pompes.');
+    updateObjective();
+  }
+  function deliverRecorder() {
+    if(!mission.deliverRecorder()){
+      if(!mission.complete)announce('Ce récepteur attend l’enregistreur des archives.');
+      return;
+    }
+    receiverLight.material=green;
+    sound.cue('refuge');
+    announce('Enregistrement transmis. Sortie terminée.');
+    updateObjective();
   }
   function pick(owner) {
     held=owner;
@@ -215,16 +253,20 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
     return true;
   }
   function desktopInteract(origin,direction) {
-    if(readableDirection(origin,valvePosition,direction,2.03,.78)){purge();return true;}
+    if(origin.x<valvePosition.x&&readableDirection(origin,valvePosition,direction,2.03,.78)){purge();return true;}
+    if(recorder.visible&&readableDirection(origin,recorderPosition,direction,1.47,.79)){collectRecorder();return true;}
+    if(readableDirection(origin,receiverPosition,direction,1.47,.78)){deliverRecorder();return true;}
     if(held==='desktop'){drop();return true;}
     if(!held&&readableDirection(origin,lamp.position,direction,2.12,.71)){pick('desktop');return true;}
-    announce('Vise la lampe ou la vanne puis appuie sur E.');
+    announce('Approche-toi et vise l’objet à utiliser.');
     return false;
   }
   function grip(hand,pressed,menu) {
     if(held===hand){if(!pressed)drop();return true;}
     if(!pressed||hand.grip||menu)return false;
-    if(hand.target.distanceToSquared(valvePosition)<.33**2){purge();return true;}
+    if(hand.target.x<valvePosition.x&&hand.target.distanceToSquared(valvePosition)<.33**2){purge();return true;}
+    if(recorder.visible&&hand.target.distanceToSquared(recorderPosition)<.32**2){collectRecorder();return true;}
+    if(hand.target.distanceToSquared(receiverPosition)<.32**2){deliverRecorder();return true;}
     if(!held&&hand.target.distanceToSquared(lamp.position)<.32**2){pick(hand);return true;}
     return false;
   }
@@ -246,8 +288,9 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
     if(dropping){
       const {x,y,z}=lamp.position;
       const overTable=Math.abs(x+2.21)<.69&&Math.abs(z-.9)<.825;
+      const overCrate=Math.abs(x+.92)<.35&&Math.abs(z+46.44)<.31;
       const inPool=x>left&&x<right&&z<near&&z>far;
-      const rest=(overTable?.73:inPool?bed:0)+.073;
+      const rest=(overTable?.73:overCrate?.54:inPool?bed:0)+.073;
       dropSpeed+=dt*4.5;
       lamp.position.y=Math.max(rest,y-dropSpeed*dt);
       if(lamp.position.y<=rest)dropping=false;
@@ -270,7 +313,7 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
     if(encounter.phase==='hidden'||encounter.phase==='gone')return false;
     creatureCenter.copy(creature.position).y+=.76;
     face.copy(down).applyQuaternion(lamp.quaternion);
-    const lit=lampOn&&readableDirection(spot.position,creatureCenter,face,6.5,.92);
+    const lit=lampOn&&readableDirection(spot.position,creatureCenter,face,6.5,.92)&&archiveLineClear(spot.position,creatureCenter);
     const {event,distance:travel}=encounter.update(dt,head,lit);
     creatureCenter.set(encounter.position.x,0,encounter.position.z);
     face.copy(creatureCenter).sub(creature.position);
@@ -296,21 +339,26 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
     if(event==='escaped')announce('Les pas s’arrêtent derrière le seuil. Regagne le refuge.');
     if(event!=='caught')return false;
     sound.cue('creature');
-    reset();
-    goHome();
-    announce('Rattrapé dans les archives. Retour au refuge.');
+    reset(true);
+    goHome(locations.checkpoint);
+    announce('Rattrapé. Reprise au palier des pompes.');
     return true;
   }
-  function reset() {
-    mission.reset();
+  function reset(checkpoint=false) {
+    if(checkpoint)mission.retryArchives();
+    else mission.reset();
     if(held&&held!=='desktop')held.demoHeld=false;
     held=null;
-    lampOn=false;
+    lampOn=checkpoint;
     dropping=false;
-    lamp.position.copy(lampHome);
+    if(checkpoint)lamp.position.set(...locations.spareLamp);
+    else lamp.position.copy(lampHome);
     lamp.rotation.set(0,-.28,0);
-    valveLamp.material=red;
-    valve.rotation.x=0;
+    valveLamp.material=mission.purge?green:red;
+    valve.rotation.x=mission.purge?Math.PI/2:0;
+    recorder.visible=true;
+    recorderLight.material=mission.purge?amber:red;
+    receiverLight.material=red;
     encounter.reset();
     waterEffects.reset();
     if(scene.fog===underwaterFog)scene.fog=aboveWaterFog;
@@ -331,7 +379,7 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
       announce('Retour au refuge après la chute.');
       return;
     }
-    placeLights(head.z);
+    placeLights(head.x,head.z);
     updateLamp(camera,dt);
     const wet=headUnderwater(head,submerged);
     const changed=wet!==submerged;
@@ -354,7 +402,6 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
       pannedCue('metal',creature.position,head,camera);
       announce('Quelque chose bouge entre les rayonnages.');
     }
-    if(event==='returned'){sound.cue('refuge');announce('Sortie terminée. Tu es revenu au refuge.');}
     if(mission.purge)valve.rotation.x=Math.min(Math.PI/2,valve.rotation.x+dt*2.2);
     if(updateEncounter(dt,head,camera))return;
     updateObjective();
@@ -362,7 +409,7 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
   reset();
   return {reset,grip,toggleLamp,desktopInteract,update,toggleGrain,
     mute:muted=>sound.setEnabled(!muted),objective:()=>mission.objective(),state:()=>({
-      purge:mission.purge,sighting:mission.sighting,complete:mission.complete,submerged,encounter:encounter.phase,
+      purge:mission.purge,sighting:mission.sighting,complete:mission.complete,hasRecorder:mission.hasRecorder,submerged,encounter:encounter.phase,
       holding:held==='desktop'?'desktop':held?.side??null, lampOn,grain:Number(grainControl.value),
     })};
 }

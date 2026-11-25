@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as T from 'three';
-import {createEncounter} from './rencontre.mjs';
+import {archiveLineClear,createEncounter} from './rencontre.mjs';
 import {createExperience} from './experience.mjs';
 import {locations} from './level.mjs';
 
@@ -52,7 +52,22 @@ test('shelves confine the pursuit and close range triggers a catch once',()=>{
   assert.equal(creature.phase,'hidden');
 });
 
-test('expedition finishes on escape and restarts cleanly after a catch',()=>{
+test('creature detours around the opaque shelf and lets the player escape by the service passage',()=>{
+  const creature=atPursuit();
+  const target={x:2.05,y:.69,z:-54.25};
+  assert(!archiveLineClear(creature.position,target));
+  let outcome=null;
+  for(let i=0;i<700&&!outcome;i++){
+    const previous={...creature.position};
+    outcome=creature.update(step,target,false).event;
+    assert(archiveLineClear(previous,creature.position,.25));
+  }
+  assert.equal(outcome,'caught');
+  const second=atPursuit();
+  assert.equal(second.update(step,{x:4.25,y:.69,z:-49},false).event,'escaped');
+});
+
+test('expedition requires delivery and preserves the purge after a catch',()=>{
   const original=globalThis.document;
   const objective={textContent:''},grain={value:'19'};
   globalThis.document={
@@ -60,10 +75,10 @@ test('expedition finishes on escape and restarts cleanly after a catch',()=>{
     createElement(){return {getContext(){return {fillRect(){},strokeRect(){},fillText(){}};}};},
   };
   try {
-    let resets=0,time=0;
-    const messages=[];
+    let time=0;
+    const messages=[],resets=[];
     const scene=new T.Scene(),camera=new T.PerspectiveCamera();
-    const game=createExperience({T,scene,audioContext:()=>null,announce:text=>messages.push(text),goHome:()=>resets++});
+    const game=createExperience({T,scene,audioContext:()=>null,announce:text=>messages.push(text),goHome:position=>resets.push(position)});
     const head=new T.Vector3();
     const walk=(x,y,z)=>{
       head.set(x,y,z);
@@ -71,27 +86,49 @@ test('expedition finishes on escape and restarts cleanly after a catch',()=>{
       camera.updateMatrixWorld();
       game.update({head,camera,dt:step,time:time+=step});
     };
+    const aimAt=(location)=>game.desktopInteract(head,new T.Vector3(...location).sub(head).normalize());
     const purge=()=>{
       walk(0,.69,-13.5);
+      walk(5.7,.69,-41.45);
+      assert.equal(aimAt(locations.valve),false);
       walk(2.8,.69,-41.45);
-      const direction=new T.Vector3(...locations.valve).sub(head).normalize();
-      assert(game.desktopInteract(head,direction));
+      assert(aimAt(locations.valve));
       walk(0,.69,locations.archiveEntrance-.15);
       assert.equal(game.state().encounter,'hidden');
       walk(0,.69,-50);
       assert.equal(game.state().encounter,'observing');
     };
+    walk(1.58,.69,-56.45);
+    assert(aimAt(locations.recorder));
+    assert.equal(game.state().hasRecorder,false);
     purge();
-    walk(0,.69,-46.8);
+    walk(1.58,.69,-56.45);
+    assert(aimAt(locations.recorder));
+    assert(game.state().hasRecorder);
+    walk(4.35,.69,-49);
     assert.equal(game.state().encounter,'retreating');
     walk(0,.69,.33);
+    assert.equal(game.state().complete,false);
+    walk(1.21,.69,1.59);
+    assert(aimAt(locations.receiver));
     assert(game.state().complete);
     game.reset();
-    purge();
-    for(let i=0;i<750&&resets===0;i++)walk(0,.69,-51.5);
-    assert.equal(resets,1);
-    assert.equal(game.state().encounter,'hidden');
     assert.equal(game.state().purge,false);
+    purge();
+    walk(1.58,.69,-56.45);
+    const hand={target:new T.Vector3(...locations.recorder),grip:false};
+    assert(game.grip(hand,true,false));
+    assert(game.state().hasRecorder);
+    for(let i=0;i<750&&resets.length===0;i++)walk(0,.69,-51.5);
+    assert.deepEqual(resets,[locations.checkpoint]);
+    assert.equal(game.state().encounter,'hidden');
+    assert.equal(game.state().purge,true);
+    assert.equal(game.state().hasRecorder,false);
     assert.match(messages.at(-1),/Rattrapé/);
+    walk(...locations.checkpoint);
+    walk(0,.69,-50);
+    assert.equal(game.state().encounter,'observing');
+    assert(game.grip(hand,true,false));
+    assert(game.state().hasRecorder);
   }finally{globalThis.document=original;}
 });

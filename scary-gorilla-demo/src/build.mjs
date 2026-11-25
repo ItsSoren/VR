@@ -41,7 +41,7 @@ game=edit(game,"const defaults={...settings};",
   "Object.assign(settings,{size:3,post:false,bloom:false,reflections:false,rayTrace:false});\nconst defaults={...settings};");
 game=edit(game,"const steps=createStepSound(),mapAudio=createMapAudio(()=>steps.context);",[
   "const steps=createStepSound(),mapAudio=createMapAudio(()=>steps.context);",
-  "const demo=createExperience({T,scene,audioContext:()=>steps.context,announce:showGameHint,goHome:resetPlayer});",
+  "const demo=createExperience({T,scene,audioContext:()=>steps.context,announce:showGameHint,goHome:position=>{resetPlayer();if(position)rig.position.set(...position);}});",
   "document.querySelector('#demo-mute').onchange=({target})=>demo.mute(target.checked);",
   "document.querySelector('#demo-restart').onclick=()=>{demo.reset();resetPlayer();};",
   "document.querySelector('#demo-play').onclick=()=>toggleSettings(true);",
@@ -123,11 +123,11 @@ html=html.replace(/Gorilla Lab [^<]* · Réglages/,'Station Écho · Menu');
 html=html.replace(/<h1>Gorilla Lab [^<]+<\/h1>/,'<h1>Scary Gorilla</h1>');
 html=replaceSection(html,'<p>VR :','<nav aria-label="Réglages">',[
   '<p class="demo-subtitle">Station Écho</p>',
-  '<p>Traverse la passerelle, lance la purge dans la salle des pompes et regagne le refuge.</p>',
+  '<p>Réactive les archives, récupère leur enregistreur et transmets-le depuis le refuge.</p>',
   '<div class="demo-buttons"><button id="demo-play">Jouer sur écran</button><button id="demo-restart">Recommencer</button></div>',
   '<label class="demo-adjust" for="demo-grain">Grain de film <input id="demo-grain" type="range" min="0" max="60" value="19"></label>',
   '<label class="demo-adjust" for="demo-mute">Couper les sons de la démo <input id="demo-mute" type="checkbox"></label>',
-  '<details class="demo-controls"><summary>Commandes</summary><p>VR · Appuis avec les mains ou stick gauche. Stick droit pour tourner. Grip pour la lampe et la vanne. Gâchette pour la lampe, A pour le grain.</p><p>PC · ZQSD ou WASD, glisser pour regarder. E pour interagir, F pour la lampe, C pour s’accroupir, Espace pour sauter.</p></details>',
+  '<details class="demo-controls"><summary>Commandes</summary><p>VR · Appuis avec les mains ou stick gauche. Stick droit pour tourner. Grip pour interagir. Gâchette pour la lampe, A pour le grain.</p><p>PC · ZQSD ou WASD, glisser pour regarder. E pour interagir, F pour la lampe, C pour s’accroupir, Espace pour sauter.</p></details>',
   '<details class="lab-settings"><summary>Réglages de locomotion et de rendu</summary>',
   '',
 ].join('\n'));

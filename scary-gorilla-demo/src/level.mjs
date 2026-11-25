@@ -11,8 +11,12 @@ const metalStep = {surfaceSound:{clip:'grating',volume:.42}};
 export const locations = {
   lamp: [-1.86, .79, .90],
   valve: [3.86, .76, -41.45],
+  recorder: [1.58,.76,-57.08],
+  receiver: [1.21,.80,1.07],
+  checkpoint: [0,.025,-46.13],
+  spareLamp: [-.92,.62,-46.44],
+  archiveCover: {left:-.69,right:.69,far:-55.76,near:-52.88},
   water: {left:-4.05, right:1.5, near:-35.2, far:-45.8, surface:-.065, bed:-.62},
-  refugeEnd: -4.78,
   archiveEntrance: -47.45,
   archiveEncounter: -49.12,
 };
@@ -50,10 +54,12 @@ export function createLevel(calibration) {
   add('Fond nord de la galerie',0,2.6,-25.5,3.5,.2,.5,concrete,gray);
   floor('Galerie aval',0,-29.65,3.45,8.7);
   for (const side of [-1,1]) {
-    add('Mur de galerie aval',side*1.64,1.38,-29.65,.18,2.76,8.7);
+    if(side<0)add('Mur de galerie aval',side*1.64,1.38,-29.65,.18,2.76,8.7);
     beam('Conduite de service',side*1.36,2.40,-29.5,.16,.16,8.25,{primitive:'cylinder',pitch:90});
   }
   add('Plafond de galerie aval',0,2.80,-29.65,3.45,.24,8.7);
+  add('Mur aval avant le service',1.64,1.38,-27.85,.18,2.76,5.10);
+  add('Mur aval après le service',1.64,1.38,-33.325,.18,2.76,1.35);
 
   const distant={solid:false};
   add('Radier du puits',0,-23.30,-25,34,.60,31,tile,'#252e34',distant);
@@ -113,10 +119,11 @@ export function createLevel(calibration) {
   add('Lisse basse des pompes',1.53,.39,-40.5,.09,.09,6.7,enamel,yellow);
   for (const z of [-43.8,-40.5,-37.2]) add('Montant des pompes',1.53,.43,z,.09,.86,.09,enamel,yellow);
   beam('Armoire de purge',4.03,.83,-41.45,.27,1.33,1.57);
+  beam('Caisse de maintenance',-.92,.27,-46.44,.70,.54,.62);
 
   floor('Dalle des archives',0,-53.35,8.4,12.7);
   for (const side of [-1,1]) {
-    add('Mur des archives',side*4.13,1.40,-53.38,.24,2.8,12.75);
+    if(side<0)add('Mur des archives',side*4.13,1.40,-53.38,.24,2.8,12.75);
     for (const z of [-50.7,-54.1,-57.15]) {
       beam('Dos de rayonnage',side*3.45,1.0,z,.13,2.0,2.28);
       for(const y of [.32,.77,1.22,1.67]){
@@ -127,6 +134,29 @@ export function createLevel(calibration) {
       }
     }
   }
+  add('Mur oriental des archives',4.13,1.40,-54.8775,.24,2.8,9.755);
+  add('Jambage oriental des archives',4.13,1.40,-47.5025,.24,2.8,.995);
+  const cover=locations.archiveCover;
+  beam('Rayonnage central opaque',0,.81,(cover.far+cover.near)/2,cover.right-cover.left,1.62,cover.near-cover.far);
+  for(const z of [-53.25,-54.06,-54.87,-55.45]){
+    add('Bacs sur le rayonnage',0,1.73,z,1.18,.22,.56,5,'#756247');
+  }
+  beam('Support de l’enregistreur',1.58,.30,-57.08,.82,.60,.58);
+  beam('Poste de réception des données',1.21,.33,1.07,.78,.66,.66);
+
+  floor('Galerie de service',6.49,-40.20,2.26,19.60,0,steel);
+  floor('Sortie latérale des archives',5.11,-49,2.20,2.00,0,steel);
+  floor('Jonction des galeries',4.09,-31.525,5.08,2.25,0,steel);
+  add('Paroi extérieure de service',7.58,1.36,-40.20,.19,2.72,19.60);
+  add('Paroi intérieure de service',5.38,1.36,-40.325,.19,2.72,15.35);
+  add('Fond de service',6.49,1.36,-49.76,2.26,2.72,.19);
+  add('Mur nord de la jonction',4.65,1.36,-30.40,6.02,2.72,.19);
+  add('Mur sud de la sortie',5.11,1.36,-49.85,2.20,2.72,.19);
+  add('Mur nord de la sortie',4.75,1.36,-48.02,1.31,2.72,.19);
+  add('Mur sud de la jonction',3.55,1.36,-32.65,3.85,2.72,.19);
+  add('Plafond coupe-feu de service',6.49,2.76,-40.20,2.30,.2,19.60);
+  add('Plafond des jonctions de service',4.09,2.76,-31.525,5.08,.2,2.30);
+  add('Plafond de la sortie des archives',5.11,2.76,-49,2.20,.2,2.03);
   add('Mur du fond des archives',0,1.40,-59.63,8.4,2.8,.22);
   add('Plafond des archives',0,2.90,-53.35,8.4,.22,12.8);
   beam('Grille de ventilation',-2.87,.80,-59.48,1.32,1.0,.15,{solid:false});
