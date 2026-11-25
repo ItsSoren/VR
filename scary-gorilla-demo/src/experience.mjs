@@ -2,6 +2,7 @@ import {locations} from './level.mjs';
 import {createExpedition,headUnderwater} from './expedition.mjs';
 import {createSoundscape} from './sound.mjs';
 import {createEncounter} from './rencontre.mjs';
+import {createWaterEffects} from './bassin.mjs';
 
 export function createExperience({T,scene,audioContext,announce,goHome}) {
   const mission = createExpedition();
@@ -130,27 +131,8 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
   const down=new T.Vector3(0,0,-1);
   const lampDark=flat('#514f42');
 
-  const {left,right,near,far,surface:waterY,bed}=locations.water;
-  const waterMaterial=new T.ShaderMaterial({
-    transparent:true,depthWrite:false,side:T.DoubleSide,
-    uniforms:{age:{value:0},wet:{value:0}},
-    vertexShader:'varying vec2 vUv; void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
-    fragmentShader:[
-      'uniform float age; uniform float wet; varying vec2 vUv;',
-      'void main(){',
-      'float a=sin(vUv.x*83.+vUv.y*37.+age*1.17);',
-      'float b=sin(vUv.y*114.-vUv.x*19.-age*.83);',
-      'float glint=pow(max(0.,a*b),5.);',
-      'vec3 color=mix(vec3(.13,.22,.20),vec3(.40,.47,.36),glint*.51);',
-      'gl_FragColor=vec4(color,mix(.50,.34,wet));',
-      '}',
-    ].join('\n'),
-  });
-  const water=new T.Mesh(new T.PlaneGeometry(right-left,near-far),waterMaterial);
-  water.rotation.x=-Math.PI/2;
-  water.position.set((left+right)/2,waterY,(near+far)/2);
-  water.renderOrder=3;
-  scene.add(water);
+  const {left,right,near,far,bed}=locations.water;
+  const waterEffects=createWaterEffects(T,scene,locations.water);
   const underwaterFog=new T.Fog('#284d46',.10,5.3);
   let aboveWaterFog=null, submerged=false;
 
@@ -330,6 +312,9 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
     valveLamp.material=red;
     valve.rotation.x=0;
     encounter.reset();
+    waterEffects.reset();
+    if(scene.fog===underwaterFog)scene.fog=aboveWaterFog;
+    submerged=false;
     stepsSinceCue=stridePhase=0;
     creature.visible=false;
     creature.position.set(encounter.position.x,0,encounter.position.z);
@@ -349,15 +334,15 @@ export function createExperience({T,scene,audioContext,announce,goHome}) {
     placeLights(head.z);
     updateLamp(camera,dt);
     const wet=headUnderwater(head,submerged);
-    if(wet!==submerged){
+    const changed=wet!==submerged;
+    if(changed){
       submerged=wet;
-      pannedCue('splash',water.position,head,camera);
+      sound.cue('splash');
     }
     if(scene.fog!==underwaterFog)aboveWaterFog=scene.fog;
     scene.fog=submerged?underwaterFog:aboveWaterFog;
-    waterMaterial.uniforms.age.value=time;
-    waterMaterial.uniforms.wet.value=Number(submerged);
-    sound.update(submerged,head.z<near+.5&&head.z>far-.55);
+    waterEffects.update({head,time,submerged,changed});
+    sound.update(submerged,head.x<right+.8&&head.x>left-.5&&head.z<near+.5&&head.z>far-.55);
     film.position.copy(head);
     film.material.uniforms.age.value=time;
     film.material.uniforms.strength.value=Number(grainControl.value)/100;

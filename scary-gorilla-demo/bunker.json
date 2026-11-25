@@ -1669,6 +1669,54 @@
       }
     },
     {
+      "name": "Trace humide sur la paroi",
+      "x": -4.027,
+      "y": -0.1,
+      "z": -40.5,
+      "w": 0.055,
+      "h": 0.2,
+      "d": 10.53,
+      "material": 8,
+      "color": "#394e45",
+      "solid": false
+    },
+    {
+      "name": "Front de dalle au fil de l’eau",
+      "x": 1.494,
+      "y": -0.15,
+      "z": -40.5,
+      "w": 0.07,
+      "h": 0.22,
+      "d": 10.53,
+      "material": 8,
+      "color": "#394e45",
+      "solid": false
+    },
+    {
+      "name": "Bande de sécurité du bassin",
+      "x": -1.17,
+      "y": 0.012,
+      "z": -35.17,
+      "w": 2.78,
+      "h": 0.065,
+      "d": 0.065,
+      "material": 14,
+      "color": "#b59849",
+      "solid": false
+    },
+    {
+      "name": "Bande de sécurité du bassin",
+      "x": -1.17,
+      "y": 0.012,
+      "z": -45.83,
+      "w": 2.78,
+      "h": 0.065,
+      "d": 0.065,
+      "material": 14,
+      "color": "#b59849",
+      "solid": false
+    },
+    {
       "name": "Rampe d’entrée du bassin",
       "x": -1.17,
       "y": -0.367,

@@ -18,7 +18,8 @@ export const locations = {
 };
 
 export function createLevel(calibration) {
-  const openings = new Set(['Garde-corps du belvédère','Mur lointain du puits','Repère du mur lointain','Établi du refuge','Plan de travail',
+  const openings = new Set([
+    'Garde-corps du belvédère','Mur lointain du puits','Repère du mur lointain','Établi du refuge','Plan de travail',
     'Pilier du puits','Paroi du puits','Fond du puits',
   ]);
   const pieces = calibration.pieces.filter(piece => !openings.has(piece.name));
@@ -88,6 +89,11 @@ export function createLevel(calibration) {
   floor('Allée au sec',2.86,-40.5,2.72,10.6,0,steel);
   floor('Palier de sortie des pompes',0,-46.4,8.4,1.2);
   floor('Fond du bassin',-1.28,-40.5,5.56,10.62,-.62,tile);
+  add('Trace humide sur la paroi',-4.027,-.10,-40.50,.055,.20,10.53,tile,'#394e45',{solid:false});
+  add('Front de dalle au fil de l’eau',1.494,-.15,-40.5,.07,.22,10.53,tile,'#394e45',{solid:false});
+  for(const z of [-35.17,-45.83]){
+    add('Bande de sécurité du bassin',-1.17,.012,z,2.78,.065,.065,enamel,yellow,{solid:false});
+  }
   add('Rampe d’entrée du bassin',-1.17,-.367,-36.19,2.89,.12,2.096,concrete,gray,{pitch:-17.2,...dryStep});
   add('Rampe de sortie du bassin',-1.17,-.367,-44.81,2.89,.12,2.096,concrete,gray,{pitch:17.2,...dryStep});
   for (const side of [-1,1]) {
