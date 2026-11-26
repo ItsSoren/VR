@@ -26,7 +26,7 @@ export const palmCenter = new T.Vector3(0, 0, (palmFront + palmBack) / 2);
 export const palmHalfExtent = new T.Vector3(.047, .027, (palmBack - palmFront) / 2);
 // Each section describes distance, width, then thickness relative to the finger root.
 const fingerSections = [
-  [.12, .79, .78], [.27, .71, .73], [.44, .66, .69], [.62, .61, .65], [.80, .53, .56], [.94, .36, .39],
+  [.11, .94, .94], [.31, 1.10, 1.13], [.47, 1.02, 1.07], [.65, .95, 1.01], [.80, .82, .87], [.94, .56, .60],
 ];
 // Each ring runs around the dorsal surface, outer side, then the palm.
 const ringWidth = [-.5, .5, 1, .5, -.5, -1];
@@ -109,7 +109,8 @@ export function createHandSkin(side, material, { openWrist = false } = {}) {
   // Viewed from +Z, start at the upper left and follow the rim clockwise.
   const wristIndices = reflected ? [wrist[1], wrist[0], wrist[5], wrist[4], wrist[3], wrist[2]] : wrist;
 
-  for (const { edge, length, splay } of fingerSpecs) {
+  for (const { edge, length:baseLength, splay } of fingerSpecs) {
+    const length=baseLength*1.30;
     const [ax, az, ad, ap] = palmContour[edge];
     const [bx, bz, bd, bp] = palmContour[edge + 1];
     const dx = bx - ax;
@@ -141,8 +142,8 @@ export function createHandSkin(side, material, { openWrist = false } = {}) {
   geometry.setAttribute('position', position);
   geometry.setIndex(triangles);
   // Reserve room for the most curled pose without recalculating bounds each frame.
-  geometry.boundingSphere = new T.Sphere(new T.Vector3(0, -.018, -.052), .12);
-  geometry.boundingBox = new T.Box3(new T.Vector3(-.10, -.082, -.17), new T.Vector3(.10, .038, .025));
+  geometry.boundingSphere = new T.Sphere(new T.Vector3(0, -.025, -.062), .16);
+  geometry.boundingBox = new T.Box3(new T.Vector3(-.13, -.138, -.215), new T.Vector3(.13, .038, .026));
 
   let normalsDirty=true;
   function pose(pressures,updateNormals=true) {
@@ -158,19 +159,23 @@ export function createHandSkin(side, material, { openWrist = false } = {}) {
       let x = finger.x;
       let z = finger.z;
       let y = finger.y;
-      let previousAngle = 0;
-      let previousDistance = 0;
+      let previousDistance=0, direction=0, joint=0;
+      const joints=[.08,.44,.73];
+      const angles=[.09+pressure*1.035,.06+pressure*.84,.045+pressure*.548];
+      const advance=distance=>{
+        while(joint<joints.length&&joints[joint]*length<=distance){
+          const at=joints[joint]*length,travel=at-previousDistance;
+          const forward=Math.cos(direction)*travel;
+          x+=forwardX*forward;y-=Math.sin(direction)*travel;z+=forwardZ*forward;
+          previousDistance=at;direction+=angles[joint++];
+        }
+        const travel=distance-previousDistance,forward=Math.cos(direction)*travel;
+        x+=forwardX*forward;y-=Math.sin(direction)*travel;z+=forwardZ*forward;
+        previousDistance=distance;
+      };
       for (const { ring, distance, width, height } of rows) {
-        const fraction = distance / length;
-        const baseBend = T.MathUtils.smoothstep(fraction, 0, .57);
-        const endBend = T.MathUtils.smoothstep(fraction, .38, 1);
-        const angle = (.22 + pressure * 1.32) * baseBend + (.16 + pressure * (Math.PI*5/6-1.70)) * endBend;
-        const segmentAngle = (angle + previousAngle) / 2;
-        const travel = distance - previousDistance;
-        const forward = Math.cos(segmentAngle) * travel;
-        x += forwardX * forward;
-        y -= Math.sin(segmentAngle) * travel;
-        z += forwardZ * forward;
+        advance(distance);
+        const angle=direction;
         for (let i = 0; i < ring.length; i++) {
           const lateral = ringWidth[i] * width;
           const vertical = ringHeight[i] * height;
@@ -180,15 +185,9 @@ export function createHandSkin(side, material, { openWrist = false } = {}) {
             y + vertical * Math.cos(angle),
             z - forwardX * lateral + forwardZ * bend);
         }
-        previousAngle = angle;
-        previousDistance = distance;
       }
-      const travel = length - previousDistance;
-      const forward = travel * Math.cos(previousAngle);
-      position.setXYZ(tip,
-        mirror * (x + forwardX * forward),
-        y - travel * Math.sin(previousAngle),
-        z + forwardZ * forward);
+      advance(length);
+      position.setXYZ(tip,mirror*x,y,z);
     }
     if (changed) {
       position.needsUpdate = true;

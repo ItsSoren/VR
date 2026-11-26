@@ -334,6 +334,8 @@ test('each lit torch has a beam and adds a separate dynamic light',async()=>{
   const {Scene,Object3D}=await import('three');
   const {createHeldItems}=await import('../gorilla-lab/held-items.js');
   const scene=new Scene(),items=createHeldItems(scene,()=>null,assert.fail);
+  const slots=scene.children.filter(light=>light.isSpotLight);
+  assert.equal(slots.length,6);
   const lamps=Array.from({length:4},()=>new Object3D());
   items.beginLights();
   for(const lamp of lamps)items.considerLight(lamp,true,new Vector3());
@@ -344,6 +346,19 @@ test('each lit torch has a beam and adds a separate dynamic light',async()=>{
   items.considerLight(lamps[1],true,new Vector3());items.update(.016);
   assert.equal(scene.children.filter(light=>light.isSpotLight&&light.intensity>0).length,1);
   assert.equal(lamps[0].children[0].visible,false);
+  items.beginLights();
+  for(const lamp of [...lamps,...Array.from({length:6},()=>new Object3D())])items.considerLight(lamp,true,new Vector3());
+  items.update(.016);
+  assert.deepEqual(scene.children.filter(light=>light.isSpotLight),slots);
+});
+
+test('the phone distinguishes camera switching, capture and the narrow home control',async()=>{
+  const {phoneTap}=await import('../gorilla-lab/phone-ui.js');
+  assert.equal(phoneTap('camera',204,311),'flip');
+  assert.equal(phoneTap('camera',120,311),'shutter');
+  assert.equal(phoneTap('photos',65,385),null);
+  assert.equal(phoneTap('photos',120,359),null);
+  assert.equal(phoneTap('photos',120,385),'home');
 });
 
 test('phone photos reassemble out of order and remain associated with their object',async()=>{

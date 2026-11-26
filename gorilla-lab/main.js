@@ -87,7 +87,7 @@ try{
 }catch{}
 const steps=createStepSound(),mapAudio=createMapAudio(()=>steps.context);
 const heldItems=createHeldItems(scene,()=>steps.context,showGameHint);
-const phoneUI=createPhoneUI(scene,renderer,showGameHint,hand=>pulseHand(hand,.19,24),sendPhonePhoto,togglePhonePower);
+const phoneUI=createPhoneUI(scene,renderer,showGameHint,hand=>pulseHand(hand,.19,24),sendPhonePhoto,togglePhonePower,()=>avatarHead);
 const micOption=document.querySelector('#radio-monitor');
 micOption?.addEventListener('change',()=>heldItems.setMicEnabled(micOption.checked));
 document.addEventListener('visibilitychange',()=>{if(document.hidden)heldItems.stop();});
@@ -238,6 +238,7 @@ function makePropMesh(type,ownMaterial=false){
   const mesh=new T.Mesh(spec.geo,ownMaterial?clonePropMaterial(spec.material):spec.material);
   mesh.castShadow=mesh.receiveShadow=true;
   if(type===CAMERA_TYPE)cameraDetails(mesh);
+  if(spec.id==='flashlight')heldItems.prepareLight(mesh);
   return mesh;
 }
 let maps=null;

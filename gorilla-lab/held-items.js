@@ -35,12 +35,12 @@ export function phoneKeyAt(point){
 
 const lensGeometry=new T.CircleGeometry(.043,24).rotateX(-Math.PI/2);
 const lensMaterial=new T.MeshBasicMaterial({color:0xfff2c9,toneMapped:false});
-const beamGeometry=new T.ConeGeometry(1.24,4,32,1,true).rotateZ(Math.PI).translate(0,2,0);
+const beamGeometry=new T.CylinderGeometry(.86,.042,3.2,24,1,true).translate(0,1.6,0);
 const beamMaterial=new T.ShaderMaterial({
   uniforms:{tint:{value:new T.Color(0xffdda3)}},
   transparent:true,depthWrite:false,blending:T.AdditiveBlending,side:T.DoubleSide,
-  vertexShader:'varying float along; void main(){along=position.y/4.0;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
-  fragmentShader:'uniform vec3 tint; varying float along; void main(){float alpha=smoothstep(0.0,0.09,along)*pow(max(0.0,1.0-along),2.0)*0.078;gl_FragColor=vec4(tint,alpha);}'
+  vertexShader:'varying float along; varying vec3 viewDirection; varying vec3 surfaceNormal; void main(){along=position.y/3.2;vec4 mv=modelViewMatrix*vec4(position,1.0);viewDirection=-mv.xyz;surfaceNormal=normalMatrix*normal;gl_Position=projectionMatrix*mv;}',
+  fragmentShader:'uniform vec3 tint; varying float along; varying vec3 viewDirection; varying vec3 surfaceNormal; void main(){float edge=abs(dot(normalize(surfaceNormal),normalize(viewDirection)));float alpha=smoothstep(0.0,0.035,along)*pow(max(0.0,1.0-along),2.4)*pow(edge,1.8)*0.028;gl_FragColor=vec4(tint,alpha);}'
 });
 
 export function createHeldItems(scene,getContext,notify){
@@ -50,7 +50,23 @@ export function createHeldItems(scene,getContext,notify){
     const light=new T.SpotLight(0xffe5b5,0,15,.32,.50,1.65);
     scene.add(light,light.target);lights.push(light);
   }
-  addLight();addLight();
+  // Keep the light count constant across toggles so the renderer can reuse material programs.
+  const lightBudget=6;
+  for(let i=0;i<lightBudget;i++)addLight();
+  // Warm both visual programs on the first frame in every render mode.
+  const warm=new T.Group();
+  for(const [geometry,material] of [[lensGeometry,lensMaterial],[beamGeometry,beamMaterial]]){
+    const mesh=new T.Mesh(geometry,material);mesh.scale.setScalar(0);mesh.frustumCulled=false;warm.add(mesh);
+  }
+  scene.add(warm);
+  function prepareLight(mesh){
+    if(lampModels.has(mesh))return lampModels.get(mesh);
+    const extras=new T.Group();
+    const lens=new T.Mesh(lensGeometry,lensMaterial);lens.position.y=.136;
+    const beam=new T.Mesh(beamGeometry,beamMaterial);beam.position.y=.137;
+    extras.visible=false;extras.add(lens,beam);mesh.add(extras);lampModels.set(mesh,extras);
+    return extras;
+  }
   let radios=new Set(),nextRadios=new Set(),micNearby=false,talkNear=false;
   const crumbGeo=new T.DodecahedronGeometry(.009,0);
   const crumbMat=new T.MeshBasicMaterial({color:0xe0b46e});
@@ -127,24 +143,22 @@ export function createHeldItems(scene,getContext,notify){
     talk,finishTalk,bite,
     setMicEnabled(value){micEnabled=value;if(!value)stopMic();},
     stop(){radios.clear();nextRadios.clear();micNearby=talkNear=false;stopMic();},
+    prepareLight,
     beginLights(){lamps.length=0;},
     considerLight(mesh,on,head){
-      let extras=lampModels.get(mesh);
-      if(on&&!extras){
-        extras=new T.Group();
-        const lens=new T.Mesh(lensGeometry,lensMaterial);
-        lens.position.y=.136;
-        const beam=new T.Mesh(beamGeometry,beamMaterial);
-        beam.position.y=.144;
-        extras.add(lens,beam);mesh.add(extras);lampModels.set(mesh,extras);
-      }
-      if(extras)extras.visible=on;
-      if(on&&mesh.visible&&mesh.position.distanceToSquared(head)<34**2)lamps.push(mesh);
+      const extras=prepareLight(mesh);
+      extras.visible=on;
+      if(!on||!mesh.visible)return;
+      const distance=mesh.position.distanceToSquared(head);
+      if(distance>=34**2)return;
+      const index=lamps.findIndex(slot=>slot.distance>distance);
+      if(index>=0)lamps.splice(index,0,{mesh,distance});
+      else if(lamps.length<lightBudget)lamps.push({mesh,distance});
+      if(lamps.length>lightBudget)lamps.pop();
     },
     update(dt){
-      if(lamps.length>lights.length)while(lights.length<lamps.length)addLight();
       for(let i=0;i<lights.length;i++){
-        const light=lights[i],lamp=lamps[i];
+        const light=lights[i],lamp=lamps[i]?.mesh;
         light.intensity=lamp?25:0;
         if(lamp){
           aim.set(0,1,0).applyQuaternion(lamp.quaternion);
