@@ -1,3 +1,4 @@
+import {createPhoneUI} from './phone-ui.js';
 import {createHeldItems,itemScale,itemShape} from './held-items.js';
 import {createMapAudio} from './map-audio.js';
 import {createScreenBloom} from './hdr-bloom.js';
@@ -85,7 +86,8 @@ try{
   if(Number.isInteger(saved)&&saved>=1&&saved<=10)settings.stepVolume=saved;
 }catch{}
 const steps=createStepSound(),mapAudio=createMapAudio(()=>steps.context);
-const heldItems=createHeldItems(scene,()=>steps.context,showGameHint,hand=>pulseHand(hand,.19,24));
+const heldItems=createHeldItems(scene,()=>steps.context,showGameHint);
+const phoneUI=createPhoneUI(scene,renderer,showGameHint,hand=>pulseHand(hand,.19,24),sendPhonePhoto,togglePhonePower);
 const micOption=document.querySelector('#radio-monitor');
 micOption?.addEventListener('change',()=>heldItems.setMicEnabled(micOption.checked));
 document.addEventListener('visibilitychange',()=>{if(document.hidden)heldItems.stop();});
@@ -290,7 +292,7 @@ function releaseAll(){
 }
 function clearObjects(){
   releaseAll();
-  for(const body of objects){scene.remove(body.mesh,body.shadow);if(body.customMaterial)for(const mat of Array.isArray(body.mesh.material)?body.mesh.material:[body.mesh.material])mat.dispose();}
+  for(const body of objects){phoneUI.remove(body.mesh);scene.remove(body.mesh,body.shadow);if(body.customMaterial)for(const mat of Array.isArray(body.mesh.material)?body.mesh.material:[body.mesh.material])mat.dispose();}
   objects.length=0;
   remoteActors.clear();
 }
@@ -305,6 +307,9 @@ spawnSamples();
 function release(hand,launch=true) {
   const object=hand.held;
   if(!object) return;
+  if(object.spec.id==='phone'&&hand.peerId&&hand.hand&&!object.toolHold){
+    object.releasedBy=hand.peerId;object.releasedAt=performance.now();
+  }
   object.owner=null;hand.held=null;object.toolHold=false;
   object.velocity.multiplyScalar(launch? .55+settings.throw*.12:0).clampLength(0,23);
   if(launch) object.angular.clampLength(0,24); else object.angular.set(0,0,0);
@@ -826,6 +831,7 @@ maps=connectMaps({scene,arena,boot,onReset:angle=>{
 });
 const spectator=addSpectator({scene,localColor:avatarColor,currentMap:()=>maps.signature||'arena-r25-'+arena.hillSeed,
   seedArena:seed=>arena.setHillSeed(seed),
+  acceptPhoto:receivePhonePhoto,onReplicaRemove:mesh=>phoneUI.remove(mesh),
   onRoomMap:(value,expected,active,progress,signal)=>maps.loadRoomMap(value,candidate=>{
     const signature=candidate?'custom-'+mapCode(JSON.stringify(candidate)):'arena-r25-'+arena.hillSeed;
     return active()&&mapCode(signature)===expected;
@@ -1144,7 +1150,7 @@ function manipulateBody(body,mode,actor,heldAt){
   if(!body)return;
   if(mode===3&&!body.protected){
     if(body.owner)release(body.owner,false);
-    scene.remove(body.mesh,body.shadow);
+    phoneUI.remove(body.mesh);scene.remove(body.mesh,body.shadow);
     if(body.customMaterial)for(const mat of Array.isArray(body.mesh.material)?body.mesh.material:[body.mesh.material])mat.dispose();
     objects.splice(objects.indexOf(body),1);
   }else if(body.owner)return;
@@ -1965,7 +1971,27 @@ function mouthPosition(headPosition,rotation){
   itemForward.set(0,-.13,-.085).applyQuaternion(rotation);
   return mouth.copy(headPosition).add(itemForward);
 }
+function sendPhonePhoto(mesh,source){
+  const body=objects.find(object=>object.mesh===mesh);
+  const id=body?.netId??mesh.userData.netId;
+  if(id)spectator.publishPhoto(id,source);
+}
+function togglePhonePower(mesh){
+  const body=objects.find(object=>object.mesh===mesh);
+  if(body)applyItemAction(body,3,worldHead,performance.now());
+  else if(mesh.userData.netId)spectator.sendAction({type:'item',mode:3,objectId:mesh.userData.netId});
+}
+function receivePhonePhoto(id,peer,source){
+  const body=objects.find(object=>object.netId===id);
+  if(body?.spec.id!=='phone')return false;
+  const owned=body.owner?.peerId===peer.id&&body.owner.hand&&!body.toolHold;
+  const recentlyReleased=!body.owner&&body.releasedBy===peer.id&&performance.now()-body.releasedAt<12_000;
+  if(!owned&&!recentlyReleased)return false;
+  if(source)phoneUI.setPhoto(body.mesh,source);
+  return true;
+}
 function applyItemAction(body,mode,headPosition,time,rotation){
+  if(mode===3&&body.spec.id==='phone'){body.itemState=body.itemState?0:1;return;}
   if(mode===1&&body.spec.id==='flashlight'){
     body.itemState=body.itemState?0:1;
     return;
@@ -1979,7 +2005,6 @@ function applyItemAction(body,mode,headPosition,time,rotation){
   else setItemState(body,(body.itemState??0)+1);
 }
 function updateHeldInteractions(enabled,time){
-  let phone=null,phoneFinger=null,talking=false,radioNear=false;
   if(enabled)for(const hand of hands){
     if(!hand.valid)continue;
     const body=hand.held;
@@ -1988,11 +2013,9 @@ function updateHeldInteractions(enabled,time){
     const spec=body?.spec??objectSpecs[replica?.userData.netType];
     if(!mesh||body?.toolHold||(!body&&hand.replicaTool))continue;
     if(spec?.id==='phone'){
-      phone=mesh;
-      phoneFinger=hands.find(other=>other!==hand&&!other.held&&!other.remoteHeld);
+      phoneUI.touch(mesh,hands.find(other=>other!==hand));
     }else if(spec?.id==='radio'){
-      talking||=hand.trigger;
-      radioNear||=hand.trigger&&mesh.position.distanceToSquared(worldHead)<.45**2;
+      if(hand.trigger)heldItems.talk(mesh,mesh.position.distanceToSquared(worldHead)<.45**2);
     }else if(spec?.id==='bread'){
       const shape=body?.shape??itemShape(spec,settings.preciseHitboxes,mesh.userData.itemState);
       const target=mouthPosition(worldHead,headRotation);
@@ -2002,8 +2025,7 @@ function updateHeldInteractions(enabled,time){
       else if(spectator.sendAction({type:'item',mode:2,objectId:hand.remoteHeld}))heldItems.bite(target);
     }
   }
-  if(phone)heldItems.touchPhone(phone,phoneFinger);else heldItems.clearPhone();
-  heldItems.talk(talking,radioNear);
+  heldItems.finishTalk();
 }
 const cueOffset=new T.Vector3(),cueRight=new T.Vector3(),cueRotation=new T.Quaternion();
 function notifyMapTrigger(event){
@@ -2173,11 +2195,18 @@ renderer.setAnimationLoop((time,frame)=>{
   heldItems.beginLights();
   if(settings.objects){
     if(remoteWorld)spectator.forEachReplica(mesh=>{
-      if(objectSpecs[mesh.userData.netType]?.id==='flashlight'&&mesh.userData.itemState===1)heldItems.considerLight(mesh,worldHead);
+      const spec=objectSpecs[mesh.userData.netType];
+      if(spec?.id==='flashlight')heldItems.considerLight(mesh,mesh.userData.itemState===1,lightView);
+      if(spec?.id==='phone'){
+        const photo=spectator.photo(mesh.userData.netId);
+        if(photo)phoneUI.setPhoto(mesh,photo);
+        phoneUI.refresh(mesh,mesh.userData.itemState!==1);
+      }
       mesh.scale.x=itemScale(objectSpecs[mesh.userData.netType],mesh.userData.itemState);
     });
     else for(const body of objects){
-      if(body.spec.id==='flashlight'&&body.itemState===1)heldItems.considerLight(body.mesh,worldHead);
+      if(body.spec.id==='flashlight')heldItems.considerLight(body.mesh,body.itemState===1,lightView);
+      if(body.spec.id==='phone')phoneUI.refresh(body.mesh,body.itemState!==1);
     }
   }
   heldItems.update(inputDt);
@@ -2222,6 +2251,7 @@ renderer.setAnimationLoop((time,frame)=>{
       }
     }
   }
+  phoneUI.flush();
   updateMirror(time,pose);
   const renderStart=performance.now();
   const bloomProfile=settings.bloom?arena.bloomProfile:null;

@@ -1,7 +1,7 @@
 {
   "name": "gorilla-lab",
   "private": true,
-  "version": "0.52.0",
+  "version": "0.53.0",
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",

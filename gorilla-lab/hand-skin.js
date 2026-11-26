@@ -26,11 +26,11 @@ export const palmCenter = new T.Vector3(0, 0, (palmFront + palmBack) / 2);
 export const palmHalfExtent = new T.Vector3(.047, .027, (palmBack - palmFront) / 2);
 // Each section describes distance, width, then thickness relative to the finger root.
 const fingerSections = [
-  [.19, .96, 1.02], [.43, .89, .90], [.69, .78, .81], [.90, .60, .63],
+  [.12, .79, .78], [.27, .71, .73], [.44, .66, .69], [.62, .61, .65], [.80, .53, .56], [.94, .36, .39],
 ];
 // Each ring runs around the dorsal surface, outer side, then the palm.
-const ringWidth = [-.57, .57, 1, .61, -.61, -1];
-const ringHeight = [1, 1, -.04, -.91, -.91, -.04];
+const ringWidth = [-.5, .5, 1, .5, -.5, -1];
+const ringHeight = [.866, .866, 0, -.866, -.866, 0];
 
 export function createHandSkin(side, material, { openWrist = false } = {}) {
   const reflected = side === 'left' || side === -1;
@@ -164,7 +164,7 @@ export function createHandSkin(side, material, { openWrist = false } = {}) {
         const fraction = distance / length;
         const baseBend = T.MathUtils.smoothstep(fraction, 0, .57);
         const endBend = T.MathUtils.smoothstep(fraction, .38, 1);
-        const angle = (.17 + pressure * .83) * baseBend + (.14 + pressure * .76) * endBend;
+        const angle = (.22 + pressure * 1.32) * baseBend + (.16 + pressure * (Math.PI*5/6-1.70)) * endBend;
         const segmentAngle = (angle + previousAngle) / 2;
         const travel = distance - previousDistance;
         const forward = Math.cos(segmentAngle) * travel;

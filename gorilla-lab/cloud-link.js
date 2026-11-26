@@ -288,7 +288,7 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
     const value=encodeAvatar(pose,avatar,delta,{
       version:protocolVersion,ready:data.ready!==false,actions:pendingActions,actionTarget:pendingActions[0]?.target??0,
       shots:pendingShots,score:data.score,
-      roomSource:role==='vr'||data.roomSource?.startsWith('rtc:')?data.roomSource:null,hinges:role==='vr'?data.hinges:null,
+      roomSource:role==='vr'||(data.roomSource?.startsWith('rtc:')||data.roomSource?.startsWith('photo:'))?data.roomSource:null,hinges:role==='vr'?data.hinges:null,
     });
     lastSend=time;
     if(role==='vr')firstHostSend=Math.min(firstHostSend,time);
@@ -364,7 +364,7 @@ function encodeAction(action){
   }
   if(!Number.isInteger(objectId)||objectId<1||objectId>=100000)return null;
   if(type==='hinge')return '60'+digits(objectId,5);
-  if(type==='item')return [1,2].includes(mode)?'7'+mode+digits(objectId,5):null;
+  if(type==='item')return [1,2,3].includes(mode)?'7'+mode+digits(objectId,5):null;
   if(type==='tool')return Number.isInteger(mode)&&mode>=1&&mode<=7?'2'+mode+digits(objectId,5):null;
   const hand=action.hand??0;
   if((type==='hold'||type==='release')&&[0,1,2].includes(hand))return (type==='hold'?'3':'4')+hand+digits(objectId,5);

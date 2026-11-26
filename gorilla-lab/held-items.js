@@ -33,31 +33,25 @@ export function phoneKeyAt(point){
   return y*3+x;
 }
 
-const phoneLabels=['1','2','3','4','5','6','7','8','9','*','0','#'];
-const phonePlane=new T.PlaneGeometry(.097,.182);
-const touchMarker=new T.RingGeometry(.0055,.008,16);
-function makePhoneDisplay(){
-  const canvas=document.createElement('canvas');
-  canvas.width=256;canvas.height=480;
-  const ctx=canvas.getContext('2d');
-  ctx.fillStyle='#101826';ctx.fillRect(0,0,256,480);
-  ctx.fillStyle='#b4d6f2';ctx.font='bold 20px system-ui';
-  ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('CLAVIER TACTILE',128,33);
-  for(let i=0;i<phoneLabels.length;i++){
-    const x=128+(i%3-1)*79,y=240-(.0475-Math.floor(i/3)*.035)*2637;
-    ctx.fillStyle='#304661';ctx.beginPath();ctx.roundRect(x-32,y-33,64,66,10);ctx.fill();
-    ctx.fillStyle='#fff';ctx.font='bold 28px system-ui';ctx.fillText(phoneLabels[i],x,y);
-  }
-  const map=new T.CanvasTexture(canvas);map.colorSpace=T.SRGBColorSpace;
-  return new T.MeshBasicMaterial({map});
-}
+const lensGeometry=new T.CircleGeometry(.043,24).rotateX(-Math.PI/2);
+const lensMaterial=new T.MeshBasicMaterial({color:0xfff2c9,toneMapped:false});
+const beamGeometry=new T.ConeGeometry(1.24,4,32,1,true).rotateZ(Math.PI).translate(0,2,0);
+const beamMaterial=new T.ShaderMaterial({
+  uniforms:{tint:{value:new T.Color(0xffdda3)}},
+  transparent:true,depthWrite:false,blending:T.AdditiveBlending,side:T.DoubleSide,
+  vertexShader:'varying float along; void main(){along=position.y/4.0;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
+  fragmentShader:'uniform vec3 tint; varying float along; void main(){float alpha=smoothstep(0.0,0.09,along)*pow(max(0.0,1.0-along),2.0)*0.078;gl_FragColor=vec4(tint,alpha);}'
+});
 
-export function createHeldItems(scene,getContext,notify,vibrate){
-  const light=new T.SpotLight(0xffe5b5,0,15,.32,.50,1.65);
-  scene.add(light,light.target);
-  const aim=new T.Vector3(),point=new T.Vector3(),local=new T.Vector3(),inverse=new T.Quaternion();
-  const indices=new WeakMap();
-  let phoneMaterial,ringMaterial,activePhone=null,talkHeld=false,talkNear=false;
+export function createHeldItems(scene,getContext,notify){
+  const lights=[],lamps=[],lampModels=new WeakMap();
+  const aim=new T.Vector3();
+  function addLight(){
+    const light=new T.SpotLight(0xffe5b5,0,15,.32,.50,1.65);
+    scene.add(light,light.target);lights.push(light);
+  }
+  addLight();addLight();
+  let radios=new Set(),nextRadios=new Set(),micNearby=false,talkNear=false;
   const crumbGeo=new T.DodecahedronGeometry(.009,0);
   const crumbMat=new T.MeshBasicMaterial({color:0xe0b46e});
   const crumbs=Array.from({length:24},()=>{
@@ -107,44 +101,18 @@ export function createHeldItems(scene,getContext,notify,vibrate){
     osc.onended=()=>{osc.disconnect();gain.disconnect();};
     osc.start(at);osc.stop(at+duration);
   }
-  function talk(pressed,near){
-    if(pressed!==talkHeld)tone(pressed?1240:710,.10,.045,'square');
-    const capture=pressed&&near;
-    if(capture!==talkNear){
-      if(capture)void startMic();else stopMic();
-    }
-    talkHeld=pressed;talkNear=capture;
+  function talk(mesh,near){
+    nextRadios.add(mesh);
+    micNearby||=near;
+    if(!radios.has(mesh))tone(1240,.10,.045,'square');
   }
-  function clearPhone(){
-    if(activePhone)indices.get(activePhone).screen.visible=indices.get(activePhone).marker.visible=false;
-    activePhone=null;
-  }
-  function touchPhone(mesh,hand){
-    if(activePhone!==mesh)clearPhone();
-    activePhone=mesh;
-    let display=indices.get(mesh);
-    if(!display){
-      const screen=new T.Mesh(phonePlane,phoneMaterial??=makePhoneDisplay());
-      screen.position.z=.0122;
-      const marker=new T.Mesh(touchMarker,ringMaterial??=new T.MeshBasicMaterial({color:0x8bffd2}));
-      marker.position.z=.0132;marker.visible=false;
-      mesh.add(screen,marker);
-      indices.set(mesh,display={screen,marker,key:-1,previousZ:Infinity});
+  function finishTalk(){
+    for(const mesh of radios)if(!nextRadios.has(mesh))tone(710,.10,.045,'square');
+    [radios,nextRadios]=[nextRadios,radios];nextRadios.clear();
+    if(micNearby!==talkNear){
+      if(micNearby)void startMic();else stopMic();
     }
-    display.screen.visible=true;
-    if(!hand?.valid){display.key=-1;display.previousZ=Infinity;return;}
-    hand.skin.indexTip(point);
-    inverse.copy(mesh.quaternion).invert();
-    local.copy(point).sub(mesh.position).applyQuaternion(inverse);
-    const key=phoneKeyAt(local);
-    if(local.z>.026||key!==display.key)display.key=-1;
-    if(key>=0&&display.key<0&&local.z>=.000&&local.z<=.021&&display.previousZ>.017){
-      display.key=key;display.marker.visible=true;
-      display.marker.position.set(-.03+(key%3)*.03,.0475-Math.floor(key/3)*.035,.0132);
-      tone(520+key*46,.07,.035);vibrate(hand);
-    }
-    if(display.key<0)display.marker.visible=false;
-    display.previousZ=local.z;
+    talkNear=micNearby;micNearby=false;
   }
   function bite(position){
     tone(115,.11,.045,'triangle');
@@ -155,22 +123,34 @@ export function createHeldItems(scene,getContext,notify,vibrate){
       crumb.velocity.set((Math.random()-.5)*.85,Math.random()*.65,(Math.random()-.5)*.85);
     }
   }
-  let lamp=null,best=Infinity;
   return {
-    clearPhone,talk,touchPhone,bite,
+    talk,finishTalk,bite,
     setMicEnabled(value){micEnabled=value;if(!value)stopMic();},
-    stop(){clearPhone();talkHeld=talkNear=false;stopMic();},
-    beginLights(){lamp=null;best=Infinity;},
-    considerLight(mesh,head){
-      const distance=mesh.position.distanceToSquared(head);
-      if(mesh.visible&&distance<best&&distance<34**2){lamp=mesh;best=distance;}
+    stop(){radios.clear();nextRadios.clear();micNearby=talkNear=false;stopMic();},
+    beginLights(){lamps.length=0;},
+    considerLight(mesh,on,head){
+      let extras=lampModels.get(mesh);
+      if(on&&!extras){
+        extras=new T.Group();
+        const lens=new T.Mesh(lensGeometry,lensMaterial);
+        lens.position.y=.136;
+        const beam=new T.Mesh(beamGeometry,beamMaterial);
+        beam.position.y=.144;
+        extras.add(lens,beam);mesh.add(extras);lampModels.set(mesh,extras);
+      }
+      if(extras)extras.visible=on;
+      if(on&&mesh.visible&&mesh.position.distanceToSquared(head)<34**2)lamps.push(mesh);
     },
     update(dt){
-      light.intensity=lamp?25:0;
-      if(lamp){
-        aim.set(0,1,0).applyQuaternion(lamp.quaternion);
-        light.position.copy(lamp.position).addScaledVector(aim,.14);
-        light.target.position.copy(light.position).add(aim);
+      if(lamps.length>lights.length)while(lights.length<lamps.length)addLight();
+      for(let i=0;i<lights.length;i++){
+        const light=lights[i],lamp=lamps[i];
+        light.intensity=lamp?25:0;
+        if(lamp){
+          aim.set(0,1,0).applyQuaternion(lamp.quaternion);
+          light.position.copy(lamp.position).addScaledVector(aim,.14);
+          light.target.position.copy(light.position).add(aim);
+        }
       }
       for(const crumb of crumbs)if(crumb.life>0){
         crumb.life-=dt;crumb.mesh.visible=crumb.life>0;

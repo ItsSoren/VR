@@ -329,3 +329,65 @@ test('the phone only responds inside physical key areas and a bite shrinks its c
   const chewed=itemShape({id:'bread',shape},true,2);
   assert.ok(Math.abs(Math.max(...chewed.vertices.map(p=>p.x))-.14)<1e-6);
 });
+
+test('each lit torch has a beam and adds a separate dynamic light',async()=>{
+  const {Scene,Object3D}=await import('three');
+  const {createHeldItems}=await import('../gorilla-lab/held-items.js');
+  const scene=new Scene(),items=createHeldItems(scene,()=>null,assert.fail);
+  const lamps=Array.from({length:4},()=>new Object3D());
+  items.beginLights();
+  for(const lamp of lamps)items.considerLight(lamp,true,new Vector3());
+  items.update(.016);
+  assert.equal(scene.children.filter(light=>light.isSpotLight&&light.intensity>0).length,4);
+  for(const lamp of lamps)assert.equal(lamp.children[0].children.length,2);
+  items.beginLights();items.considerLight(lamps[0],false,new Vector3());
+  items.considerLight(lamps[1],true,new Vector3());items.update(.016);
+  assert.equal(scene.children.filter(light=>light.isSpotLight&&light.intensity>0).length,1);
+  assert.equal(lamps[0].children[0].visible,false);
+});
+
+test('phone photos reassemble out of order and remain associated with their object',async()=>{
+  const {createPhoneShare,splitPhoto}=await import('../gorilla-lab/phone-share.js');
+  const bytes=new Uint8Array(4420);
+  bytes.set(new TextEncoder().encode('RIFF0000WEBPVP8 '));
+  bytes.set([0x9d,1,0x2a,240,0,150,0],23);
+  const source=Buffer.from(bytes).toString('base64');
+  const parts=splitPhoto(19,'abcdef123456',source);
+  assert.equal(parts.length,3);
+  const host=createPhoneShare();
+  for(const part of parts)assert.equal(host.receive(part,5,0,()=>false),null);
+  let result;
+  for(const part of parts.toReversed())result=host.receive(part,5,1,id=>id===19);
+  assert.deepEqual(result,{id:19,revision:'abcdef123456',source});
+  assert.ok(host.publish(result.id,result.source,1));
+  assert.equal(host.get(19),source);
+  assert.equal(host.get(20),undefined);
+  assert.ok(host.frame(2).startsWith('photo:19:'));
+  host.sent(2);
+  assert.equal(host.frame(102),null);
+  bytes[27]=1;
+  assert.deepEqual(splitPhoto(19,'abcdef123456',Buffer.from(bytes).toString('base64')),[]);
+});
+
+test('the hand rig retains thickness at the wrist when the controller rolls and bends',async()=>{
+  const {MeshBasicMaterial}=await import('three');
+  const {createHandSkin}=await import('../gorilla-lab/hand-skin.js');
+  const {createBodySkin}=await import('../gorilla-lab/body-skin.js');
+  const material=new MeshBasicMaterial();
+  const skins=['left','right'].map(side=>createHandSkin(side,material,{openWrist:true}));
+  const rig=createBodySkin(material,skins.map(s=>({geometry:s.mesh.geometry,wristIndices:s.wristIndices})));
+  for(const pitch of [-Math.PI/2,0,Math.PI/2])for(const roll of [-Math.PI/2,0,Math.PI/2]){
+    const hands=skins.map((s,i)=>{
+      s.pose([1,1,1]);
+      return {position:new Vector3(i?.42:-.42,.02,-.44),quaternion:new Quaternion().setFromEuler(new Euler(pitch,0,roll))};
+    });
+    rig.pose(hands,.48,.87,.71,true);
+    const vertices=rig.mesh.geometry.attributes.position;
+    for(const ring of [108,114,120]){
+      const a=new Vector3().fromBufferAttribute(vertices,ring);
+      const b=new Vector3().fromBufferAttribute(vertices,ring+3);
+      assert.ok(a.distanceTo(b)>.025);
+    }
+    assert.ok(vertices.array.every(Number.isFinite));
+  }
+});

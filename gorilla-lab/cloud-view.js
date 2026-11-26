@@ -4,6 +4,7 @@ import {createHandSkin} from './hand-skin.js';
 import {createBodySkin} from './body-skin.js';
 import {createBlasterModel} from './arcade-blaster.js';
 import {createToolVisual} from './tool-visual.js';
+import {createPhoneShare} from './phone-share.js';
 import {createCloudClient,mapCode,roomCode,createObjectFeed,publicRooms,maxRoomSourceLength} from './cloud-link.js';
 
 import {createDirectMapSession,decodeMapSignal} from './direct-map.js';
@@ -118,7 +119,7 @@ function disposeArt(root){
   for(const material of materials)material?.dispose();
 }
 
-export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,applyLight,onAction,onShot,onStatus,onRoomMap,onRoomCore,onRoomImage,roomMapIdentity,restoreRoomMap,exportRoomMap,roomMapSource,hingeSnapshot,applyHinges}){
+export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,applyLight,onAction,onShot,onStatus,onRoomMap,onRoomCore,onRoomImage,roomMapIdentity,restoreRoomMap,exportRoomMap,roomMapSource,hingeSnapshot,applyHinges,acceptPhoto,onReplicaRemove}){
   const peers=new Map(),replicas=new Map(),feed=createObjectFeed();
   function removePeer(id,entry){
     directUploads.get(id)?.close();
@@ -148,6 +149,8 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
     scene.remove(r.mesh);
     for(const material of Array.isArray(r.mesh.material)?r.mesh.material:[r.mesh.material])material?.dispose();
     replicas.delete(id);
+    onReplicaRemove?.(r.mesh);
+    phoneShare.forget(id);
   }
   function clearReplicas(){
     for(const id of replicas.keys())removeReplica(id);
@@ -265,6 +268,8 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
   }
   function cycleCamera(){setCamera((cameraMode+1)%cameraModes.length);}
   modeButton.onclick=cycleCamera;
+  const phoneShare=createPhoneShare();
+  let photoScope='';
   const client=createCloudClient({
     onStatus(text){networkCaption=text;status.textContent=text;onStatus?.();},
     onPose(pose){if(client.role!=='vr')takeObjects(pose);},
@@ -277,8 +282,19 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
       let entry=peers.get(pose.id);
       if(!entry){entry={art:null,motion:new T.Vector3(),handMotion:[new T.Vector3(),new T.Vector3()]};peers.set(pose.id,entry);}
       const prior=entry.pose;
-      if(client.role==='vr'&&readyHere(pose)&&(!readyHere(prior)||entry.inactive))feed.requestFull();
-      if(pose.roomSource?.startsWith('rtc:'))receiveDirectSignal(pose);
+      if(client.role==='vr'&&readyHere(pose)&&(!readyHere(prior)||entry.inactive)){
+        feed.requestFull();phoneShare.resend(pose.arrival);
+      }
+      if(pose.roomSource?.startsWith('photo:')){
+        const hosting=client.role==='vr';
+        if(readyHere(pose)&&(hosting?pose.role==='player':pose.id===client.remote?.id)){
+          const photo=phoneShare.receive(pose.roomSource,pose.id,pose.arrival,id=>!hosting||acceptPhoto?.(id,pose));
+          if(photo){
+            if(hosting){if(acceptPhoto?.(photo.id,pose,photo.source))phoneShare.publish(photo.id,photo.source,pose.arrival);}
+            else phoneShare.save(photo.id,photo.source);
+          }
+        }
+      }else if(pose.roomSource?.startsWith('rtc:'))receiveDirectSignal(pose);
       else if(pose.role==='vr'&&pose.roomSource&&!mapPaused){
         let value=pose.roomSource;
         if(value.startsWith('part:')){
@@ -397,7 +413,7 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
   const resumeButton=$('#cloud-map-resume');
   resumeButton.onclick=resumeMapLoad;
   function leave(){
-    stopMapLoad();stopDirectDownload();closeDirectUploads();resumeMapLoad();client.leave();
+    stopMapLoad();stopDirectDownload();closeDirectUploads();resumeMapLoad();client.leave();phoneShare.clear();photoScope='';
     resumeButton.hidden=true;
     downloadProgress=null;transferProgress(null);
     sharedSourceMap=-1;sharedSource=null;directSource=null;sourceAt=signalledAt=-Infinity;
@@ -589,6 +605,8 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
     if(!client.role){clearReplicas();return;}
     const ready=client.role!=='pc'||!inVR,now=performance.now();
     const map=localMap(),host=client.role!=='vr'?client.remote:null;
+    const scope=client.code+':'+map+':'+(host?.id??client.id);
+    if(photoScope!==scope){phoneShare.clear();photoScope=scope;}
     if(roomMapPending&&(host?.id!==roomMapPending.id||host?.map!==roomMapPending.map))stopMapLoad();
     if(directDownload&&(host?.id!==directDownload.id||host?.map!==directDownload.map||host?.map===map&&!directDownload.images))stopDirectDownload();
     if(lastMapAttempt&&(host?.id!==lastMapAttempt.id||host?.map!==lastMapAttempt.map)){
@@ -651,9 +669,12 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
     const signals=hosting?[...directUploads.values()].map(session=>session.signal).filter(Boolean):
       directDownload?.session.signal?[directDownload.session.signal]:[];
     const signal=signals.length&&now-signalledAt>=200?signals[signallingSlot%signals.length]:null;
+    if(hosting&&bodies)phoneShare.retain(new Set(bodies.filter(body=>body.spec?.id==='phone').map(body=>body.netId)));
+    const photo=!signal&&!share?phoneShare.frame(now):null;
     const sent=client.tick({x:position.x,y:position.y,z:position.z,yaw,map,ready:ready&&!mapPaused,avatar:ready&&client.role!=='pc'?avatar:null,
-      roomSource:signal??(share?(mapFragments?.[fragmentIndex]??sharedSource):null),hinges:hosting?hingeSnapshot?.():null,
+      roomSource:signal??photo??(share?(mapFragments?.[fragmentIndex]??sharedSource):null),hinges:hosting?hingeSnapshot?.():null,
       objectFeed:hosting&&bodies?t=>feed.capture(t,bodies,true):null});
+    if(photo&&sent)phoneShare.sent(now);
     if(signal&&sent){signalledAt=now;signallingSlot++;}
     else if(share&&sent){
       sourceAt=now;
@@ -677,6 +698,8 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
     get role(){return client.role;},get connected(){return readyHere(client.remote)&&hasInitialWorld;},get guestActive(){return guestActive();},
     get remoteSpectator(){return client.peers.find(p=>p.role==='pc'&&readyHere(p))??null;},
     get remoteLight(){return replicaLight===-1?null:replicaLight;},get replicaCount(){return replicas.size;},
+    publishPhoto(id,source){return !!client.role&&phoneShare.publish(id,source,performance.now());},
+    photo(id){return phoneShare.get(id);},
     replica(id){return replicas.get(id)?.mesh??null;},
     forEachReplica(fn){for(const r of replicas.values())if(r.mesh.visible)fn(r.mesh);}};
 }

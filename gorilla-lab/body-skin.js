@@ -36,7 +36,7 @@ export function createBodySkin(material,handMeshes){
   const arms=handMeshes.map(({geometry,wristIndices},i)=>{
     const col=i===0?6:0;
     const socket=[at(4,col),at(4,col+1),at(3,col+1),at(2,col+1),at(2,col),at(3,col)];
-    const rings=[socket,...Array.from({length:5},()=>Array.from({length:6},()=>next++))];
+    const rings=[socket,...Array.from({length:7},()=>Array.from({length:6},()=>next++))];
     const wrist=rings.at(-1);
     const remap=new Array(geometry.attributes.position.count);
     wristIndices.forEach((index,j)=>{remap[index]=wrist[j];});
@@ -64,6 +64,7 @@ export function createBodySkin(material,handMeshes){
   const armFrame=new T.Quaternion(),forearmFrame=new T.Quaternion(),targetFrame=new T.Quaternion();
   const blendFrame=new T.Quaternion(),wristTwist=new T.Quaternion(),partialTwist=new T.Quaternion();
   const forward=new T.Vector3(0,0,-1);
+  const wristDirection=new T.Vector3(),wristControl=new T.Vector3(),rimCenter=new T.Vector3();
   const restHand=new T.Quaternion().setFromEuler(new T.Euler(-1.42,0,0));
   const lengths=[.22,.64,.99,.52];
   const widths=[.105,.091,.065,.061];
@@ -89,7 +90,8 @@ export function createBodySkin(material,handMeshes){
       for(const joint of jointCenters)wrist.add(rest.fromBufferAttribute(source,joint));
       restingWrist.set(base.x+arm.sign*.05*width,base.y-.43*width,base.z-.04*width);
       targetFrame.copy(hand?.quaternion??restHand);
-      wrist.multiplyScalar(1/6).applyQuaternion(targetFrame).add(hand?.position??restingWrist);
+      rimCenter.copy(wrist).multiplyScalar(1/6);
+      wrist.copy(rimCenter).applyQuaternion(targetFrame).add(hand?.position??restingWrist);
       reach.subVectors(wrist,base);
       const distance=reach.length();
       tangent.copy(reach);
@@ -119,14 +121,27 @@ export function createBodySkin(material,handMeshes){
       const twistLength=Math.hypot(wristTwist.z,wristTwist.w);
       if(twistLength>.07)wristTwist.set(0,0,wristTwist.z/twistLength,wristTwist.w/twistLength);
       else wristTwist.identity();
-      for(let j=0;j<4;j++){
-        const lower=j===3;
-        center.lerpVectors(lower?elbow:base,lower?wrist:elbow,lengths[j]);
+      const forearmLength=wrist.distanceTo(elbow);
+      wristDirection.copy(forward).applyQuaternion(targetFrame);
+      wristControl.copy(wrist).addScaledVector(wristDirection,-Math.min(.066,forearmLength*.28));
+      for(let j=0;j<6;j++){
+        const lower=j>=3;
+        if(j<4)center.lerpVectors(lower?elbow:base,lower?wrist:elbow,lengths[j]);
+        else {
+          const t=j===4?.78:.91, u=1-t;
+          center.copy(elbow).multiplyScalar(u*u).addScaledVector(wristControl,2*u*t).addScaledVector(wrist,t*t);
+        }
         blendFrame.copy(armFrame).slerp(forearmFrame,lower?1:j*.24);
         blendFrame.multiply(partialTwist.identity().slerp(wristTwist,lower?.84:j*.13));
+        if(j>=4)blendFrame.slerp(targetFrame,j===4?.52:.85);
         for(let k=0;k<6;k++){
-          const ray=jointRays[k],radius=widths[j]*width;
-          point.set(ray[0]*radius,ray[1]*radius*.84,0).applyQuaternion(blendFrame).add(center);
+          if(j>=4){
+            point.fromBufferAttribute(source,jointCenters[k]).sub(rimCenter).multiplyScalar(j===4?1.4:1.15);
+          }else {
+            const ray=jointRays[k],radius=widths[j]*width;
+            point.set(ray[0]*radius,ray[1]*radius*.84,0);
+          }
+          point.applyQuaternion(blendFrame).add(center);
           coords.setXYZ(arm.rings[j+1][k],point.x,point.y,point.z);
         }
       }
