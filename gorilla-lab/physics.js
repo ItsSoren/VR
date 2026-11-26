@@ -331,11 +331,13 @@ function thinBoxCrossing(from,to,box,out,hitNormal){
   out.lerpVectors(from,to,enter).addScaledVector(hitNormal,.001);
   return true;
 }
-function thinPalmCrossing(from,to,field,out,hitNormal){
-  if(Math.max(from.x,to.x)+palmHull.radius<field.xMin||Math.min(from.x,to.x)-palmHull.radius>field.xMax||
-      Math.max(from.z,to.z)+palmHull.radius<field.zMin||Math.min(from.z,to.z)-palmHull.radius>field.zMax)return false;
+function thinPalmCrossing(from,to,field,out,hitNormal,offsetCount){
+  const radius=palmBody.radius;
+  if(Math.max(from.x,to.x)+radius<field.xMin||Math.min(from.x,to.x)-radius>field.xMax||
+      Math.max(from.z,to.z)+radius<field.zMin||Math.min(from.z,to.z)-radius>field.zMax)return false;
   let first=Infinity,side=1;
-  for(const offset of palmOffsets){
+  for(let i=0;i<offsetCount;i++){
+    const offset=palmOffsets[i];
     const x0=from.x+offset.x,z0=from.z+offset.z,x1=to.x+offset.x,z1=to.z+offset.z;
     let enter=0,exit=1;
     const dx=x1-x0,dz=z1-z0;
@@ -375,10 +377,15 @@ function thinPalmCrossing(from,to,field,out,hitNormal){
   out.addScaledVector(hitNormal,.0075);
   return true;
 }
-export function palmContact(from,to,rotation,boxes,out,hitNormal){
+const sphereDirections=[new T.Vector3(1,0,0),new T.Vector3(-1,0,0),new T.Vector3(0,1,0),
+  new T.Vector3(0,-1,0),new T.Vector3(0,0,1),new T.Vector3(0,0,-1)];
+export function palmContact(from,to,rotation,boxes,out,hitNormal,shape=palmHull,previousRotation=rotation){
   const distance=from.distanceTo(to);
-  const steps=Math.min(48,Math.max(1,Math.ceil(distance/.021)));
-  const r=palmHull.radius;
+  const r=shape.radius;
+  const travel=distance+previousRotation.angleTo(rotation)*r;
+  const steps=Math.min(48,Math.max(1,Math.ceil(travel/.021)));
+  palmBody.shape=shape;
+  palmBody.radius=r;
   sweepCandidates.length=0;
   for(const box of boxes){
     const b=boundsFor(box);
@@ -387,22 +394,28 @@ export function palmContact(from,to,rotation,boxes,out,hitNormal){
       ||Math.max(from.z,to.z)+r<b.minZ||Math.min(from.z,to.z)-r>b.maxZ))continue;
     sweepCandidates.push(box);
   }
-  palmBody.mesh.quaternion.copy(rotation);
   const center=palmBody.mesh.position;
-  if(sweepCandidates.some(box=>box.heightfield)){
-    for(let i=0;i<palmOffsets.length;i++)palmOffsets[i].copy(palmHull.vertices[i]).applyQuaternion(rotation);
-  }
+  const terrain=sweepCandidates.some(box=>box.heightfield);
+  const vertices=shape.sphereRadius?sphereDirections:shape.vertices;
   palmPrevious.copy(from);
   for(let i=1;i<=steps;i++){
-    center.lerpVectors(from,to,i/steps);
+    const fraction=i/steps;
+    center.lerpVectors(from,to,fraction);
+    palmBody.mesh.quaternion.slerpQuaternions(previousRotation,rotation,fraction);
+    if(terrain)for(let j=0;j<vertices.length;j++){
+      const offset=palmOffsets[j]??=(new T.Vector3());
+      offset.copy(vertices[j]);
+      if(shape.sphereRadius)offset.multiplyScalar(shape.sphereRadius);
+      else offset.applyQuaternion(palmBody.mesh.quaternion);
+    }
     for(const box of sweepCandidates){
       const object=box.objectBody;
       if(object&&(object.owner||center.distanceToSquared(object.mesh.position)>(r+object.radius)**2))continue;
       // Retenir le côté d'où vient la paume, même si un sommet a franchi
       // toute la surface fine entre deux échantillons.
-      if(box.heightfield&&thinPalmCrossing(palmPrevious,center,box,out,hitNormal))return box;
+      if(box.heightfield&&thinPalmCrossing(palmPrevious,center,box,out,hitNormal,vertices.length))return box;
       if(!object&&!box.heightfield&&!box.convex&&Math.min(box.half.x,box.half.y,box.half.z)<=.03&&
-          distance>.02&&thinBoxCrossing(palmPrevious,center,box,out,hitNormal))return box;
+          shape===palmHull&&distance>.02&&thinBoxCrossing(palmPrevious,center,box,out,hitNormal))return box;
       const depth=object?sat(palmBody,object,normal):shapeContact(palmBody,box,normal);
       if(depth>0){
         out.copy(center).addScaledVector(normal,depth+.0005);

@@ -329,7 +329,9 @@ export function encodeObjectState(body,wide=false){
   const flags=(body.owner?1:0)+(body.frozen?2:0)+((body.velocity.lengthSq()<.002&&body.angular.lengthSq()<.004&&!body.owner)?4:0);
   const style=Math.min(4,Math.max(0,(body.materialStyle??-1)+1));
   const color=body.mesh.material?.color?.getHex()??0xffffff;
-  return digits(id,5)+digits(type,2)+flags+style+digits(color,8)+p+q;
+  // Eight decimal digits have space for the original RGB and four item states.
+  const itemState=Math.min(3,Math.max(0,body.itemState|0));
+  return digits(id,5)+digits(type,2)+flags+style+digits(color+itemState*0x1000000,8)+p+q;
 }
 export function objectRemoval(id){
   return digits(id,5)+'99'+'0'.repeat(objectSize-7);
@@ -362,6 +364,7 @@ function encodeAction(action){
   }
   if(!Number.isInteger(objectId)||objectId<1||objectId>=100000)return null;
   if(type==='hinge')return '60'+digits(objectId,5);
+  if(type==='item')return [1,2].includes(mode)?'7'+mode+digits(objectId,5):null;
   if(type==='tool')return Number.isInteger(mode)&&mode>=1&&mode<=7?'2'+mode+digits(objectId,5):null;
   const hand=action.hand??0;
   if((type==='hold'||type==='release')&&[0,1,2].includes(hand))return (type==='hold'?'3':'4')+hand+digits(objectId,5);
@@ -369,12 +372,12 @@ function encodeAction(action){
 }
 function decodeAction(value){
   const kind=value[0],mode=Number(value[1]),objectId=Number(value.slice(2));
-  const type=['','spawn','tool','hold','release','world','hinge'][kind];
+  const type=['','spawn','tool','hold','release','world','hinge','item'][kind];
   if(!type)return null;
   let action={type,objectId};
   if(type==='spawn')action={type,typeId:objectId};
   else if(type==='world')action={type,mode,typeId:objectId};
-  else if(type==='tool')action.mode=mode;
+  else if(type==='tool'||type==='item')action.mode=mode;
   else if(mode)action.hand=mode;
   return encodeAction(action)===value?action:null;
 }
@@ -520,10 +523,12 @@ export function decodeAvatar(value,now){
       const id=Number(value.slice(i,i+5)),type=Number(value.slice(i+5,offset));
       if(!id)return null;
       if(type===(legacy?9:99)){records.push({id,removed:true});continue;}
-      const flags=Number(value[offset]),style=Number(value[offset+1]),color=Number(value.slice(offset+2,offset+10));
+      const flags=Number(value[offset]),style=Number(value[offset+1]);
+      const packedColor=Number(value.slice(offset+2,offset+10));
+      const color=packedColor%0x1000000,itemState=Math.floor(packedColor/0x1000000);
       const position=unpackPoint(value,offset+10,wide),rotation=unpackQuat(value,offset+25);
-      if(type>maxObjectType||flags>7||style>4||color>0xffffff||!position||!rotation)return null;
-      records.push({id,type,flags,style,color,position,rotation});
+      if(type>maxObjectType||flags>7||style>4||itemState>3||!position||!rotation)return null;
+      records.push({id,type,flags,style,color,position,rotation,...(itemState?{itemState}:{})});
     }
     pose.objects={full:mode==='2',records};
   }

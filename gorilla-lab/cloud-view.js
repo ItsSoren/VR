@@ -204,6 +204,7 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
       r.frequent=difference>.06&&difference<.16;
       r.received=pose.arrival;
       r.mesh.userData.netFlags=record.flags;r.mesh.userData.held=Boolean(record.flags&1);
+      r.mesh.userData.itemState=record.itemState??0;
       setReplicaAppearance(r,record);
     }
     if(present)for(const id of replicas.keys())if(!present.has(id))removeReplica(id);

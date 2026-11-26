@@ -1,3 +1,4 @@
+import {createHeldItems,itemScale,itemShape} from './held-items.js';
 import {createMapAudio} from './map-audio.js';
 import {createScreenBloom} from './hdr-bloom.js';
 import {readTurnAxis,consumeSnap} from './snap-turn.js';
@@ -84,6 +85,10 @@ try{
   if(Number.isInteger(saved)&&saved>=1&&saved<=10)settings.stepVolume=saved;
 }catch{}
 const steps=createStepSound(),mapAudio=createMapAudio(()=>steps.context);
+const heldItems=createHeldItems(scene,()=>steps.context,showGameHint,hand=>pulseHand(hand,.19,24));
+const micOption=document.querySelector('#radio-monitor');
+micOption?.addEventListener('change',()=>heldItems.setMicEnabled(micOption.checked));
+document.addEventListener('visibilitychange',()=>{if(document.hidden)heldItems.stop();});
 for(const event of ['pointerdown','keydown'])addEventListener(event,steps.unlock,{passive:true});
 const debugView=createDebugView(scene);
 const diagnostics=createDiagnostics();
@@ -154,7 +159,7 @@ const hands=['left','right'].map(side=>{
   mesh.castShadow=true;mesh.visible=false;scene.add(mesh);
   return {side,mesh,skin,pressure:[0,0,0],bodyPose:{position:new T.Vector3(),quaternion:new T.Quaternion()},
     target:new T.Vector3(),gripPosition:new T.Vector3(),
-    valid:false,surface:null,held:null,grip:false,trigger:false,menu:false,controllerRotation:new T.Quaternion(),aimDirection:new T.Vector3(),supportOffset:new T.Vector3(),hasSupport:false};
+    valid:false,surface:null,held:null,grip:false,trigger:false,menu:false,controllerRotation:new T.Quaternion(),aimDirection:new T.Vector3(),supportOffset:new T.Vector3(),supportRotation:new T.Quaternion(),supportShape:null,hasSupport:false};
 });
 const locomotion=new GorillaLocomotion(T.Vector3,hands,palmContact);
 const bodySkin=createBodySkin(fur,hands.map(h=>({geometry:h.mesh.geometry,wristIndices:h.skin.wristIndices})));
@@ -309,7 +314,7 @@ function resetObjects(){
   if(maps?.exercise==='boules')diagnostics.record('sphere-test-reset',{objects:objects.length});
   releaseAll();
   for(const object of objects){
-    restoreObject(object);object.frozen=Boolean(object.spec.properties?.frozen);
+    restoreObject(object);setItemState(object,0);object.frozen=Boolean(object.spec.properties?.frozen);
   }
 }
 function resetPlayer(){
@@ -394,7 +399,7 @@ function selectPage(index){page=index;vrRowsPage=0;vrRoomDraft=null;hudDirty=tru
 let reportSnapshot=null, capturedVRThisSession=false, rawFrameMs=[], frameSampleIndex=0, diagAt=0, lastVR=null, reportHadVR=false, contactFrames=0, trackedFrames=0, renderStats={};
 const lightSlots=Array.from({length:3},()=>{
   const light=new T.PointLight('#ffffff',0,22,1.60);
-  light.visible=false;scene.add(light);
+  scene.add(light);
   return {light,mesh:null,distance:Infinity};
 });
 let activeLights=lightSlots;
@@ -416,7 +421,6 @@ function updatePropLights(spectating){
   const range=20+lightLevel()*.75;
   for(const {light,mesh} of lightSlots){
     light.distance=range;
-    light.visible=Boolean(mesh);
     light.intensity=mesh?132:0;
     if(mesh){light.position.copy(mesh.position);light.color.copy((Array.isArray(mesh.material)?mesh.material[0]:mesh.material).emissive);}
   }
@@ -583,7 +587,7 @@ function change(key,step){
 function syncHitboxes(){
   for(const object of objects){
     object.precise=settings.preciseHitboxes;
-    object.shape=object.precise?object.spec.shape:(object.spec.lowShape??object.spec.shape);
+    object.shape=itemShape(object.spec,object.precise,object.itemState);
     object.radius=object.shape.radius;
     if(!object.owner)placeObject(object,arena.boxes);
   }
@@ -1014,6 +1018,12 @@ function handleNetworkAction(action,peer){
   }
   const body=objects.find(o=>o.netId===action.objectId);
   if(!body)return;
+  if(action.type==='item'){
+    if(body.owner?.peerId===peer.id&&body.owner.hand&&!body.toolHold){
+      applyItemAction(body,action.mode,peer,performance.now(),peer.avatar?.head);
+    }
+    return;
+  }
   const hand=action.hand??0,actorId=peer.id*3+hand;
   const mode=action.type==='hold'?1:action.mode;
   let actor=remoteActors.get(actorId);
@@ -1421,7 +1431,7 @@ function replicaBlockers(){
   spectator.forEachReplica(mesh=>{
     const type=mesh.userData.netType;
     if(!objectSpecs[type]||objectSpecs[type].properties?.collidable===false||mesh.userData.held)return;
-    const spec=objectSpecs[type],shape=settings.preciseHitboxes?spec.shape:(spec.lowShape??spec.shape);
+    const spec=objectSpecs[type],shape=itemShape(spec,settings.preciseHitboxes,mesh.userData.itemState);
     const collider=mesh.userData.playerCollider??={mesh,blocksPlayer:true,frozen:true};
     collider.shape=shape;collider.radius=shape.radius;collider.precise=settings.preciseHitboxes;
     collider.handCollider??={objectBody:collider,friction:.96,gravity:1};
@@ -1465,6 +1475,7 @@ enter.onclick=async()=>{
   }
 };
 renderer.xr.addEventListener('sessionend',()=>{
+  heldItems.stop();
   cancelSphereBenchmark('session VR terminée');
   if(lastVR&&!capturedVRThisSession)saveReport('VR',true);
   enter.disabled=false;menu=false;vrRoomDraft=null;panel.mesh.visible=false;wrist.mesh.visible=false;
@@ -1539,10 +1550,16 @@ function predictRemoteGrip(actor,position,rotation){
     actor.remoteHeld=0;return;
   }
   heldPosition.copy(actor.replicaOffset).applyQuaternion(rotation).add(position);
-  const sphere=objectSpecs[mesh.userData.netType]?.shape.sphereRadius;
-  if(sphere&&handContact(mesh.position,heldPosition,sphere,activeBoxes,spawnHit,spawnNormal))heldPosition.copy(spawnHit);
+  heldRotation.multiplyQuaternions(rotation,actor.replicaRotation);
+  const spec=objectSpecs[mesh.userData.netType];
+  if(spec?.properties?.collidable!==false&&spec){
+    const shape=itemShape(spec,settings.preciseHitboxes,mesh.userData.itemState);
+    if(palmContact(mesh.position,heldPosition,heldRotation,activeBoxes,spawnHit,spawnNormal,shape,mesh.quaternion)){
+      heldPosition.copy(spawnHit);
+    }
+  }
   mesh.position.copy(heldPosition);
-  mesh.quaternion.multiplyQuaternions(rotation,actor.replicaRotation);
+  mesh.quaternion.copy(heldRotation);
   mesh.updateMatrixWorld(true);
 }
 // WebXR fournit les prises. xr-palm.js calcule leur pose dans l'arène avant
@@ -1582,15 +1599,20 @@ function trackHands(frame,space,dt){
     if(!grip&&h.grip&&!h.held?.toolHold)release(h,!menu);
     h.grip=grip;
     h.hasSupport=false;
+    h.supportShape=null;
     const carried=h.held;
-    if(carried&&!carried.toolHold&&carried.collidable&&carried.spec.supportAxis){
-      heldRotation.multiplyQuaternions(gripRotation,carried.relativeRotation);
-      h.supportOffset.copy(carried.spec.supportAxis).applyQuaternion(heldRotation);
-      candidate.copy(carried.offset).applyQuaternion(gripRotation);
-      const alignment=h.supportOffset.dot(candidate);
-      if(Math.abs(alignment)>.008?alignment<0:h.supportOffset.y>0)h.supportOffset.negate();
-      h.supportOffset.add(candidate);h.hasSupport=true;
+    const replica=!carried&&h.remoteHeld?spectator.replica(h.remoteHeld):null;
+    const remoteSpec=replica&&objectSpecs[replica.userData.netType];
+    if(carried&&!carried.toolHold&&carried.collidable){
+      h.supportShape=carried.shape;
+      h.supportOffset.copy(carried.offset).applyQuaternion(gripRotation);
+      h.supportRotation.multiplyQuaternions(gripRotation,carried.relativeRotation);
+    }else if(remoteSpec&&!h.replicaTool&&remoteSpec.properties?.collidable!==false){
+      h.supportShape=itemShape(remoteSpec,settings.preciseHitboxes,replica.userData.itemState);
+      h.supportOffset.copy(h.replicaOffset).applyQuaternion(h.mesh.quaternion);
+      h.supportRotation.multiplyQuaternions(h.mesh.quaternion,h.replicaRotation);
     }
+    h.hasSupport=Boolean(h.supportShape);
     if(h.held?.toolHold){
       const rayPose=frame.getPose(source.targetRaySpace,space);
       const a=rayPose?.transform.orientation;
@@ -1607,13 +1629,18 @@ function trackHands(frame,space,dt){
     if(h.side==='right'&&cycle&&!h.toolCycle&&settings.toolActive&&!menu)change('toolMode',1);
     h.toolCycle=cycle;
     const trigger=Boolean(source.gamepad?.buttons[0]?.pressed);
+    const heldSpec=carried?.spec??remoteSpec;
+    if(!menu&&heldSpec?.id==='flashlight'&&trigger&&!h.trigger&&!carried?.toolHold&&(carried||!h.replicaTool)){
+      if(carried)applyItemAction(carried,1,worldHead,performance.now());
+      else spectator.sendAction({type:'item',mode:1,objectId:h.remoteHeld});
+    }
     if(menu){
       const click=trigger&&!h.trigger;
       if(click||!pendingAim||!pendingAim.click&&h.side!==panelHand)pendingAim={source,click};
     }
     else if(!menu&&h.side==='right'&&settings.mapEdit)mapLook={source,click:trigger&&!h.trigger};
     else if(!menu&&h.side==='right'&&settings.toolActive)toolLook={source,hand:h,click:trigger&&!h.trigger};
-    else if(!menu&&!settings.blasterActive&&(h.side==='right'||trigger&&!h.trigger))fixtureAim={source,click:trigger&&!h.trigger};
+    else if(!menu&&!settings.blasterActive&&heldSpec?.id!=='flashlight'&&heldSpec?.id!=='radio'&&(h.side==='right'||trigger&&!h.trigger))fixtureAim={source,click:trigger&&!h.trigger};
     h.trigger=trigger;
   }
 }
@@ -1927,6 +1954,57 @@ function captureNetworkAvatar(){
     tool:toolState.mode?toolState:null,gun:blaster.gun,
   };
 }
+const mouth=new T.Vector3(),itemForward=new T.Vector3();
+function setItemState(body,state){
+  body.itemState=state;
+  body.mesh.scale.x=itemScale(body.spec,state);
+  body.shape=itemShape(body.spec,body.precise,state);
+  body.radius=body.shape.radius;
+}
+function mouthPosition(headPosition,rotation){
+  itemForward.set(0,-.13,-.085).applyQuaternion(rotation);
+  return mouth.copy(headPosition).add(itemForward);
+}
+function applyItemAction(body,mode,headPosition,time,rotation){
+  if(mode===1&&body.spec.id==='flashlight'){
+    body.itemState=body.itemState?0:1;
+    return;
+  }
+  if(mode!==2||body.spec.id!=='bread'||!rotation||time<(body.nextBite??0))return;
+  const target=mouthPosition(headPosition,rotation);
+  if(distanceToObject(target,body)>(body.owner?.peerId!==undefined ? .145 : .085))return;
+  body.nextBite=time+420;
+  if(body.owner?.peerId===undefined)heldItems.bite(target);
+  if(body.itemState===3)manipulateBody(body,3,body.owner,0);
+  else setItemState(body,(body.itemState??0)+1);
+}
+function updateHeldInteractions(enabled,time){
+  let phone=null,phoneFinger=null,talking=false,radioNear=false;
+  if(enabled)for(const hand of hands){
+    if(!hand.valid)continue;
+    const body=hand.held;
+    const replica=!body&&hand.remoteHeld?spectator.replica(hand.remoteHeld):null;
+    const mesh=body?.mesh??replica;
+    const spec=body?.spec??objectSpecs[replica?.userData.netType];
+    if(!mesh||body?.toolHold||(!body&&hand.replicaTool))continue;
+    if(spec?.id==='phone'){
+      phone=mesh;
+      phoneFinger=hands.find(other=>other!==hand&&!other.held&&!other.remoteHeld);
+    }else if(spec?.id==='radio'){
+      talking||=hand.trigger;
+      radioNear||=hand.trigger&&mesh.position.distanceToSquared(worldHead)<.45**2;
+    }else if(spec?.id==='bread'){
+      const shape=body?.shape??itemShape(spec,settings.preciseHitboxes,mesh.userData.itemState);
+      const target=mouthPosition(worldHead,headRotation);
+      if(distanceToObject(target,{mesh,shape,radius:shape.radius})>.085||time<(hand.biteAt??0))continue;
+      hand.biteAt=time+540;
+      if(body)applyItemAction(body,2,worldHead,time,headRotation);
+      else if(spectator.sendAction({type:'item',mode:2,objectId:hand.remoteHeld}))heldItems.bite(target);
+    }
+  }
+  if(phone)heldItems.touchPhone(phone,phoneFinger);else heldItems.clearPhone();
+  heldItems.talk(talking,radioNear);
+}
 const cueOffset=new T.Vector3(),cueRight=new T.Vector3(),cueRotation=new T.Quaternion();
 function notifyMapTrigger(event){
   diagnostics.record('map-trigger',event);
@@ -2076,7 +2154,7 @@ renderer.setAnimationLoop((time,frame)=>{
     }
   }
   blaster.update({frame,space,inVR,remoteWorld,dt,yaw,drop,rightHand:hands[1],
-    enabled:settings.blasterActive&&!spectating&&!menu&&!settings.mapEdit,
+    enabled:settings.blasterActive&&!spectating&&!menu&&!settings.mapEdit&&(!inVR||!['flashlight','radio'].includes(hands[1].held?.spec.id??objectSpecs[spectator.replica(hands[1].remoteHeld)?.userData.netType]?.id)),
     flatFiring:blasterTrigger.held||keys.has('KeyJ'),
   });
   spectator.update({inVR,time,dt:inputDt,position:worldHead,yaw:spectating?yaw:bodyYaw,pitch,camera,rig,keys,actions,flat,avatar:captureNetworkAvatar,
@@ -2091,6 +2169,18 @@ renderer.setAnimationLoop((time,frame)=>{
       }
     }
   }
+  updateHeldInteractions(inVR&&!document.hidden&&!menu&&!settings.mapEdit&&settings.objects,time);
+  heldItems.beginLights();
+  if(settings.objects){
+    if(remoteWorld)spectator.forEachReplica(mesh=>{
+      if(objectSpecs[mesh.userData.netType]?.id==='flashlight'&&mesh.userData.itemState===1)heldItems.considerLight(mesh,worldHead);
+      mesh.scale.x=itemScale(objectSpecs[mesh.userData.netType],mesh.userData.itemState);
+    });
+    else for(const body of objects){
+      if(body.spec.id==='flashlight'&&body.itemState===1)heldItems.considerLight(body.mesh,worldHead);
+    }
+  }
+  heldItems.update(inputDt);
   actions.clear();
   const debugStart=performance.now();
   debugView.update({settings,boxes:activeBoxes,bodies:remoteWorld?(settings.debugHitboxes?replicaBlockers():noBodies):objects,hands,locomotion,velocity,

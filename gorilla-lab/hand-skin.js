@@ -201,5 +201,8 @@ export function createHandSkin(side, material, { openWrist = false } = {}) {
   geometry.getAttribute('normal').setUsage(T.DynamicDrawUsage);
   const mesh = new T.Mesh(geometry, material);
   mesh.castShadow = true;
-  return { mesh, pose, wristIndices };
+  function indexTip(out){
+    return out.fromBufferAttribute(position,fingers[0].tip).applyQuaternion(mesh.quaternion).add(mesh.position);
+  }
+  return { mesh, pose, wristIndices, indexTip };
 }

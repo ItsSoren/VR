@@ -280,3 +280,52 @@ test('the direct channel waits for the core to be applied before sending lossles
     else globalThis.RTCPeerConnection=original;
   }
 });
+
+test('a sideways box held by either a local player or an invited player can push off the floor',()=>{
+  const cases=[{held:{}},{remoteHeld:17}];
+  const shape=boxCollider(new Vector3(.22,.09,.12));
+  const floor=floorBox();
+  for(const grip of cases){
+    const hand={...grip,mesh:{quaternion:new Quaternion()},valid:true,target:new Vector3(),
+      hasSupport:true,supportShape:shape,supportOffset:new Vector3(0,-.18,0),supportRotation:new Quaternion()};
+    const locomotion=new GorillaLocomotion(Vector3,[hand],palmContact);
+    const velocity=new Vector3(),movement=new Vector3(),rig=new Vector3(),head=new Vector3();
+    let launch=false;
+    for(let i=0;i<14;i++){
+      hand.target.set(-i*.01,.41-i*.028,0).add(rig);
+      head.set(0,.85,0).add(rig);
+      locomotion.move({head,dt:1/90,gravity:9.81,settings:{arms:5,grip:5,slide:3,jump:5,weight:5},
+        boxes:[floor],velocity,movement,reach:1.2});
+      rig.add(movement);
+      launch||=locomotion.finish(movement,velocity).launched;
+      if(launch)break;
+    }
+    assert.ok(launch && velocity.y>0);
+  }
+});
+
+test('item state shares the object packet without changing its color or record size',async()=>{
+  const {encodeObjectState,encodeAvatar,decodeAvatar,encodePose}=await import('../gorilla-lab/cloud-link.js');
+  const {Color}=await import('three');
+  const stamp=Date.now();
+  const base=encodePose({time:stamp,id:1234567,x:0,y:0,z:0,yaw:0,map:4321},true);
+  const body={netId:12,netType:8,mesh:{position:new Vector3(),quaternion:new Quaternion(),material:{color:new Color(0xbd6140)}},
+    velocity:new Vector3(),angular:new Vector3(),itemState:3};
+  const record=encodeObjectState(body,true);
+  assert.equal(record.length,encodeObjectState({...body,itemState:0},true).length);
+  const avatar={head:new Quaternion()};
+  const packet=encodeAvatar(base,avatar,{full:true,records:[record]},{version:6,ready:true});
+  const decoded=decodeAvatar(packet,stamp).objects.records[0];
+  assert.equal(decoded.itemState,3);
+  assert.equal(decoded.color,0xbd6140);
+});
+
+test('the phone only responds inside physical key areas and a bite shrinks its collision hull',async()=>{
+  const {phoneKeyAt,itemShape}=await import('../gorilla-lab/held-items.js');
+  assert.equal(phoneKeyAt(new Vector3(-.03,.0475,.014)),0);
+  assert.equal(phoneKeyAt(new Vector3(0,-.0575,.014)),10);
+  assert.equal(phoneKeyAt(new Vector3(-.015,.0475,.014)),-1);
+  const shape=boxCollider(new Vector3(.28,.05,.05));
+  const chewed=itemShape({id:'bread',shape},true,2);
+  assert.ok(Math.abs(Math.max(...chewed.vertices.map(p=>p.x))-.14)<1e-6);
+});

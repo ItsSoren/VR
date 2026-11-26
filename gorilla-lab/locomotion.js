@@ -27,6 +27,7 @@ export class GorillaLocomotion {
         previousPalm: new Vector3(), previousTarget: new Vector3(), offset: new Vector3(),
         normal: new Vector3(), localNormal: new Vector3(), localAnchor: new Vector3(),
         inverseRotation: hand.mesh.quaternion.clone(),
+        previousRotation: hand.mesh.quaternion.clone(), supportShape:null, supportId:null,
         released: null, releaseSurface: null, releaseTime: 0, tracked: false, eligible: false,
       };
     });
@@ -75,7 +76,14 @@ export class GorillaLocomotion {
       for (const box of boxes) if (box !== state.releaseSurface) this.castBoxes.push(box);
       boxes = this.castBoxes;
     }
-    return this.palmContact(from, to, state.hand.mesh.quaternion, boxes, this.hit, this.hitNormal);
+    return this.cast(state,from,to,boxes);
+  }
+
+  cast(state,from,to,boxes,rotate=true) {
+    const {hand,supportShape,previousRotation}=state;
+    const rotation=supportShape?hand.supportRotation:hand.mesh.quaternion;
+    return this.palmContact(from,to,rotation,boxes,this.hit,this.hitNormal,supportShape??undefined,
+      rotate&&supportShape&&state.tracked?previousRotation:rotation);
   }
 
   move({head, dt, inputDt=dt, gravity, settings, boxes, velocity, movement, reach}) {
@@ -93,6 +101,16 @@ export class GorillaLocomotion {
 
     for (const state of this.hands) {
       const {hand, normal, offset} = state;
+      const shape=hand.hasSupport?hand.supportShape??null:null;
+      const id=hand.hasSupport?hand.held??(hand.remoteHeld||null):null;
+      if(state.supportShape!==shape||state.supportId!==id){
+        if(state.hadContact) this.clearHistory();
+        state.tracked=state.hadContact=false;
+        state.releaseSurface=hand.surface=null;
+        state.releaseTime=0;
+        state.supportShape=shape;
+        state.supportId=id;
+      }
       const previous = hand.surface;
       state.released = null;
       hand.surface = null;
@@ -107,7 +125,7 @@ export class GorillaLocomotion {
       if (!hand.valid) continue;
       const target = hand.locomotionTarget.subVectors(hand.target, head);
       let reachAssist=0;
-      if(state.eligible&&!hand.held){
+      if(state.eligible&&!hand.held&&!hand.remoteHeld){
         // Map the lowered controller to the longer virtual arm while keeping horizontal reach intact.
         const lower=Math.min(1,Math.max(0,(-target.y-.39)/.33));
         reachAssist=lower*lower*(3-2*lower)*(.02+(settings.arms??5)*.016);
@@ -137,7 +155,7 @@ export class GorillaLocomotion {
         const nearAnchor = difference.dot(normal) <= STICK_DISTANCE &&
           hand.anchor.distanceToSquared(head) <= (reach + STICK_DISTANCE) ** 2 &&
           difference.lengthSq() <= Math.max(.12, reach * .5) ** 2;
-        if (nearAnchor && (!surface || (surface === previous && this.hitNormal.dot(normal) > .7))) {
+        if (nearAnchor && (!surface || (!state.supportShape && surface === previous && this.hitNormal.dot(normal) > .7))) {
           surface = previous;
           this.hit.copy(hand.anchor).add(offset);
           this.hitNormal.copy(normal);
@@ -174,7 +192,7 @@ export class GorillaLocomotion {
         this.from.copy(this.to);
         this.to.addScaledVector(normal, -CONTACT_SKIN * 2.5);
         this.supportBoxes[0] = surface;
-        const support = this.palmContact(this.from, this.to, hand.mesh.quaternion, this.supportBoxes, this.hit, this.hitNormal);
+        const support = this.cast(state,this.from,this.to,this.supportBoxes,false);
         if (support) {
           hand.anchor.copy(this.hit).sub(offset);
           normal.copy(this.hitNormal);
@@ -226,6 +244,7 @@ export class GorillaLocomotion {
       state.tracked = state.eligible;
       state.hadContact = Boolean(hand.surface);
       if (!hand.valid) continue;
+      if(state.supportShape)state.previousRotation.copy(hand.supportRotation);
       previousTarget.copy(hand.locomotionTarget).add(appliedMove);
       previousPalm.copy(previousTarget).add(offset);
       // The next controller pose includes the new virtual crouch offset.
