@@ -8,6 +8,37 @@ import {GorillaLocomotion} from '../gorilla-lab/locomotion.js';
 import {makePiece, parseMap, snapPlacement} from '../gorilla-lab/map-format.js';
 import {decodeRoomMapLink, encodeRoomMapLink} from '../gorilla-lab/room-map-link.js';
 import {floorBox} from './object-fixtures.js';
+import {standingEyeHeight, avatarWidth, vrTorsoStretch} from '../gorilla-lab/player-pose.js';
+
+test('a taller VR player keeps the same short torso and low hand reach',()=>{
+  assert.ok(Math.abs(standingEyeHeight(5)-standingEyeHeight(3)-.176)<1e-9);
+  assert.ok(avatarWidth(5)>avatarWidth(3));
+  assert.ok(vrTorsoStretch<avatarWidth(3)*.59);
+  const hand={mesh:{quaternion:new Quaternion()},valid:true,target:new Vector3()};
+  const locomotion=new GorillaLocomotion(Vector3,[hand],palmContact);
+  function atSize(size,relativeY){
+    const head=new Vector3(0,standingEyeHeight(size),0);
+    hand.target.set(.17,head.y+relativeY,0);
+    locomotion.move({head,dt:1/90,gravity:9.81,settings:{size,arms:5},boxes:[],
+      velocity:new Vector3(),movement:new Vector3(),reach:1.0});
+    return hand.locomotionTarget.clone();
+  }
+  assert.ok(atSize(5,-.76).distanceTo(atSize(3,-.76))<1e-9);
+  assert.ok(Math.abs(atSize(5,0).y-standingEyeHeight(5))<1e-9);
+});
+
+test('remote torso proportions stay tied to standing size through crouching',async()=>{
+  const {encodeAvatar,decodeAvatar,encodePose}=await import('../gorilla-lab/cloud-link.js');
+  const time=Date.now();
+  const pose=encodePose({time,id:1234567,x:0,y:0,z:0,yaw:0,map:4321},true);
+  const avatar={head:new Quaternion(),height:.38,bodySize:5};
+  const v=encodeAvatar(pose,avatar,null,{version:6,ready:true});
+  const vOld=encodeAvatar(pose,{...avatar,bodySize:undefined},null,{version:6,ready:true});
+  assert.equal(v.length,vOld.length);
+  assert.equal(decodeAvatar(v,time).avatar.bodySize,5);
+  assert.equal(decodeAvatar(v,time).avatar.height,.38);
+  assert.equal(decodeAvatar(vOld,time).avatar.bodySize,undefined);
+});
 
 test('lowered controllers gain downward reach without moving the view or a horizontal grip',()=>{
   const hand={mesh:{quaternion:new Quaternion()},valid:true,target:new Vector3()};

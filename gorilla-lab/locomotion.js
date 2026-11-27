@@ -1,6 +1,7 @@
 // Movement model based on Another-Axiom's MIT-licensed GorillaLocomotion.
 // https://github.com/Another-Axiom/GorillaLocomotion/blob/main/Player.cs
 import {palmCenter} from './hand-skin.js';
+import {extraGroundReach} from './player-pose.js';
 
 const HISTORY_SECONDS = .065;
 const RELEASE_SECONDS = .08;
@@ -124,14 +125,19 @@ export class GorillaLocomotion {
       }
       if (!hand.valid) continue;
       const target = hand.locomotionTarget.subVectors(hand.target, head);
-      let reachAssist=0;
+      let reachAssist=0,statureReach=0,handReach=reach;
       if(state.eligible&&!hand.held&&!hand.remoteHeld){
         // Map the lowered controller to the longer virtual arm while keeping horizontal reach intact.
         const lower=Math.min(1,Math.max(0,(-target.y-.39)/.33));
-        reachAssist=lower*lower*(3-2*lower)*(.02+(settings.arms??5)*.016);
+        const lowered=lower*lower*(3-2*lower);
+        // Extend the lowest part of the reach without accelerating an ordinary downstroke.
+        const nearFloor=Math.min(1,Math.max(0,(-target.y-.65)/.11));
+        statureReach=extraGroundReach(settings.size,nearFloor*nearFloor*(3-2*nearFloor));
+        reachAssist=lowered*(.02+(settings.arms??5)*.016)+statureReach;
+        handReach+=statureReach;
         target.y-=reachAssist;
       }
-      target.clampLength(0, reach).add(head);
+      target.clampLength(0, handReach).add(head);
       if(hand.hasSupport)offset.copy(hand.supportOffset);
       else offset.copy(palmCenter).applyQuaternion(hand.mesh.quaternion);
       if (!state.eligible) continue;
@@ -146,6 +152,7 @@ export class GorillaLocomotion {
 
       this.from.copy(target).add(offset);
       if (state.tracked) this.from.copy(state.previousPalm);
+      else this.from.y+=statureReach;
       this.to.copy(target).add(offset);
       if (!priorActive) this.to.add(this.flight);
       this.to.y -= Math.min(CONTACT_SKIN, gravity * dt * dt);
@@ -153,7 +160,7 @@ export class GorillaLocomotion {
       if (priorActive) {
         const difference = this.correction.subVectors(target, hand.anchor);
         const nearAnchor = difference.dot(normal) <= STICK_DISTANCE &&
-          hand.anchor.distanceToSquared(head) <= (reach + STICK_DISTANCE) ** 2 &&
+          hand.anchor.distanceToSquared(head) <= (handReach + STICK_DISTANCE) ** 2 &&
           difference.lengthSq() <= Math.max(.12, reach * .5) ** 2;
         if (nearAnchor && (!surface || (!state.supportShape && surface === previous && this.hitNormal.dot(normal) > .7))) {
           surface = previous;

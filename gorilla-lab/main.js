@@ -6,7 +6,7 @@ import {readTurnAxis,consumeSnap} from './snap-turn.js';
 import {createDiagnostics} from './diagnostics.js';
 import {createSphereBenchmark} from './sphere-benchmark.js';
 import {restoreObject,outsideObjectWorld} from './object-lifecycle.js';
-import {calibratedHeight,torsoBend,removeInwardVelocity,bodyProxyOffset} from './player-pose.js';
+import {calibratedHeight,torsoBend,removeInwardVelocity,bodyProxyOffset,standingEyeHeight,avatarWidth,vrTorsoStretch} from './player-pose.js';
 
 import * as T from 'three';
 import { Reflector } from 'three/addons/objects/Reflector.js';
@@ -381,7 +381,7 @@ function usePreset(name){
 const sections=[
   ['Locomotion',[
     ['Appuis Gorilla','movement'],['Collisions','collisions'],['Grip','grip'],['Glissement','slide'],
-    ['Gravité','gravity'],['Impulsion','jump'],['Poids','weight'],['Taille','size'],['Longueur des bras','arms'],
+    ['Gravité','gravity'],['Impulsion','jump'],['Poids','weight'],['Taille du joueur','size'],['Longueur des bras','arms'],
     ['Vibration des appuis','stepHaptics'],['Intensité vibrations','stepHapticStrength'],['Rotation avec menu','snapWithMenu'],['Retour au départ',resetPlayer],
   ]],
   ['Objets',[
@@ -575,7 +575,10 @@ function change(key,step){
   }
   if(typeof settings[key]==='boolean') settings[key]=!settings[key];
   else settings[key]=T.MathUtils.clamp(settings[key]+step,1,key==='texturePower'?12:key==='toolMode'?7:10);
-  if(key==='size'||key==='arms') for(const hand of hands) {hand.valid=false;hand.surface=null;}
+  if(key==='size'||key==='arms'){
+    locomotion.reset();hasPreviousHead=false;
+    for(const hand of hands)hand.valid=false;
+  }
   if(key==='quality'){settings.auto=false;liveLevel=settings.quality;}
   if(key==='auto'&&!settings.auto) liveLevel=settings.quality;
   if(key==='movement'||key==='collisions') for(const h of hands) h.surface=null;
@@ -1693,7 +1696,7 @@ function confine(position,speed,headroom,margin){
 function character(frame,space,pose,dt,inputDt=dt){
   const inVR=Boolean(pose);
   if(riddenVehicle&&(inVR||spectator.role||!objects.includes(riddenVehicle)||riddenVehicle.owner))riddenVehicle=null;
-  const targetEye=.43+settings.size*.088;
+  const targetEye=standingEyeHeight(settings.size);
   if(inVR){
     const p=pose.transform.position;
     standingHeight=calibratedHeight(standingHeight,p.y);
@@ -1866,8 +1869,8 @@ function character(frame,space,pose,dt,inputDt=dt){
     }
     if(!inVR)h.mesh.visible=false;
   }
-  const bodyScale=.72+settings.size*.05;
-  const torsoScale=bodyScale*(inVR ? .59 : .68);
+  const bodyScale=avatarWidth(settings.size);
+  const torsoScale=inVR?vrTorsoStretch:bodyScale*.68;
   monkey.visible=settings.body&&(inVR||!pcAvatar);
   avatarHead.position.copy(worldHead);
   if(inVR)avatarHead.quaternion.copy(headRotation).premultiply(spin.setFromAxisAngle(up,yaw));
@@ -1956,7 +1959,7 @@ function captureNetworkAvatar(){
   const inVR=renderer.xr.isPresenting;
   return {
     head:avatarHead.quaternion,hands:inVR?hands.map(h=>h.valid?{position:h.mesh.position,quaternion:h.mesh.quaternion,pressure:h.pressure}:null):[null,toolState.mode?desktopHand:null],
-    height:head.y,armSpan:armSegmentLength()*2,light:settings.timeOfDay-1,
+    height:head.y,bodySize:inVR?settings.size:0,armSpan:armSegmentLength()*2,light:settings.timeOfDay-1,
     color:avatarColor,
     tool:toolState.mode?toolState:null,gun:blaster.gun,
   };
@@ -2240,7 +2243,7 @@ renderer.setAnimationLoop((time,frame)=>{
     pcAvatar.root.visible=settings.body&&!inVR&&!spectating;
     if(pcAvatar.root.visible){
       pcAvatar.root.quaternion.setFromAxisAngle(up,bodyYaw);
-      pcAvatar.root.scale.setScalar(.72+settings.size*.05);
+      pcAvatar.root.scale.setScalar(avatarWidth(settings.size));
       pcAvatar.root.position.copy(worldHead).sub(wristReach.copy(pcAvatar.headPivot)
         .multiplyScalar(pcAvatar.root.scale.x).applyQuaternion(pcAvatar.root.quaternion));
       pcAvatar.setBend('head',pitch/(Math.PI/2));

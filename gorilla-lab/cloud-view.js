@@ -1,4 +1,5 @@
 import * as T from 'three';
+import {avatarWidth,avatarSizeFromHeight,vrTorsoStretch} from './player-pose.js';
 import {createAvatarStyle} from './avatar-style.js';
 import {createHandSkin} from './hand-skin.js';
 import {createBodySkin} from './body-skin.js';
@@ -64,8 +65,8 @@ function makeAvatar(localColor){
     head.quaternion.slerp(goal,smooth);
     look.set(0,0,-1).applyQuaternion(head.quaternion);
     const lean=T.MathUtils.smoothstep(-look.y,.28,.94);
-    const scale=T.MathUtils.clamp(.72+(data.height-.43)/.088*.05,.77,1.22);
-    const stretch=scale*.59;
+    const scale=avatarWidth(data.bodySize??avatarSizeFromHeight(data.height));
+    const stretch=data.bodySize?vrTorsoStretch:scale*.59;
     body.rotation.x=-.5*lean;
     body.position.set(0,-.145,.045).applyQuaternion(head.quaternion)
       .sub(handPoint.set(0,.46*stretch,.04*scale).applyQuaternion(body.quaternion));

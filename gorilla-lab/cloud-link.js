@@ -352,7 +352,8 @@ function packAvatar(avatar,wide){
     const pressure=hand?.pressure?.[i]??0;
     return Math.round(Math.max(0,Math.min(1,pressure))*9);
   }).join('')).join('');
-  return head+hands.join('')+height+arms+light+'00'+digits(avatar.color??0,2)+pressures;
+  const bodySize=Number.isInteger(avatar.bodySize)&&avatar.bodySize>=1&&avatar.bodySize<=10?avatar.bodySize:0;
+  return head+hands.join('')+height+arms+light+digits(bodySize,2)+digits(avatar.color??0,2)+pressures;
 }
 function encodeAction(action){
   if(!action)return null;
@@ -422,10 +423,11 @@ function unpackAvatar(value,start,legacy,wide=false){
   }:null);
   if(hands.some(h=>h&&(!h.position||!h.quaternion)))return null;
   const light=Number(value[start+74]);
-  // Two legacy digits are reserved to preserve the following field offsets.
-  if(light>2||Number(value.slice(start+75,start+77))>31)return null;
+  // Reuse the reserved digits for standing stature without changing packet length.
+  const bodySize=Number(value.slice(start+75,start+77));
+  if(light>2||bodySize>31)return null;
   return {head,hands,height:Number(value.slice(start+68,start+71))/100,armSpan:Number(value.slice(start+71,start+74))/100,
-    light,color:legacy?0:Number(value.slice(start+77,start+79))};
+    light,color:legacy?0:Number(value.slice(start+77,start+79)),...(!legacy&&bodySize>=1&&bodySize<=10?{bodySize}:{})};
 }
 export function decodeAvatar(value,now){
   if(typeof value!=='string'||value.length>maxValueLength||!/^[0-9]+$/.test(value))return null;
