@@ -86,7 +86,7 @@ try{
   if(Number.isInteger(saved)&&saved>=1&&saved<=10)settings.stepVolume=saved;
 }catch{}
 const steps=createStepSound(),mapAudio=createMapAudio(()=>steps.context);
-const heldItems=createHeldItems(scene,()=>steps.context,showGameHint);
+const heldItems=createHeldItems(scene,()=>steps.context,showGameHint,renderer);
 const phoneUI=createPhoneUI(scene,renderer,showGameHint,hand=>pulseHand(hand,.19,24),sendPhonePhoto,togglePhonePower,()=>avatarHead);
 const micOption=document.querySelector('#radio-monitor');
 micOption?.addEventListener('change',()=>heldItems.setMicEnabled(micOption.checked));
@@ -117,7 +117,7 @@ const up=new T.Vector3(0,1,0), spin=new T.Quaternion();
 let yaw=0,bodyYaw=0,pitch=0, drop=0, underSurfaceCrouch=0, standingHeight=NaN, snapState={armed:true}, frameTime=0,fps=0,windowFrames=0,windowElapsed=0,qualityTimer=0,lowCount=0,highCount=0,liveLevel=settings.quality,refreshRate=72;
 let vrRowsPage=0;
 let menu=false,panelHand='left',page=new URLSearchParams(location.search).has('room')?5:0,renderPage=0,spawnPage=0,mapPage=0,hudDirty=true,lastDraw=0;
-const blocked=[],handBoxes=[];
+const blocked=[],handBoxes=[],beamObjectBoxes=[];
 let activeBoxes=arena.boxes;
 const geometry=new T.IcosahedronGeometry(1,0);
 const avatarColor=1+Math.floor(Math.random()*(avatarPalettes.length-1));
@@ -339,6 +339,9 @@ function lightLevel(){return useQualityBudget()?Math.min(settings.lightQuality,l
 function applyVisual(){
   const effectiveTexture=settings.texturePower;
   arena.visual(liveLevel,settings.shadows?shadowLevel():0,lightLevel(),settings.reflections,settings.textures,2**(effectiveTexture-1),settings.lightmap);
+  // Flashlight occlusion remains active at every quality level. The arena
+  // still controls whether the sun casts shadows.
+  renderer.shadowMap.enabled=true;
   maps.refreshMaterials?.();
   renderer.shadowMap.needsUpdate=true;
   arena.setTimeOfDay(spectator.remoteLight??settings.timeOfDay-1);
@@ -1696,7 +1699,7 @@ function confine(position,speed,headroom,margin){
 function character(frame,space,pose,dt,inputDt=dt){
   const inVR=Boolean(pose);
   if(riddenVehicle&&(inVR||spectator.role||!objects.includes(riddenVehicle)||riddenVehicle.owner))riddenVehicle=null;
-  const targetEye=standingEyeHeight(settings.size);
+  const targetEye=standingEyeHeight(settings.size,inVR);
   if(inVR){
     const p=pose.transform.position;
     standingHeight=calibratedHeight(standingHeight,p.y);
@@ -2197,9 +2200,16 @@ renderer.setAnimationLoop((time,frame)=>{
   }
   updateHeldInteractions(inVR&&!document.hidden&&!menu&&!settings.mapEdit&&settings.objects,time);
   heldItems.beginLights();
+  beamObjectBoxes.length=0;
   if(settings.objects){
     if(remoteWorld)spectator.forEachReplica(mesh=>{
       const spec=objectSpecs[mesh.userData.netType];
+      if(spec&&spec.properties?.collidable!==false){
+        const shape=itemShape(spec,settings.preciseHitboxes,mesh.userData.itemState);
+        const proxy=mesh.userData.lightCollider??={objectBody:{mesh}};
+        Object.assign(proxy.objectBody,{shape,radius:shape.radius});
+        beamObjectBoxes.push(proxy);
+      }
       if(spec?.id==='flashlight')heldItems.considerLight(mesh,mesh.userData.itemState===1,lightView);
       if(spec?.id==='phone'){
         const photo=spectator.photo(mesh.userData.netId);
@@ -2209,11 +2219,16 @@ renderer.setAnimationLoop((time,frame)=>{
       mesh.scale.x=itemScale(objectSpecs[mesh.userData.netType],mesh.userData.itemState);
     });
     else for(const body of objects){
+      if(body.collidable&&body.mesh.visible&&body.handCollider){
+        const proxy=body.lightCollider??={objectBody:{mesh:body.mesh}};
+        Object.assign(proxy.objectBody,{shape:body.shape,radius:body.radius});
+        beamObjectBoxes.push(proxy);
+      }
       if(body.spec.id==='flashlight')heldItems.considerLight(body.mesh,body.itemState===1,lightView);
       if(body.spec.id==='phone')phoneUI.refresh(body.mesh,body.itemState!==1);
     }
   }
-  heldItems.update(inputDt);
+  heldItems.update(inputDt,arena.boxes,beamObjectBoxes);
   actions.clear();
   const debugStart=performance.now();
   debugView.update({settings,boxes:activeBoxes,bodies:remoteWorld?(settings.debugHitboxes?replicaBlockers():noBodies):objects,hands,locomotion,velocity,

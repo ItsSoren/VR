@@ -415,7 +415,7 @@ export function palmContact(from,to,rotation,boxes,out,hitNormal,shape=palmHull,
       // toute la surface fine entre deux échantillons.
       if(box.heightfield&&thinPalmCrossing(palmPrevious,center,box,out,hitNormal,vertices.length))return box;
       if(!object&&!box.heightfield&&!box.convex&&Math.min(box.half.x,box.half.y,box.half.z)<=.03&&
-          shape===palmHull&&distance>.02&&thinBoxCrossing(palmPrevious,center,box,out,hitNormal))return box;
+          (shape===palmHull||r<.012)&&distance>.02&&thinBoxCrossing(palmPrevious,center,box,out,hitNormal))return box;
       const depth=object?sat(palmBody,object,normal):shapeContact(palmBody,box,normal);
       if(depth>0){
         out.copy(center).addScaledVector(normal,depth+.0005);

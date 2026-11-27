@@ -1,5 +1,5 @@
 import * as T from 'three';
-import {colliderFor} from './physics.js';
+import {colliderFor,palmContact,boxCollider} from './physics.js';
 
 const breadScales=[1,.75,.5,.25];
 const breadHulls=new WeakMap();
@@ -43,12 +43,24 @@ const beamMaterial=new T.ShaderMaterial({
   fragmentShader:'uniform vec3 tint; varying float along; varying vec3 viewDirection; varying vec3 surfaceNormal; void main(){float edge=abs(dot(normalize(surfaceNormal),normalize(viewDirection)));float alpha=smoothstep(0.0,0.035,along)*pow(max(0.0,1.0-along),2.4)*pow(edge,1.8)*0.028;gl_FragColor=vec4(tint,alpha);}'
 });
 
-export function createHeldItems(scene,getContext,notify){
+const beamProbe=boxCollider(new T.Vector3(.004,.004,.004));
+export function createHeldItems(scene,getContext,notify,renderer=null){
   const lights=[],lamps=[],lampModels=new WeakMap();
-  const aim=new T.Vector3();
+  const aim=new T.Vector3(),origin=new T.Vector3(),end=new T.Vector3(),hit=new T.Vector3(),normal=new T.Vector3();
+  const beamRotation=new T.Quaternion(),blockers=[];
+  let shadowClock=0;
   function addLight(){
     const light=new T.SpotLight(0xffe5b5,0,15,.32,.50,1.65);
-    scene.add(light,light.target);lights.push(light);
+    light.castShadow=true;
+    light.shadow.mapSize.set(192,192);
+    light.shadow.camera.near=.045;
+    light.shadow.camera.far=15;
+    light.shadow.normalBias=.006;
+    light.shadow.bias=-.00015;
+    light.shadow.autoUpdate=false;
+    light.shadow.needsUpdate=false;
+    const slot={light,mesh:null,refreshAt:0};
+    scene.add(light,light.target);lights.push(slot);
   }
   // Keep the light count constant across toggles so the renderer can reuse material programs.
   const lightBudget=6;
@@ -60,11 +72,12 @@ export function createHeldItems(scene,getContext,notify){
   }
   scene.add(warm);
   function prepareLight(mesh){
-    if(lampModels.has(mesh))return lampModels.get(mesh);
+    if(lampModels.has(mesh))return lampModels.get(mesh).group;
     const extras=new T.Group();
     const lens=new T.Mesh(lensGeometry,lensMaterial);lens.position.y=.136;
     const beam=new T.Mesh(beamGeometry,beamMaterial);beam.position.y=.137;
-    extras.visible=false;extras.add(lens,beam);mesh.add(extras);lampModels.set(mesh,extras);
+    extras.visible=false;extras.add(lens,beam);mesh.add(extras);
+    lampModels.set(mesh,{group:extras,beam,refreshAt:0});
     return extras;
   }
   let radios=new Set(),nextRadios=new Set(),micNearby=false,talkNear=false;
@@ -149,6 +162,7 @@ export function createHeldItems(scene,getContext,notify){
       const extras=prepareLight(mesh);
       extras.visible=on;
       if(!on||!mesh.visible)return;
+      lampModels.get(mesh).beam.visible=false;
       const distance=mesh.position.distanceToSquared(head);
       if(distance>=34**2)return;
       const index=lamps.findIndex(slot=>slot.distance>distance);
@@ -156,15 +170,38 @@ export function createHeldItems(scene,getContext,notify){
       else if(lamps.length<lightBudget)lamps.push({mesh,distance});
       if(lamps.length>lightBudget)lamps.pop();
     },
-    update(dt){
+    update(dt,worldBoxes=[],objectBoxes=[]){
+      shadowClock+=dt;
       for(let i=0;i<lights.length;i++){
-        const light=lights[i],lamp=lamps[i]?.mesh;
-        light.intensity=lamp?25:0;
-        if(lamp){
+        const slot=lights[i],light=slot.light,lamp=lamps[i]?.mesh??null;
+        if(!lamp){
+          light.intensity=0;slot.mesh=null;light.shadow.needsUpdate=false;
+          continue;
+        }
+        // Each active lamp's depth map is refreshed at most every 85 ms.
+        // Keep its pose in sync with the map so stale shadows don't slide across walls.
+        if(slot.mesh!==lamp||shadowClock>=slot.refreshAt){
+          slot.mesh=lamp;slot.refreshAt=shadowClock+.085;
           aim.set(0,1,0).applyQuaternion(lamp.quaternion);
           light.position.copy(lamp.position).addScaledVector(aim,.14);
           light.target.position.copy(light.position).add(aim);
+          light.shadow.needsUpdate=true;
+          if(renderer)renderer.shadowMap.needsUpdate=true;
         }
+        light.intensity=25;
+        const model=lampModels.get(lamp);
+        model.beam.visible=true;
+        if(shadowClock<model.refreshAt)continue;
+        model.refreshAt=shadowClock+.045;
+        aim.set(0,1,0).applyQuaternion(lamp.quaternion);
+        origin.copy(lamp.position).addScaledVector(aim,.145);
+        end.copy(origin).addScaledVector(aim,3.2);
+        blockers.length=0;
+        for(const box of worldBoxes)blockers.push(box);
+        for(const box of objectBoxes)if(box.objectBody.mesh!==lamp)blockers.push(box);
+        const stop=palmContact(origin,end,beamRotation,blockers,hit,normal,beamProbe);
+        const length=stop?Math.max(0,hit.sub(origin).dot(aim)):3.2;
+        model.beam.scale.y=length/3.2;
       }
       for(const crumb of crumbs)if(crumb.life>0){
         crumb.life-=dt;crumb.mesh.visible=crumb.life>0;

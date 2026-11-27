@@ -1,8 +1,8 @@
 // Shared, allocation-free rules for player calibration and collision response.
 const standingEyeBase=.43, sizeStep=.088;
-export const vrTorsoStretch=.43;
-export function standingEyeHeight(size) {
-  return standingEyeBase+sizeStep*size;
+export const vrTorsoStretch=.35;
+export function standingEyeHeight(size,inVR=false) {
+  return standingEyeBase+sizeStep*size-(inVR?.064:0);
 }
 export function avatarWidth(size) {
   return .72+size*.05;

@@ -12,6 +12,7 @@ import {standingEyeHeight, avatarWidth, vrTorsoStretch} from '../gorilla-lab/pla
 
 test('a taller VR player keeps the same short torso and low hand reach',()=>{
   assert.ok(Math.abs(standingEyeHeight(5)-standingEyeHeight(3)-.176)<1e-9);
+  assert.ok(Math.abs(standingEyeHeight(3)-standingEyeHeight(3,true)-.064)<1e-9);
   assert.ok(avatarWidth(5)>avatarWidth(3));
   assert.ok(vrTorsoStretch<avatarWidth(3)*.59);
   const hand={mesh:{quaternion:new Quaternion()},valid:true,target:new Vector3()};
@@ -390,6 +391,31 @@ test('the phone distinguishes camera switching, capture and the narrow home cont
   assert.equal(phoneTap('photos',65,385),null);
   assert.equal(phoneTap('photos',120,359),null);
   assert.equal(phoneTap('photos',120,385),'home');
+});
+
+test('flashlights use a fixed shadow pool and their beam stops at solid walls and props',async()=>{
+  const {Scene}=await import('three');
+  const {createHeldItems}=await import('../gorilla-lab/held-items.js');
+  const scene=new Scene(),renderer={shadowMap:{needsUpdate:false}};
+  const items=createHeldItems(scene,()=>null,assert.fail,renderer);
+  const lamp=new Object3D(),eye=new Vector3();
+  const wall={position:new Vector3(0,.69,0),quaternion:new Quaternion(),half:new Vector3(2,.004,2)};
+  wall.min=wall.half.clone().negate();wall.shape=boxCollider(wall.half);
+  items.beginLights();items.considerLight(lamp,true,eye);items.update(.016,[wall]);
+  const beam=lamp.children[0].children[1];
+  assert.ok(beam.scale.y<.25);
+  const slots=scene.children.filter(light=>light.isSpotLight);
+  assert.equal(slots.length,6);
+  assert.ok(slots.every(light=>light.castShadow));
+  assert.equal(slots.filter(light=>light.shadow.needsUpdate).length,1);
+  assert.equal(renderer.shadowMap.needsUpdate,true);
+  const prop=new Object3D();
+  prop.position.y=1.6;
+  const shape=boxCollider(new Vector3(.2,.1,.2));
+  items.update(.09,[],[{objectBody:{mesh:prop,shape,radius:shape.radius}}]);
+  assert.ok(beam.scale.y>.35&&beam.scale.y<.5);
+  items.update(.09);
+  assert.equal(beam.scale.y,1);
 });
 
 test('phone photos reassemble out of order and remain associated with their object',async()=>{
