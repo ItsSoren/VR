@@ -88,9 +88,42 @@ test('creature gaze follows the head and stops at a thin wall without extra scen
   assert.ok(beams.every(beam=>beam.scale.y===1));
   assert.ok(glows.every(glow=>!glow.visible));
   const source=beams[0].getWorldPosition(new Vector3());
-  assert.ok(beams[0].localToWorld(new Vector3(0,1,0)).z>source.z+.99);
+  assert.ok(beams[0].localToWorld(new Vector3(0,1,0)).z>source.z+.98);
   visual.draw([],1,[wall]);
   assert.equal(scene.children.length,0);
+});
+
+test('creature limbs move slowly and its head can look independently while standing',async()=>{
+  const {Scene}=await import('three');
+  const {createEntityVisuals}=await import('../gorilla-lab/creature-visuals.js');
+  const scene=new Scene(),visual=createEntityVisuals(scene);
+  const pose={id:1,x:0,y:0,z:0,yaw:0,state:0};
+  visual.draw([pose],1/60);
+  const head=scene.getObjectByName('Tête de la créature');
+  const shoulder=scene.getObjectByName('Épaule de la créature');
+  const beam=scene.getObjectByName('Faisceau du regard');
+  const height=head.position.y;
+  let changes=0,previous=0;
+  for(let i=0;i<180;i++){
+    pose.z-=1.55/60;
+    visual.draw([pose],1/60);
+    const swing=shoulder.rotation.x+.13;
+    assert.ok(Math.abs(swing)<=.18);
+    const sign=Math.sign(swing);
+    if(previous&&sign!==previous)changes++;
+    previous=sign;
+  }
+  assert.ok(changes>=2&&changes<=4);
+  const before=head.rotation.y;
+  for(let i=0;i<95;i++)visual.draw([pose],1/60);
+  assert.ok(Math.abs(shoulder.rotation.x+.13)<.002);
+  assert.equal(head.position.y,height);
+  assert.equal(head.parent.rotation.y,0);
+  assert.ok(Math.abs(head.rotation.y-before)>.065);
+  const from=beam.getWorldPosition(new Vector3());
+  const forward=beam.localToWorld(new Vector3(0,1,0)).sub(from).normalize();
+  const look=new Vector3(0,0,-1).applyQuaternion(head.getWorldQuaternion(new Quaternion()));
+  assert.ok(forward.dot(look)>.999);
 });
 
 test('entity exercise survives map export with a bounded route and stable ids',async()=>{

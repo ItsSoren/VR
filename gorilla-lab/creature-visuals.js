@@ -109,7 +109,8 @@ export function createEntityVisuals(scene){
     let geometry=geometryCache.get(look);
     if(!geometry){geometry=geometryFor(look);geometryCache.set(look,geometry);}
     const root=new T.Group();root.name='Créature '+p.id;root.add(new T.Mesh(geometry.torso,bodyMaterial));
-    const head=new T.Group();head.position.set(0,1.14,-.055);head.add(new T.Mesh(geometry.head,bodyMaterial));root.add(head);
+    const head=new T.Group();head.name='Tête de la créature';head.position.set(0,1.14,-.055);
+    head.rotation.order='YXZ';head.add(new T.Mesh(geometry.head,bodyMaterial));root.add(head);
     const eyes=[];
     for(const x of [-.060,.060]){
       const lens=new T.Mesh(lensGeometry,lenses[0]);lens.position.set(x,.023,-.201);lens.scale.z=.58;head.add(lens);
@@ -119,14 +120,15 @@ export function createEntityVisuals(scene){
       eyes.push({lens,emitter,beam,patch});
     }
     const limbs=[-1,1].map(sign=>{
-      const shoulder=new T.Group();shoulder.position.set(sign*.322,.91,.015);root.add(shoulder);
+      const shoulder=new T.Group();shoulder.name='Épaule de la créature';
+      shoulder.position.set(sign*.322,.91,.015);root.add(shoulder);
       shoulder.add(new T.Mesh(geometry.upperArm,bodyMaterial));
       const elbow=new T.Group();elbow.position.y=-.285;elbow.add(new T.Mesh(geometry.forearm,bodyMaterial));shoulder.add(elbow);
       const hip=new T.Group();hip.position.set(sign*.13,.38,.065);hip.add(new T.Mesh(geometry.leg,bodyMaterial));root.add(hip);
       return {sign,shoulder,elbow,hip};
     });
     root.position.set(p.x,p.y,p.z);root.rotation.y=p.yaw;scene.add(root);
-    return {root,head,eyes,limbs,stride:0,nextRay:0};
+    return {root,head,eyes,limbs,stride:0,gait:0,nextRay:0};
   }
   function project({root,head,eyes}){
     root.updateMatrixWorld();
@@ -176,14 +178,24 @@ export function createEntityVisuals(scene){
       }
       root.rotation.y+=turn(root.rotation.y,p.yaw)*alpha;
       const alert=Number(p.state===entityState.chase||p.state===entityState.caught);
-      art.stride+=Math.min(gap,.32)*alpha*12;
-      const walk=Math.min(.44,gap*4);
-      const swing=Math.sin(art.stride)*walk;
-      head.position.y=1.14+Math.cos(art.stride*2)*walk*.038;
+      // Use the displayed travel rather than the incoming snapshot gap. A
+      // late packet or a teleport must not make the limbs cycle faster.
+      const speed=gap<=2.5&&dt>0?gap*alpha/dt:0;
+      art.stride=(art.stride+Math.min(alert?4.6:4,speed*2.8)*dt)%(Math.PI*2);
+      art.gait+=(Math.min(.18,speed*.11)-art.gait)*(1-Math.exp(-dt*5));
+      const swing=Math.sin(art.stride)*art.gait;
+      const scan=time*.82+p.id*.93;
+      const search=p.state===entityState.search;
+      const neckBlend=1-Math.exp(-dt*3.8);
+      const ahead=Math.max(-.16,Math.min(.16,turn(root.rotation.y,p.yaw)));
+      const lookYaw=alert?ahead+.025*Math.sin(scan):(search?.23:.135)*Math.sin(scan);
+      const lookPitch=(search?.055:.034)*Math.sin(scan*.73-.7)-(alert?.028:0);
+      head.rotation.y+=(lookYaw-head.rotation.y)*neckBlend;
+      head.rotation.x+=(lookPitch-head.rotation.x)*neckBlend;
       for(const {sign,shoulder,elbow,hip} of limbs){
-        shoulder.rotation.set(-.14+sign*swing,0,sign*.18);
-        elbow.rotation.x=-.21-Math.abs(swing)*.44;
-        hip.rotation.x=-swing*sign*.82;
+        shoulder.rotation.set(-.13+sign*swing,0,sign*.15);
+        elbow.rotation.x=-.23-Math.max(0,sign*swing)*.28;
+        hip.rotation.x=-swing*sign*.72;
       }
       for(const {lens,beam} of eyes){lens.material=lenses[alert];beam.material=beams[alert];}
       if(time>=art.nextRay){
