@@ -8,6 +8,60 @@ import {GorillaLocomotion} from '../gorilla-lab/locomotion.js';
 import {makePiece, parseMap, snapPlacement} from '../gorilla-lab/map-format.js';
 import {decodeRoomMapLink, encodeRoomMapLink} from '../gorilla-lab/room-map-link.js';
 import {floorBox} from './object-fixtures.js';
+test('six online players share compact authoritative entities and measure relay round trips',async()=>{
+  const {createCloudClient,maxRoomPlayers,roomLatencyBudget}=await import('../gorilla-lab/cloud-link.js');
+  const {createEntityReplicas}=await import('../gorilla-lab/entity-replicas.js');
+  assert.deepEqual([1,2,3,4,5,6].map(roomLatencyBudget),[0,50,100,150,200,250]);
+  const clients=[],links=[],queue=[],sends=[];
+  const epoch=1780000000000;
+  let time=0;
+  class Relay{
+    constructor(){this.readyState=1;this.bufferedAmount=0;links.push(this);}
+    send(raw){
+      if(JSON.parse(raw).method!=='set')return;
+      sends.push({time,from:links.indexOf(this)});
+      for(const link of links)if(link!==this)queue.push({at:time+25,link,raw});
+    }
+    close(){this.readyState=3;}
+  }
+  const replicas=createEntityReplicas();
+  let mapPayload=false;
+  function join(role,index){
+    const client=createCloudClient({adaptive:true,Socket:Relay,now:()=>epoch+time,monotonicNow:()=>time,
+      random:()=>.16+index*.081,onPose(pose){
+        if(index!==1||!pose)return;
+        if(pose.entities)replicas.receive(pose.entities,pose.time,pose.arrival);
+        if(pose.roomSource==='part:fixture')mapPayload=true;
+      }});
+    client.join('TEST57',role);links.at(-1).onopen();clients.push(client);
+  }
+  function advance(end){
+    for(;time<end;time+=25){
+      for(let i=0;i<queue.length;){
+        const msg=queue[i];
+        if(msg.at>time){i++;continue;}
+        queue.splice(i,1);msg.link.onmessage?.({data:msg.raw});
+      }
+      clients.forEach((client,i)=>client.tick({x:i,y:1,z:0,yaw:0,map:8,
+        entities:i===0?[{id:1,x:time/1000,y:0,z:0,yaw:0,state:2}]:[{id:2,x:5,y:0,z:0,yaw:0,state:9}],
+        roomSource:i===0?'part:fixture':null}));
+    }
+  }
+  join('vr',0);advance(1200);
+  for(let i=1;i<=maxRoomPlayers;i++){join('player',i);advance(1200+i*1600);}
+  const {roomTiming}=clients[0].stats;
+  assert.equal(roomTiming.count,6);
+  assert.equal(roomTiming.measuredPeers,5);
+  assert.equal(roomTiming.p95Ms,50);
+  assert.equal(clients.at(-1).state,'capacity');
+  assert.equal(mapPayload,true);
+  const positions=replicas.update(time);
+  assert.equal(positions.length,1);
+  assert.equal(positions[0].state,2);
+  assert.ok(positions[0].x>8);
+  const idle=sends.filter(e=>e.from===1&&e.time>5000);
+  assert.ok(idle.length>2&&idle.slice(1).every((e,i)=>e.time-idle[i].time>=250));
+});
 import {standingEyeHeight, avatarWidth, vrTorsoStretch} from '../gorilla-lab/player-pose.js';
 
 test('a taller VR player keeps the same short torso and low hand reach',()=>{

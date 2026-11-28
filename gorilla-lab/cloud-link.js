@@ -2,7 +2,9 @@
 const socketURL='wss://clouddata.turbowarp.org';
 const projectPrefix='itssoren.github.io/VR/gorilla-lab/';
 const names={vr:'☁ GorillaVR',pc:'☁ GorillaPC'};
-const playerNames=Array.from({length:8},(_,i)=>'☁ GorillaPlayer'+i);
+export const maxRoomPlayers=6, optimalRoomPlayers=4;
+export const roomLatencyBudget=count=>Math.max(0,Math.min(maxRoomPlayers,count)-1)*50;
+const playerNames=Array.from({length:maxRoomPlayers-1},(_,i)=>'☁ GorillaPlayer'+i);
 const publicHost='☁ GorillaHost';
 export const publicRooms=['ARENE1','ARENE2','ARENE3'];
 const roles=new Map([[publicHost,'vr'],[names.vr,'vr'],[names.pc,'pc'],...playerNames.map(name=>[name,'player'])]);
@@ -36,8 +38,9 @@ export function decodePose(value,now=Date.now()){
 
 // Le relais transporte des états et des intentions. L’hôte garde l’autorité sur la physique.
 export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},onAction=()=>{},onShot=()=>{},
-    Socket=globalThis.WebSocket,now=Date.now,monotonicNow=now===Date.now?()=>performance.now():now,random=Math.random}={}){
-  const senders=new Map();
+    adaptive=false,Socket=globalThis.WebSocket,now=Date.now,monotonicNow=now===Date.now?()=>performance.now():now,random=Math.random}={}){
+  const senders=new Map(),sentTimes=new Map();
+  let lastEcho=-Infinity,lastMotion='',lastEntity='',lastEntityAt=-Infinity;
   const clockStart=monotonicNow(),wallStart=now();
   let socket=null,role=null,code='',id=0,channel='',lastSend=-Infinity,remote=null,openedAt=0,startedAt=0;
   let retryAt=Infinity,retries=0,state='offline',localReady=false,localMap=-1;
@@ -85,6 +88,7 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
   function leave(){
     closeSocket();
     role=null;code='';retryAt=Infinity;localReady=false;localMap=-1;pendingActions=[];pendingShots=[];
+    sentTimes.clear();lastEcho=lastEntityAt=-Infinity;lastMotion=lastEntity='';
     disconnectPeers(true);
     status('offline','Hors ligne');
   }
@@ -105,6 +109,8 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
   function receive(peerRole,name,packet,time){
     const data=decodeAvatar(packet.value,null);
     if(!data||data.id===id)return;
+    // A channel has one incumbent. Competing joins wait for a free channel.
+    if(peerRole==='player'&&peerPoses().some(p=>p.channel===name&&p.id!==data.id))return;
     let sender=senders.get(data.id);
     if(!sender){
       if(senders.size>=64)return;
@@ -120,6 +126,18 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
     sender.lastTime=data.time;sender.lastArrival=time;
     const pose={...data,ready:data.ready??true,protocol:data.protocol??(data.ready===undefined?3:4),role:peerRole,channel:name,received:now(),arrival:time};
     const candidate=sender.candidate;
+    if(adaptive)for(const echo of data.echoes??[]){
+      if(echo.id!==id||echo.stamp<=(sender.lastEcho??0))continue;
+      const sent=sentTimes.get(echo.stamp);
+      if(sent===undefined)continue;
+      sender.lastEcho=echo.stamp;
+      const elapsed=time-sent;
+      if(elapsed>=echo.wait&&elapsed<5000){
+        const history=sender.roundTrips??=[];
+        history.push({at:time,ms:Math.max(0,elapsed-echo.wait)});
+        if(history.length>32)history.shift();
+      }
+    }
     // A retained value cannot prove a modern client is still broadcasting. Legacy
     // packets can be used immediately if their timestamp is close to the local clock.
     if(!sender.pose&&(!candidate||candidate.channel!==name||candidate.map!==pose.map||time-candidate.arrival>freshness)&&
@@ -231,6 +249,7 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
       hostProbe=750+id%150;
     }
     actionNumber=shotNumber=0;pendingShots=[];
+    sentTimes.clear();lastEcho=lastEntityAt=-Infinity;lastMotion=lastEntity='';
     networkStats={sent:0,received:0,bytesSent:0,bytesReceived:0,bufferedBytes:0};
     retries=0;retryAt=collisionAt=Infinity;
     if(openSocket())return true;
@@ -273,7 +292,7 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
       else collisionAt=Infinity;
       if(incumbent&&(incumbent.id<id||time-collisionAt>=800)){
         const free=playerNames.find(name=>!active.some(p=>p.channel===name));
-        if(!free){if(state!=='capacity')status('capacity','Salon '+code+' · toutes les places joueur PC / mobile sont occupées.');return false;}
+        if(!free){if(state!=='capacity')status('capacity','Salon '+code+' · salon complet (6 joueurs maximum).');return false;}
         channel=free;collisionAt=Infinity;
       }
     }
@@ -283,20 +302,48 @@ export function createCloudClient({onStatus=()=>{},onPose=()=>{},onPeer=()=>{},o
     if(!pose)return false;
     pendingActions=pendingActions.filter(entry=>entry.expires>=time&&entry.target===remote?.id&&entry.map===data.map);
     pendingShots=pendingShots.filter(s=>s.expires>=time&&s.map===data.map);
-    const delta=networkStats.bufferedBytes===0?data.objectFeed?.(time):null;
     const avatar=typeof data.avatar==='function'?data.avatar():data.avatar;
+    const moving=pose.slice(21)+Number(localReady)+packAvatar(avatar,true)+packTool(avatar?.tool,true)+
+      (packPoint(avatar?.gun?.position,true)??'')+(packQuat(avatar?.gun?.quaternion)??'');
+    if(adaptive&&role==='player'&&state==='open'&&remote?.map===localMap&&
+      !pendingActions.length&&!pendingShots.length&&!data.roomSource&&moving===lastMotion&&time-lastSend<250)return false;
+    const delta=networkStats.bufferedBytes===0?data.objectFeed?.(time):null;
+    const echoes=adaptive&&time-lastEcho>=500?peerPoses().filter(p=>p.role!=='pc'&&p.map===localMap)
+      .map(p=>({id:p.id,stamp:p.time,wait:Math.min(999,Math.round(time-p.arrival))})):[];
+    const entityText=role==='vr'&&data.entities?packEntities(data.entities):null;
+    const entities=entityText!==null&&(entityText!==lastEntity||time-lastEntityAt>=1000)?entityText:null;
+    const source=role==='vr'||data.roomSource?.startsWith('rtc:')||data.roomSource?.startsWith('photo:')?data.roomSource:null;
+    const payload=packOnlineSource(source,echoes,entities);
+    if(payload!==source&&(echoes.length||entities!==null)){
+      if(echoes.length)lastEcho=time;
+      if(entities!==null){lastEntity=entities;lastEntityAt=time;}
+    }
     const value=encodeAvatar(pose,avatar,delta,{
       version:protocolVersion,ready:data.ready!==false,actions:pendingActions,actionTarget:pendingActions[0]?.target??0,
       shots:pendingShots,score:data.score,
-      roomSource:role==='vr'||(data.roomSource?.startsWith('rtc:')||data.roomSource?.startsWith('photo:'))?data.roomSource:null,hinges:role==='vr'?data.hinges:null,
+      roomSource:payload,hinges:role==='vr'?data.hinges:null,
     });
-    lastSend=time;
+    lastSend=time;lastMotion=moving;
+    if(adaptive){
+      sentTimes.set(wallTime,time);
+      if(sentTimes.size>64)sentTimes.delete(sentTimes.keys().next().value);
+    }
     if(role==='vr')firstHostSend=Math.min(firstHostSend,time);
     socket.send(JSON.stringify({method:'set',name:channel,value})+'\n');
     networkStats.sent++;networkStats.bytesSent+=value.length;
     return true;
   }
-  return {join,leave,tick,sendAction,queueShot,get stats(){return {...networkStats,peerTiming:peerTiming()};},get role(){return role;},get id(){return id;},get code(){return code;},get state(){return state;},
+  function roomTiming(){
+    const peers=peerPoses().filter(p=>p.role!=='pc');
+    const count=role?1+peers.length:0;
+    const samples=peers.flatMap(p=>{
+      const values=(senders.get(p.id)?.roundTrips??[]).filter(s=>monotonicNow()-s.at<8000)
+        .map(s=>s.ms).sort((a,b)=>a-b);
+      return values.length?[Math.round(values[Math.ceil(values.length*.95)-1])]:[];
+    });
+    return {count,targetMs:roomLatencyBudget(count),p95Ms:samples.length?Math.max(...samples):null,measuredPeers:samples.length};
+  }
+  return {join,leave,tick,sendAction,queueShot,get stats(){return {...networkStats,peerTiming:peerTiming(),roomTiming:roomTiming()};},get role(){return role;},get id(){return id;},get code(){return code;},get state(){return state;},
     get remote(){return remote;},get peers(){return peerPoses();}};
 }
 
@@ -385,6 +432,46 @@ function decodeAction(value){
 function packTool(tool,wide){
   const p=packPoint(tool?.position,wide),q=packQuat(tool?.quaternion),end=packPoint(tool?.end,wide);
   return p&&q&&end&&Number.isInteger(tool.mode)&&tool.mode>=1&&tool.mode<=7?'1'+tool.mode+p+q+end:'0';
+}
+// Version 6 keeps maps/photos compatible while optional online state uses a tagged envelope.
+function packOnlineSource(source,echoes,entities){
+  if(!echoes.length&&entities===null)return source;
+  const acknowledgements=echoes.slice(0,5).map(e=>digits(e.id,7)+digits(e.stamp,13)+digits(e.wait,3)).join('');
+  const payload='net:'+acknowledgements+';'+(entities===null?'-':entities)+';'+(source??'');
+  return payload.length<=maxRoomSourceLength?payload:source;
+}
+function unpackOnlineSource(pose,source){
+  if(!source.startsWith('net:')){if(source)pose.roomSource=source;return true;}
+  const m=/^net:([0-9]{0,115});(-|[0-9]{0,400});(.*)$/.exec(source);
+  if(!m||m[1].length%23)return false;
+  pose.echoes=[];
+  for(let i=0;i<m[1].length;i+=23)pose.echoes.push({id:Number(m[1].slice(i,i+7)),
+    stamp:Number(m[1].slice(i+7,i+20)),wait:Number(m[1].slice(i+20,i+23))});
+  if(m[2]!=='-'){
+    const entities=unpackEntities(m[2]);
+    if(!entities)return false;
+    pose.entities=entities;
+  }
+  if(m[3])pose.roomSource=m[3];
+  return true;
+}
+function packEntities(entities){
+  return entities.slice(0,16).map(e=>{
+    const p=packPoint(e,true);
+    if(!p||!Number.isInteger(e.id)||e.id<1||e.id>999||!Number.isFinite(e.yaw)||!Number.isInteger(e.state)||e.state<0||e.state>9)return '';
+    const yaw=((e.yaw*180/Math.PI%360)+360)%360;
+    return digits(e.id,3)+p+digits(Math.round(yaw*10)%3600,4)+e.state;
+  }).join('');
+}
+function unpackEntities(value){
+  if(value.length%23||value.length>16*23)return null;
+  const result=[],ids=new Set();
+  for(let i=0;i<value.length;i+=23){
+    const id=Number(value.slice(i,i+3)),point=unpackPoint(value,i+3,true),yaw=Number(value.slice(i+18,i+22));
+    if(!id||!point||yaw>=3600||ids.has(id))return null;
+    ids.add(id);result.push({id,...point,yaw:yaw*Math.PI/1800,state:Number(value[i+22])});
+  }
+  return result;
 }
 function packRoomState(source,hinges){
   const text=typeof source==='string'&&source.length<=maxRoomSourceLength&&/^[!-~]+$/.test(source)?source:'';
@@ -500,7 +587,7 @@ export function decodeAvatar(value,now){
         if(byte<33||byte>126)return null;
         source+=String.fromCharCode(byte);
       }
-      if(source)pose.roomSource=source;
+      if(!unpackOnlineSource(pose,source))return null;
       const count=Number(value.slice(i,i+3));i+=3;
       if(count>maxSyncedHinges||value.length<i+count*9+1)return null;
       pose.hinges=[];
@@ -538,11 +625,11 @@ export function decodeAvatar(value,now){
 }
 // Les petites pièces rapides utilisent aussi le paquet entre deux mises à jour ordinaires.
 const smallObjectRadius=.45, fastObjectSpeed=2.5;
-export function createObjectFeed(){
+export function createObjectFeed({fullInterval=1600,repeatFor=420}={}){
   const previous=new Map(),recent=new Map();
   let slowAt=-Infinity,fullAt=-Infinity;
   function capture(now,bodies,wide=false){
-    const full=now-fullAt>=1600;
+    const full=now-fullAt>=fullInterval;
     const regular=full||now-slowAt>=200;
     if(full)fullAt=now;
     if(regular)slowAt=now;
@@ -560,14 +647,14 @@ export function createObjectFeed(){
       if(!record)continue;
       keep?.add(id);
       const changed=record!==prior?.record;
-      if(changed)recent.set(id,{record,until:now+420});
+      if(changed)recent.set(id,{record,until:now+repeatFor});
       if(full||!regular&&changed)records.push(record);
       if(prior){prior.record=record;prior.fast=fast;}
       else previous.set(id,{record,fast});
     }
     if(regular){
       for(const id of previous.keys())if(!keep.has(id)){
-        recent.set(id,{record:objectRemoval(id),until:now+420});
+        recent.set(id,{record:objectRemoval(id),until:now+repeatFor});
         previous.delete(id);
       }
       // Les répétitions passent à cadence ordinaire, y compris la pose finale et les suppressions.

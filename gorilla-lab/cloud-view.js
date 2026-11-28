@@ -6,7 +6,8 @@ import {createBodySkin} from './body-skin.js';
 import {createBlasterModel} from './arcade-blaster.js';
 import {createToolVisual} from './tool-visual.js';
 import {createPhoneShare} from './phone-share.js';
-import {createCloudClient,mapCode,roomCode,createObjectFeed,publicRooms,maxRoomSourceLength} from './cloud-link.js';
+import {createEntityReplicas} from './entity-replicas.js';
+import {createCloudClient,mapCode,roomCode,createObjectFeed,publicRooms,maxRoomSourceLength,maxRoomPlayers,optimalRoomPlayers} from './cloud-link.js';
 
 import {createDirectMapSession,decodeMapSignal} from './direct-map.js';
 import {splitRoomMap,receiveMapFragment} from './room-map-link.js';
@@ -121,7 +122,8 @@ function disposeArt(root){
 }
 
 export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,applyLight,onAction,onShot,onStatus,onRoomMap,onRoomCore,onRoomImage,roomMapIdentity,restoreRoomMap,exportRoomMap,roomMapSource,hingeSnapshot,applyHinges,acceptPhoto,onReplicaRemove}){
-  const peers=new Map(),replicas=new Map(),feed=createObjectFeed();
+  const peers=new Map(),replicas=new Map(),feed=createObjectFeed({fullInterval:3200});
+  const entityReplicas=createEntityReplicas();
   function removePeer(id,entry){
     directUploads.get(id)?.close();
     directUploads.delete(id);
@@ -155,6 +157,7 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
   }
   function clearReplicas(){
     for(const id of replicas.keys())removeReplica(id);
+    entityReplicas.clear();
     replicaHost=0;replicaMap=-1;hasInitialWorld=false;
     if(replicaLight!==-1){replicaLight=-1;applyLight?.(null);}
   }
@@ -180,6 +183,7 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
     if(!readyHere(pose)){clearReplicas();return;}
     if(replicaHost!==pose.id||replicaMap!==pose.map){clearReplicas();replicaHost=pose.id;replicaMap=pose.map;}
     const initial=!hasInitialWorld;
+    if(pose.entities)entityReplicas.receive(pose.entities,pose.time,pose.arrival);
     if(initial&&!pose.objects?.full)return;
     if(pose.hinges)applyHinges?.(pose.hinges,initial);
     hasInitialWorld=true;
@@ -272,6 +276,7 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
   const phoneShare=createPhoneShare();
   let photoScope='';
   const client=createCloudClient({
+    adaptive:true,
     onStatus(text){networkCaption=text;status.textContent=text;onStatus?.();},
     onPose(pose){if(client.role!=='vr')takeObjects(pose);},
     onPeer(pose,previous){
@@ -591,7 +596,7 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
         const local=readyPeers.filter(readyHere);
         const count=local.filter(p=>p.role==='player').length;
         const watcher=local.some(p=>p.role==='pc');
-        caption=prefix+'tu héberges · '+(count+1)+' joueur'+(count?'s':'');
+        caption=prefix+'tu héberges · '+(count+1)+'/'+maxRoomPlayers+' joueurs';
         if(watcher)caption+=' · spectateur connecté';
         if(readyPeers.some(p=>!readyHere(p)))caption+=sharedSource==='file'?
           ' · exporte la carte et envoie le JSON à tes invités':' · un invité charge la carte';
@@ -601,7 +606,7 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
     else if(waiting)onStatus?.();
   }
   function update(frame){
-    const {inVR,time,dt,position,yaw,camera,rig,keys,avatar,bodies}=frame;
+    const {inVR,time,dt,position,yaw,camera,rig,keys,avatar,bodies,entities}=frame;
     refreshRoomActions();
     if(!client.role){clearReplicas();return;}
     const ready=client.role!=='pc'||!inVR,now=performance.now();
@@ -674,7 +679,8 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
     const photo=!signal&&!share?phoneShare.frame(now):null;
     const sent=client.tick({x:position.x,y:position.y,z:position.z,yaw,map,ready:ready&&!mapPaused,avatar:ready&&client.role!=='pc'?avatar:null,
       roomSource:signal??photo??(share?(mapFragments?.[fragmentIndex]??sharedSource):null),hinges:hosting?hingeSnapshot?.():null,
-      objectFeed:hosting&&bodies?t=>feed.capture(t,bodies,true):null});
+      entities:hosting?entities:null,
+      objectFeed:hosting&&bodies&&client.peers.length?t=>feed.capture(t,bodies,true):null});
     if(photo&&sent)phoneShare.sent(now);
     if(signal&&sent){signalledAt=now;signallingSlot++;}
     else if(share&&sent){
@@ -685,11 +691,16 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
     if(now-telemetryAt>=750){
       telemetryAt=now;
       const output=$('#cloud-telemetry'),timing=showWorld||client.role==='vr'?client.stats.peerTiming:null;
-      if(output)output.textContent=timing?'Intervalle entre paquets · '+timing.intervalMs+' ms en moyenne · '+timing.p95IntervalMs+' ms au 95e percentile · variation '+timing.jitterMs+' ms':'Intervalle entre paquets · en attente de mesures';
+      const room=client.stats.roomTiming;
+      if(output)output.textContent=client.role?
+        room.count+'/'+maxRoomPlayers+' joueurs · recommandé : '+optimalRoomPlayers+
+        ' · Aller-retour p95 : '+(room.count===1?'0 ms (solo)':room.p95Ms===null?'en attente':room.p95Ms+' ms ('+room.measuredPeers+'/'+(room.count-1)+' pairs)')+
+        ' · Cible : '+room.targetMs+' ms'+(timing?' · Intervalle des paquets : '+timing.intervalMs+' ms':''):'Hors ligne';
     }
   }
   function getPeer(id){const pose=peers.get(id)?.pose;return readyHere(pose)?pose:null;}
   return {update,getPeer,connect,leave,cancelMapLoad,resumeMapLoad,
+    entityPoses(now=performance.now()){return entityReplicas.update(now);},
     get downloadCaption(){return progressPanel.hidden?'':progressEta.textContent;},
     get downloadFraction(){return downloadFraction;},
     get canResumeMap(){return !resumeButton.hidden;},
