@@ -1,11 +1,14 @@
 import * as T from 'three';
-import {creatureLooks,maxMapEntities,maxPatrolPoints,normalizeEntities} from './entity-format.js';
+import {createEntityVisuals} from './creature-visuals.js';
+import {creatureLooks,creaturePalette,maxMapEntities,maxPatrolPoints,normalizeEntities} from './entity-format.js';
 
 export function createEntityEditor({container,scene,getMap,getPoint,remember,save,render}){
   const group=new T.Group();
   group.visible=false;scene.add(group);
+  const previewGroup=new T.Group();scene.add(previewGroup);
+  const preview=createEntityVisuals(previewGroup);
+  let previewKey;
   const markerGeometry=new T.ConeGeometry(.30,.58,5);
-  const originMaterial=new T.MeshBasicMaterial({color:'#f4af63',depthTest:false});
   const nodeMaterial=new T.MeshBasicMaterial({color:'#74dadb',depthTest:false});
   const routeMaterial=new T.LineBasicMaterial({color:'#74dadb',depthTest:false});
   let selected=0,visible=false,placement=null;
@@ -24,6 +27,10 @@ export function createEntityEditor({container,scene,getMap,getPoint,remember,sav
     commit(()=>{(map.entities??=[]).push({name:'Sentinelle',...getPoint()});selected=map.entities.length-1;});
   });
   const drop=button('Supprimer',()=>commit(()=>getMap().entities.splice(selected,1)));
+  const resetColors=button('Couleurs du mod\u00e8le',()=>commit(()=>{
+    delete current().fur;
+    delete current().face;
+  }));
   function setPlacement(value){
     placement=placement===value?null:value;
     refresh();render();
@@ -59,6 +66,7 @@ export function createEntityEditor({container,scene,getMap,getPoint,remember,sav
   }
   form.className='fields';
   input('name','Nom','text');input('look','Modèle','look');
+  input('fur','Pelage','color');input('face','Visage','color');form.append(resetColors);
   input('x','X','number',-1024,1024,.05);input('y','Sol Y','number',-2999,2999,.05);
   input('z','Z','number',-1024,1024,.05);input('yaw','Orientation (°)','number',-360,360,1);
   input('speed','Vitesse (m/s)','number',.5,4,.05);input('sight','Vue (m)','number',2,20,.25);
@@ -68,10 +76,16 @@ export function createEntityEditor({container,scene,getMap,getPoint,remember,sav
       group.remove(child);
       if(child.isLine)child.geometry.dispose();
     }
+    const style=d&&visible?JSON.stringify([d.id,d.look,d.fur,d.face]):null;
+    if(style!==previewKey){
+      previewKey=style;
+      preview.set(style?[d]:[]);
+    }
     if(!visible||!d)return;
+    preview.draw([{...d,yaw:T.MathUtils.degToRad(d.yaw),state:0}],0,[],[],false);
     const points=[d,...d.route];
-    for(const [i,p] of points.entries()){
-      const marker=new T.Mesh(markerGeometry,i?nodeMaterial:originMaterial);
+    for(const p of d.route){
+      const marker=new T.Mesh(markerGeometry,nodeMaterial);
       marker.position.set(p.x,p.y+.34,p.z);marker.rotation.z=Math.PI;
       marker.renderOrder=20;group.add(marker);
     }
@@ -95,7 +109,8 @@ export function createEntityEditor({container,scene,getMap,getPoint,remember,sav
     waypoint.setAttribute('aria-pressed',String(placement==='route'));
     form.hidden=!d;route.replaceChildren();
     if(d){
-      for(const [key,element] of Object.entries(fields))element.value=d[key];
+      const palette=creaturePalette(d);
+      for(const [key,element] of Object.entries(fields))element.value=palette[key]??d[key];
       for(const [i,p] of d.route.entries()){
         const row=make('li',p.x.toFixed(2)+' / '+p.y.toFixed(2)+' / '+p.z.toFixed(2)+' ');
         row.append(button('Replacer',()=>commit(()=>Object.assign(p,getPoint()))),
@@ -114,5 +129,6 @@ export function createEntityEditor({container,scene,getMap,getPoint,remember,sav
       if(placement==='spawn'){placement=null;commit(()=>Object.assign(current(),point));}
       else if(placement==='route')commit(()=>current().route.push(point));
     },
-    setVisible(value){visible=value;if(!value)placement=null;group.visible=value;refresh();render();}};
+    setVisible(value){visible=value;if(!value){placement=null;draw(null);}
+      group.visible=value;previewGroup.visible=value;refresh();render();}};
 }

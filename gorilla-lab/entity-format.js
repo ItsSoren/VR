@@ -1,5 +1,14 @@
 export const maxMapEntities=16, maxPatrolPoints=12;
 export const creatureLooks=['sentinelle','vigie'];
+const palettes={
+  sentinelle:{fur:'#302c42',face:'#aaa398'},
+  vigie:{fur:'#333d34',face:'#888974'},
+};
+const hex=value=>typeof value==='string'&&/^#[0-9a-f]{6}$/i.test(value);
+export function creaturePalette(entity){
+  const base=palettes[entity?.look==='vigie'?'vigie':'sentinelle'];
+  return {fur:entity?.fur??base.fur,face:entity?.face??base.face};
+}
 const finite=(n,min,max,fallback)=>Number.isFinite(n)?Math.max(min,Math.min(max,n)):fallback;
 const coordinates=value=>value&&[value.x,value.y,value.z].every(Number.isFinite);
 function point(p){
@@ -14,6 +23,8 @@ export function normalizeEntities(input){
     entities.push({
       id:entities.length+1,name:typeof entry.name==='string'&&entry.name.trim()?entry.name.trim().slice(0,36):'Sentinelle',
       look:creatureLooks.includes(entry.look)?entry.look:creatureLooks[0],...point(entry),
+      ...(hex(entry.fur)?{fur:entry.fur.toLowerCase()}:{}),
+      ...(hex(entry.face)?{face:entry.face.toLowerCase()}:{}),
       yaw:finite(entry.yaw,-360,360,0),
       speed:finite(entry.speed,.5,4,1.65), sight:finite(entry.sight,2,20,10),
       route:(Array.isArray(entry.route)?entry.route:[]).slice(0,maxPatrolPoints).filter(coordinates).map(point),

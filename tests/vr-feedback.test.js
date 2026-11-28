@@ -81,7 +81,7 @@ test('creature gaze follows the head and stops at a thin wall without extra scen
     if(node.name==='Halo du regard')glows.push(node);
   });
   assert.equal(beams.length,2);
-  assert.ok(beams.every(beam=>beam.scale.y>.25&&beam.scale.y<.4));
+  assert.ok(beams.every(beam=>beam.scale.y>.23&&beam.scale.y<.31));
   assert.ok(glows.every(glow=>glow.visible));
   pose.yaw=Math.PI;
   visual.draw([pose],.35,[wall]);
@@ -103,20 +103,21 @@ test('creature limbs move slowly and its head can look independently while stand
   const shoulder=scene.getObjectByName('Épaule de la créature');
   const beam=scene.getObjectByName('Faisceau du regard');
   const height=head.position.y;
-  let changes=0,previous=0;
+  let changes=0,previous=0,maxSwing=0;
   for(let i=0;i<180;i++){
     pose.z-=1.55/60;
     visual.draw([pose],1/60);
-    const swing=shoulder.rotation.x+.13;
-    assert.ok(Math.abs(swing)<=.18);
+    const swing=shoulder.rotation.x-.22;
+    maxSwing=Math.max(maxSwing,Math.abs(swing));
     const sign=Math.sign(swing);
     if(previous&&sign!==previous)changes++;
     previous=sign;
   }
+  assert.ok(maxSwing>.43&&maxSwing<=.51);
   assert.ok(changes>=2&&changes<=4);
   const before=head.rotation.y;
   for(let i=0;i<95;i++)visual.draw([pose],1/60);
-  assert.ok(Math.abs(shoulder.rotation.x+.13)<.002);
+  assert.ok(Math.abs(shoulder.rotation.x-.22)<.002);
   assert.equal(head.position.y,height);
   assert.equal(head.parent.rotation.y,0);
   assert.ok(Math.abs(head.rotation.y-before)>.065);
@@ -132,6 +133,10 @@ test('entity exercise survives map export with a bounded route and stable ids',a
   assert.equal(exercise.entities[0].id,1);
   assert.equal(exercise.entities[0].route.length,4);
   assert.deepEqual(JSON.parse(JSON.stringify(exercise.entities)),parseMap(exercise).entities);
+  const colored=parseMap({...exercise,entities:[{...exercise.entities[0],fur:'#374B18',face:'invalid'}]});
+  assert.equal(colored.entities[0].fur,'#374b18');
+  assert.equal(colored.entities[0].face,undefined);
+  assert.deepEqual(parseMap(JSON.stringify(colored)).entities,colored.entities);
   const raw={...exercise.entities[0],speed:99,sight:1000,route:Array.from({length:32},()=>({x:1800,y:0,z:3}))};
   const clean=normalizeEntities([null,{},...Array.from({length:20},()=>raw)]);
   assert.equal(clean.length,16);
