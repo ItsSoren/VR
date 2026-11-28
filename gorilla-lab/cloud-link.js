@@ -442,7 +442,7 @@ function packOnlineSource(source,echoes,entities){
 }
 function unpackOnlineSource(pose,source){
   if(!source.startsWith('net:')){if(source)pose.roomSource=source;return true;}
-  const m=/^net:([0-9]{0,115});(-|[0-9]{0,400});(.*)$/.exec(source);
+  const m=/^net:([0-9]{0,115});(-|[0-9]{0,531});(.*)$/.exec(source);
   if(!m||m[1].length%23)return false;
   pose.echoes=[];
   for(let i=0;i<m[1].length;i+=23)pose.echoes.push({id:Number(m[1].slice(i,i+7)),
@@ -456,20 +456,27 @@ function unpackOnlineSource(pose,source){
   return true;
 }
 function packEntities(entities){
-  return entities.slice(0,16).map(e=>{
+  const captures=entities.some(e=>e.caught>=1e6&&e.caught<1e7&&e.captureSeq>0);
+  return (captures?'000':'')+entities.slice(0,16).map(e=>{
     const p=packPoint(e,true);
     if(!p||!Number.isInteger(e.id)||e.id<1||e.id>999||!Number.isFinite(e.yaw)||!Number.isInteger(e.state)||e.state<0||e.state>9)return '';
     const yaw=((e.yaw*180/Math.PI%360)+360)%360;
-    return digits(e.id,3)+p+digits(Math.round(yaw*10)%3600,4)+e.state;
+    return digits(e.id,3)+p+digits(Math.round(yaw*10)%3600,4)+e.state+
+      (captures?digits(e.caught>=1e6&&e.caught<1e7?e.caught:0,7)+digits(e.captureSeq??0,3):'');
   }).join('');
 }
 function unpackEntities(value){
-  if(value.length%23||value.length>16*23)return null;
+  const extended=value.startsWith('000');
+  const start=extended?3:0, width=extended?33:23;
+  if((value.length-start)%width||value.length-start>16*width)return null;
   const result=[],ids=new Set();
-  for(let i=0;i<value.length;i+=23){
+  for(let i=start;i<value.length;i+=width){
     const id=Number(value.slice(i,i+3)),point=unpackPoint(value,i+3,true),yaw=Number(value.slice(i+18,i+22));
     if(!id||!point||yaw>=3600||ids.has(id))return null;
-    ids.add(id);result.push({id,...point,yaw:yaw*Math.PI/1800,state:Number(value[i+22])});
+    const caught=extended?Number(value.slice(i+23,i+30)):0;
+    const captureSeq=extended?Number(value.slice(i+30,i+33)):0;
+    ids.add(id);result.push({id,...point,yaw:yaw*Math.PI/1800,state:Number(value[i+22]),
+      ...(caught>=1e6&&captureSeq?{caught,captureSeq}:{})});
   }
   return result;
 }

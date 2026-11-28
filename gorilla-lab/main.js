@@ -1,3 +1,5 @@
+import {createEntitySimulation,createEntityVisuals} from './creature-runtime.js';
+import {entityExercise} from './entity-format.js';
 import {createPhoneUI} from './phone-ui.js';
 import {createHeldItems,itemScale,itemShape} from './held-items.js';
 import {createMapAudio} from './map-audio.js';
@@ -811,6 +813,10 @@ function spawnPlacedModels(){
     }
   }
 }
+const entityVisuals=createEntityVisuals(scene);
+let activeEntityDefinitions,entityAuthority,pendingCreatureCapture=false;
+const creatureSimulation=createEntitySimulation(player=>{if(player.id===0)pendingCreatureCapture=true;});
+const localCreaturePlayer={id:0,x:0,y:0,z:0};
 maps=connectMaps({scene,arena,boot,onReset:angle=>{
   cancelSphereBenchmark('carte changée');
   sphereBenchPair=[];
@@ -839,6 +845,7 @@ maps=connectMaps({scene,arena,boot,onReset:angle=>{
 const spectator=addSpectator({scene,localColor:avatarColor,currentMap:()=>maps.signature||'arena-r25-'+arena.hillSeed,
   seedArena:seed=>arena.setHillSeed(seed),
   acceptPhoto:receivePhonePhoto,onReplicaRemove:mesh=>phoneUI.remove(mesh),
+  onEntityCapture:()=>{pendingCreatureCapture=true;},
   onRoomMap:(value,expected,active,progress,signal)=>maps.loadRoomMap(value,candidate=>{
     const signature=candidate?'custom-'+mapCode(JSON.stringify(candidate)):'arena-r25-'+arena.hillSeed;
     return active()&&mapCode(signature)===expected;
@@ -1948,6 +1955,7 @@ let startingMap=true;
 async function restoreStartingMap(){
   try{
     if(mapQuery.has('map'))await maps.loadURL(mapQuery.get('map'));
+    else if(mapQuery.get('exercise')==='entites')maps.load(entityExercise());
     else if(mapQuery.get('exercise')==='appuis')maps.load(thinSurfaceCourse());
     else if(mapQuery.get('exercise')==='boules')maps.load(sphereTestCourse());
     else{
@@ -2067,6 +2075,21 @@ renderer.setAnimationLoop((time,frame)=>{
   }
   const guestActive=spectator.guestActive;
   if(guestActive&&!wasGuestActive)releaseAll();
+  if(maps.entities!==activeEntityDefinitions){
+    activeEntityDefinitions=maps.entities;
+    entityVisuals.set(activeEntityDefinitions??[]);
+    creatureSimulation.set(activeEntityDefinitions??[]);
+    pendingCreatureCapture=false;
+  }
+  const authority=!spectator.role||spectator.role==='vr';
+  if(authority!==entityAuthority){
+    entityAuthority=authority;creatureSimulation.set(activeEntityDefinitions??[]);
+  }
+  if(pendingCreatureCapture){
+    pendingCreatureCapture=false;
+    resetPlayer();
+    showGameHint('La créature t’a attrapé · retour au départ');
+  }
   wasGuestActive=guestActive;
   animateProps(time*.001);
   setModelEffectTime(time*.001);
@@ -2186,8 +2209,14 @@ renderer.setAnimationLoop((time,frame)=>{
     enabled:settings.blasterActive&&!spectating&&!menu&&!settings.mapEdit&&(!inVR||!['flashlight','radio'].includes(hands[1].held?.spec.id??objectSpecs[spectator.replica(hands[1].remoteHeld)?.userData.netType]?.id)),
     flatFiring:blasterTrigger.held||keys.has('KeyJ'),
   });
+  if(authority&&activeEntityDefinitions?.length){
+    localCreaturePlayer.x=worldHead.x;localCreaturePlayer.y=worldHead.y;localCreaturePlayer.z=worldHead.z;
+    const players=spectator.role==='vr'?[localCreaturePlayer,...spectator.entityPlayers()]:[localCreaturePlayer];
+    if(spectator.role||!menu)creatureSimulation.update(inputDt,players,arena.boxes);
+  }
   spectator.update({inVR,time,dt:inputDt,position:worldHead,yaw:spectating?yaw:bodyYaw,pitch,camera,rig,keys,actions,flat,avatar:captureNetworkAvatar,
-    bodies:settings.objects?objects:noBodies});
+    bodies:settings.objects?objects:noBodies,entities:authority&&activeEntityDefinitions?.length?creatureSimulation.poses:null});
+  if(activeEntityDefinitions?.length)entityVisuals.draw(authority?creatureSimulation.poses:spectator.entityPoses(),inputDt);
   if(spectator.guestActive){
     if(inVR)for(const hand of hands)if(hand.valid)predictRemoteGrip(hand,hand.mesh.position,hand.mesh.quaternion);
     if(desktopActor.remoteHeld){

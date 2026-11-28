@@ -121,9 +121,9 @@ function disposeArt(root){
   for(const material of materials)material?.dispose();
 }
 
-export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,applyLight,onAction,onShot,onStatus,onRoomMap,onRoomCore,onRoomImage,roomMapIdentity,restoreRoomMap,exportRoomMap,roomMapSource,hingeSnapshot,applyHinges,acceptPhoto,onReplicaRemove}){
+export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,applyLight,onAction,onShot,onStatus,onRoomMap,onRoomCore,onRoomImage,roomMapIdentity,restoreRoomMap,exportRoomMap,roomMapSource,hingeSnapshot,applyHinges,acceptPhoto,onReplicaRemove,onEntityCapture}){
   const peers=new Map(),replicas=new Map(),feed=createObjectFeed({fullInterval:3200});
-  const entityReplicas=createEntityReplicas();
+  const entityReplicas=createEntityReplicas(),seenCaptures=new Map();
   function removePeer(id,entry){
     directUploads.get(id)?.close();
     directUploads.delete(id);
@@ -157,7 +157,7 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
   }
   function clearReplicas(){
     for(const id of replicas.keys())removeReplica(id);
-    entityReplicas.clear();
+    entityReplicas.clear();seenCaptures.clear();
     replicaHost=0;replicaMap=-1;hasInitialWorld=false;
     if(replicaLight!==-1){replicaLight=-1;applyLight?.(null);}
   }
@@ -183,7 +183,14 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
     if(!readyHere(pose)){clearReplicas();return;}
     if(replicaHost!==pose.id||replicaMap!==pose.map){clearReplicas();replicaHost=pose.id;replicaMap=pose.map;}
     const initial=!hasInitialWorld;
-    if(pose.entities)entityReplicas.receive(pose.entities,pose.time,pose.arrival);
+    if(pose.entities){
+      for(const entity of pose.entities){
+        if(entity.caught!==client.id||!entity.captureSeq||seenCaptures.get(entity.id)===entity.captureSeq)continue;
+        seenCaptures.set(entity.id,entity.captureSeq);
+        if(!initial&&client.role==='player')onEntityCapture?.();
+      }
+      entityReplicas.receive(pose.entities,pose.time,pose.arrival);
+    }
     if(initial&&!pose.objects?.full)return;
     if(pose.hinges)applyHinges?.(pose.hinges,initial);
     hasInitialWorld=true;
@@ -700,7 +707,8 @@ export function addSpectator({scene,localColor,currentMap,seedArena,makeReplica,
   }
   function getPeer(id){const pose=peers.get(id)?.pose;return readyHere(pose)?pose:null;}
   return {update,getPeer,connect,leave,cancelMapLoad,resumeMapLoad,
-    entityPoses(now=performance.now()){return entityReplicas.update(now);},
+    entityPlayers(){return client.peers.filter(p=>p.role==='player'&&readyHere(p));},
+    entityPoses(now=performance.now()){return client.role&&readyHere(client.remote)?entityReplicas.update(now):[];},
     get downloadCaption(){return progressPanel.hidden?'':progressEta.textContent;},
     get downloadFraction(){return downloadFraction;},
     get canResumeMap(){return !resumeButton.hidden;},

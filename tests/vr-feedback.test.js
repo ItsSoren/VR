@@ -64,6 +64,72 @@ test('six online players share compact authoritative entities and measure relay 
 });
 import {standingEyeHeight, avatarWidth, vrTorsoStretch} from '../gorilla-lab/player-pose.js';
 
+test('entity exercise survives map export with a bounded route and stable ids',async()=>{
+  const {entityExercise,normalizeEntities}=await import('../gorilla-lab/entity-format.js');
+  const exercise=parseMap(JSON.stringify(entityExercise()));
+  assert.equal(exercise.entities[0].id,1);
+  assert.equal(exercise.entities[0].route.length,4);
+  assert.deepEqual(JSON.parse(JSON.stringify(exercise.entities)),parseMap(exercise).entities);
+  const raw={...exercise.entities[0],speed:99,sight:1000,route:Array.from({length:32},()=>({x:1800,y:0,z:3}))};
+  const clean=normalizeEntities([null,{},...Array.from({length:20},()=>raw)]);
+  assert.equal(clean.length,16);
+  assert.equal(clean.at(-1).id,16);
+  assert.equal(clean[0].speed,4);
+  assert.equal(clean[0].sight,20);
+  assert.equal(clean[0].route.length,12);
+  assert.equal(clean[0].route[0].x,1024);
+});
+
+test('host AI sees around walls, searches after occlusion, and captures once',async()=>{
+  const {createEntitySimulation,entityState}=await import('../gorilla-lab/creature-runtime.js');
+  const worldFloor=floorBox();
+  const wall={half:new Vector3(1,1,.008),position:new Vector3(0,1,-1),quaternion:new Quaternion()};
+  const catches=[];
+  const sim=createEntitySimulation((player,entity)=>catches.push([player.id,entity.captureSeq]));
+  const def={id:1,x:0,y:0,z:0,yaw:0,route:[],speed:1,sight:8};
+  const player={id:2345678,x:0,y:.8,z:-2};
+  sim.set([def]);
+  const frames=(count,players,boxes)=>{for(let i=0;i<count;i++)sim.update(.067,players,boxes);};
+  frames(7,[player],[worldFloor,wall]);
+  assert.equal(sim.poses[0].state,entityState.patrol);
+  frames(4,[player],[worldFloor]);
+  assert.equal(sim.poses[0].state,entityState.chase);
+  frames(5,[player],[worldFloor,wall]);
+  assert.equal(sim.poses[0].state,entityState.search);
+  frames(45,[player],[worldFloor,wall]);
+  assert.ok(sim.poses[0].z>-.8);
+  assert.equal(sim.poses[0].state,entityState.patrol);
+  sim.set([def]);
+  frames(4,[{...player,z:-.4}],[worldFloor]);
+  assert.deepEqual(catches,[[2345678,1]]);
+  assert.equal(sim.poses[0].state,entityState.caught);
+  frames(18,[{...player,z:-.4}],[worldFloor]);
+  assert.equal(catches.length,1);
+});
+
+test('a six-player room carries captures and maps in the same entity packet',async()=>{
+  const {createCloudClient,decodeAvatar}=await import('../gorilla-lab/cloud-link.js');
+  let time=0,last;
+  class Relay{
+    constructor(){this.readyState=1;this.bufferedAmount=0;globalSocket=this;}
+    send(raw){const packet=JSON.parse(raw);if(packet.method==='set')last=decodeAvatar(packet.value,null);}
+    close(){}
+  }
+  let globalSocket;
+  const client=createCloudClient({adaptive:true,Socket:Relay,now:()=>1780000000000+time,monotonicNow:()=>time,random:()=>.5});
+  client.join('TEST58','vr');globalSocket.onopen();
+  time=1000;
+  const entities=Array.from({length:16},(_,i)=>({id:i+1,x:i,y:0,z:0,yaw:0,state:0}));
+  Object.assign(entities[4],{state:3,caught:7654321,captureSeq:2});
+  assert.ok(client.tick({x:0,y:1,z:0,yaw:0,map:8,entities,roomSource:'part:fixture'}));
+  assert.equal(last.roomSource,'part:fixture');
+  assert.equal(last.entities.length,16);
+  assert.deepEqual(last.entities[4],entities[4]);
+  time=1100;
+  assert.ok(client.tick({x:0,y:1,z:0,yaw:0,map:8,entities,roomSource:'part:fixture'}));
+  assert.equal(last.entities,undefined);
+});
+
 test('a taller VR player keeps the same short torso and low hand reach',()=>{
   assert.ok(Math.abs(standingEyeHeight(5)-standingEyeHeight(3)-.176)<1e-9);
   assert.ok(Math.abs(standingEyeHeight(3)-standingEyeHeight(3,true)-.064)<1e-9);

@@ -14,6 +14,8 @@ import {normalizeTerrain,normalizeTerrainRule,maxTerrainRules,maxTerrainDensity,
 import {openTextureStudio} from './texture-studio.js';
 import {mostlyInRectangle} from './marquee-selection.js';
 import {createTrafficEditor} from './editor-traffic.js';
+import {createEntityEditor} from './editor-entities.js';
+import {entityExercise} from './entity-format.js';
 import {createAudioEditor} from './editor-audio.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import {resizedCenter,scaleHandleSigns} from './editor-scale.js';
@@ -27,7 +29,8 @@ const $ = id => document.getElementById(id);
 const fields = ['name', 'x', 'y', 'z', 'w', 'h', 'd', 'pitch', 'yaw', 'roll', 'material', 'color', 'grip', 'gravity', 'bounce', 'solid'];
 const uvFields=['uvScale','uvRotation','uvOffsetX','uvOffsetY'];
 const toolButtons = [...document.querySelectorAll('.tool')];
-const draftKey = 'gorilla-lab-editor-draft';
+const entityDemo=new URLSearchParams(location.search).get('exercise')==='entites';
+const draftKey=entityDemo?'gorilla-lab-entity-exercise-draft':'gorilla-lab-editor-draft';
 const modelPack = readModelPack(localStorage);
 const builtinModelLibrary=createBuiltinModelTemplates();
 const modelLibrary=[...new Map([...builtinModelLibrary,...modelPack.models.filter(model=>model.kind!=='avatar')].map(model=>[model.id,model])).values()].filter(model=>model.parts.length);
@@ -82,7 +85,7 @@ const toolHelp = {
   spawn: 'Déplace l’anneau avec les flèches ou clique sur une surface pour placer le départ.',
   model: 'Choisis un modèle dans la bibliothèque, puis clique dans la vue 3D ou sur le plan pour le poser.',
 };
-let map, selected = -1, tool = 'move', gesture = null, ghost = null, audioEditor, trafficEditor;
+let map, selected = -1, tool = 'move', gesture = null, ghost = null, audioEditor, trafficEditor, entityEditor;
 let pieceMeshStats=[],sceneMeshStats=null;
 const editorEvents=[];
 function editorTrace(event,details={},level='info'){
@@ -302,7 +305,7 @@ function buildWorkspaceShell(){
   const tabs=make('nav','inspector-tabs');
   tabs.setAttribute('aria-label','Propriétés');
   const specs=[['object','Modéliser'],['terrain','Terrain'],['material','Texturer'],['props','Props'],['collision','Collisions'],
-    ['behavior','Physique'],['audio','Audio'],['traffic','Circulation'],['scene','Scène'],['publish','Jouer / Exporter']];
+    ['behavior','Physique'],['audio','Audio'],['traffic','Circulation'],['entities','Entités'],['scene','Scène'],['publish','Jouer / Exporter']];
   for(const [key,label] of specs){
     const button=make('button','inspector-tab',label);
     button.type='button';
@@ -339,7 +342,8 @@ function buildWorkspaceShell(){
   }
   const audio=make('section');audio.id='audio-options';
   const traffic=make('section');traffic.id='traffic-options';
-  content.append(objectSection,collision,behavior,audio,traffic,publish);
+  const entities=make('section');entities.id='entity-options';
+  content.append(objectSection,collision,behavior,audio,traffic,entities,publish);
   const sceneOptions=make('section','scene-options');
   sceneOptions.id='scene-options';
   sceneOptions.append(make('h2','','Paramètres de carte'));
@@ -365,6 +369,7 @@ function buildWorkspaceShell(){
     if(tab==='material')surfaceControls.open=true;
     audioEditor?.setVisible(tab==='audio');
     trafficEditor?.setVisible(tab==='traffic');
+    entityEditor?.setVisible(tab==='entities');
     content.scrollTop=0;
   };
   for(const button of tabs.querySelectorAll('button'))button.addEventListener('click',()=>setTab(button.dataset.tab));
@@ -393,6 +398,12 @@ audioEditor=createAudioEditor({container:$('audio-options'),scene,getMap:()=>map
   getCenter:()=>controls.target.toArray(),remember,save:pendingSave,render:queueRender});
 trafficEditor=createTrafficEditor({container:$('traffic-options'),scene,getMap:()=>map,getPiece:current,
   getCenter:()=>controls.target.toArray(),remember,save:pendingSave,render:queueRender});
+entityEditor=createEntityEditor({container:$('entity-options'),scene,getMap:()=>map,getPoint:()=>{
+  const selectedPiece=current(),point=controls.target;
+  if(!selectedPiece)return {x:point.x,y:point.y,z:point.z};
+  const {x,y,z,h,terrain}=selectedPiece;
+  return {x,y:terrain?y:y+h*.5,z};
+},remember,save:pendingSave,render:queueRender});
 const neutralBackground=new T.Color('#8fb6c6');
 scene.background = neutralBackground;
 const ambient=new T.HemisphereLight('#f0f5ff', '#8e775c', 2.6);
@@ -1153,6 +1164,7 @@ function updateInspector() {
   for(const name of ['terrain','props'])document.querySelector('.inspector-tab[data-tab="'+name+'"]').disabled=!terrain;
   audioEditor.refresh();
   trafficEditor.refresh();
+  entityEditor.refresh();
 }
 
 function applyEnvironmentPreview(){
@@ -1564,6 +1576,15 @@ function commitPlacement(canvas, event) {
 
 // Répartit le pointeur entre caméra, poignées, sélection, pinceau et création.
 function beginGesture(canvas, event) {
+  if(entityEditor.placing&&event.button===0&&event.isPrimary&&!gesture&&!gizmo.dragging){
+    event.stopImmediatePropagation();
+    const hit=pointUnderPointer(canvas,event);
+    if(hit){
+      const {x,y,z}=hit.point;
+      entityEditor.place({x,y,z});
+    }
+    return;
+  }
   if (tool==='view'||event.button !== 0 || !event.isPrimary || gesture||gizmo.dragging) return;
   if(tool==='spawn'||transformModes.has(tool)){
     if(canvas===screen&&gizmo.enabled){
@@ -2379,6 +2400,7 @@ for(const canvas of [screen,plan])canvas.addEventListener('pointermove',event=>{
   $('debug-stats').textContent='X '+point.x.toFixed(2)+' · Y '+point.y.toFixed(2)+' · Z '+point.z.toFixed(2)+' m · '+map.pieces.length+' éléments';
 });
 async function startEditor(){
+if(entityDemo)map=parseMap(entityExercise());
 try {
   const draft = await readLocalMap(draftKey);
   if (draft) {
@@ -2404,6 +2426,7 @@ resizeRenderer();
 resizePlan();
 fitViews();
 applyLayout();
+if(entityDemo)window.setInspectorTab('entities');
 if(requestedModel){
   const selectedFromFoundry=modelLibrary.find(model=>model.id===requestedModel);
   if(selectedFromFoundry){
