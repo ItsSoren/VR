@@ -765,3 +765,50 @@ test('a refined cube supports a thin brush and a continuous pull that bends into
   assert.ok(rig.mesh.geometry.attributes.skinWeight.array.every(Number.isFinite));
   rig.dispose();geometry.dispose();material.dispose();
 });
+
+test('local mesh simplification preserves sharp edges, untouched regions and a closed mesh',async()=>{
+  const {sculptGeometry,sculptVertices,sculptRig}=await import('../gorilla-lab/sculpt-rig.js');
+  const {refineSculpt,simplifySculpt}=await import('../gorilla-lab/sculpt-brush.js');
+  const {normalizeSculpt}=await import('../gorilla-lab/sculpt-format.js');
+  const geometry=sculptGeometry('cube'),center=new Vector3(0,.68,-.335),radius=.22;
+  const count=()=>geometry.attributes.position.count;
+  const original=count();
+  const positions=()=>sculptVertices(geometry).reduce((points,value,i,array)=>{
+    if(i%3===0)points.add(array.slice(i,i+3).join(','));
+    return points;
+  },new Set());
+  const before=positions();
+  assert.ok(refineSculpt(geometry,[center],radius*.65,.024));
+  assert.ok(count()>original);
+  const refined=count();
+  assert.ok(simplifySculpt(geometry,[center],radius,.115));
+  assert.ok(count()<refined);
+  for(let i=0;i<8;i++)simplifySculpt(geometry,[center],radius,.13);
+  assert.ok(count()<original);
+  const after=positions();
+  for(const key of before){
+    const [x,y,z]=key.split(',').map(n=>n/1000);
+    if(center.distanceTo(new Vector3(x,y,z))>radius+.002)assert.ok(after.has(key));
+  }
+  const cubeEdge=new Vector3(0,.055,-.335);
+  const edgeBefore=positions();
+  simplifySculpt(geometry,[cubeEdge],.12,.15);
+  const edgeAfter=positions();
+  for(const key of edgeBefore)if(key.endsWith(',55,-335'))assert.ok(edgeAfter.has(key));
+  const indices=Array.from(geometry.index.array),edgeFaces=new Map();
+  for(let i=0;i<indices.length;i+=3){
+    const triangle=indices.slice(i,i+3);
+    assert.equal(new Set(triangle).size,3);
+    for(let j=0;j<3;j++){
+      const a=triangle[j],b=triangle[(j+1)%3],key=Math.min(a,b)+':'+Math.max(a,b);
+      const edge=edgeFaces.get(key)??{uses:0,dir:0};
+      edge.uses++;edge.dir+=Math.sign(a-b);edgeFaces.set(key,edge);
+    }
+  }
+  assert.ok([...edgeFaces.values()].every(edge=>edge.uses===2&&edge.dir===0));
+  const sculpt=normalizeSculpt({base:'cube',indices,vertices:sculptVertices(geometry)});
+  assert.ok(sculpt);
+  const rig=sculptRig(sculpt);
+  assert.equal(rig.mesh.geometry.attributes.position.count,count());
+  rig.dispose();geometry.dispose();
+});

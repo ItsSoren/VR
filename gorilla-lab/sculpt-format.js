@@ -24,7 +24,7 @@ export const sculptPose=()=>sculptJoints.map(()=>[0,0,0]);
 export function normalizeSculpt(raw){
   const baseCount=sculptVertexCounts[raw?.base],count=raw?.vertices?.length/3;
   if(!Number.isInteger(baseCount)||!Array.isArray(raw.vertices)||!Number.isInteger(count)||
-    count<baseCount||count>maxSculptVertices||!raw.vertices.every(Number.isFinite))return null;
+    count<4||count>maxSculptVertices||!raw.vertices.every(Number.isFinite))return null;
   const indices=raw.indices;
   if(indices!==undefined){
     if(!Array.isArray(indices)||indices.length!==(count-2)*6||

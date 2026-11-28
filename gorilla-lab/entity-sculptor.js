@@ -1,7 +1,7 @@
 import * as T from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {readSculpts,normalizeSculpt,sculptStorage,sculptJoints,sculptStates,sculptPose,maxSculptVertices} from './sculpt-format.js';
-import {sculptNeighbors,refineSculpt,sculptInfluence,shapeSculpt} from './sculpt-brush.js';
+import {sculptNeighbors,refineSculpt,simplifySculpt,sculptInfluence,shapeSculpt} from './sculpt-brush.js';
 import {sculptGeometry,sculptVertices,sculptRig,applySculptPose,playSculptClip} from './sculpt-rig.js';
 
 export function openEntitySculptor({canvas,renderer,onClose}){
@@ -22,6 +22,8 @@ export function openEntitySculptor({canvas,renderer,onClose}){
     ['carve','C','Creuser','Repousse la surface vers l’intérieur'],
     ['smooth','S','Lisser','Estompe les bosses et les raccords'],
     ['pinch','P','Pincer','Resserre les sommets pour marquer un pli'],
+    ['refine','B','Densifier','Subdivise les grandes arêtes sous la brosse'],
+    ['simplify','N','Simplifier','Fusionne les arêtes courtes sous la brosse'],
   ];
   const rail=make('nav','tool-rail sculpt-rail',brushes.map(([key,letter,label,title])=>
     `<button class="rail-btn" data-brush="${key}" title="${title} (${letter})"><span>${letter}</span><span>${label}</span></button>`).join(''));
@@ -31,9 +33,11 @@ export function openEntitySculptor({canvas,renderer,onClose}){
         <label>Mode <select data-ui="mode"><option value="sculpt">Sculpture</option><option value="motion">Squelette et animations</option></select></label>
         <div data-ui="sculpt">
           <label>Rayon <input data-ui="radius" type="range" min="8" max="160" step="1" value="52"></label>
-          <label>Intensit&eacute; <input data-ui="strength" type="range" min=".15" max="1" step=".05" value=".65"></label>
+          <label data-ui="spacing-label" hidden>Taille des ar&ecirc;tes <input data-ui="spacing" type="range" min="3" max="34" step="1" value="11"><span data-ui="spacing-value">11 px</span></label>
+          <label data-ui="strength-label">Intensit&eacute; <input data-ui="strength" type="range" min=".15" max="1" step=".05" value=".65"></label>
           <label><input data-ui="mirror" type="checkbox" checked> Sym&eacute;trie gauche / droite</label>
           <label><input data-ui="adaptive" type="checkbox" checked> Ajouter des polygones sous la brosse</label>
+          <p data-ui="mesh-count"></p>
           <label><input data-ui="wire" type="checkbox"> Afficher les polygones</label>
           <label>Couleur <input data-ui="color" type="color"></label>
           <button data-ui="undo">Annuler</button> <button data-ui="redo">R&eacute;tablir</button>
@@ -102,13 +106,18 @@ export function openEntitySculptor({canvas,renderer,onClose}){
   const requestRender=()=>{if(!raf)raf=requestAnimationFrame(render);};
   controls.addEventListener('change',requestRender);
   const observer=new ResizeObserver(requestRender);observer.observe(canvas);
+  const topologyBrush=key=>key==='refine'||key==='simplify';
   const selectBrush=key=>{
     activeBrush=key;
     for(const button of rail.querySelectorAll('[data-brush]'))button.setAttribute('aria-pressed',String(button.dataset.brush===key));
     const info=brushes.find(([name])=>name===key);
-    $('hint').textContent=info[3]+'. Maj pour lisser, Ctrl pour inverser Relief ou Creuser.';
+    const topology=topologyBrush(key);
+    $('spacing-label').hidden=!topology;$('strength-label').hidden=topology;
+    $('hint').textContent=info[3]+(topology?'. Réduis la taille pour des détails plus fins.':'. Maj pour lisser, Ctrl pour inverser Relief ou Creuser.');
+
   };
   selectBrush(activeBrush);
+  $('spacing').oninput=()=>{$('spacing-value').textContent=$('spacing').value+' px';};
   for(const button of rail.querySelectorAll('[data-brush]'))button.onclick=()=>selectBrush(button.dataset.brush);
   views.onclick=event=>{
     const view=event.target.dataset.view;if(!view)return;
@@ -120,6 +129,11 @@ export function openEntitySculptor({canvas,renderer,onClose}){
     controls.update();requestRender();
   };
   const status=message=>{$('status').textContent=message;};
+  const countText=new Intl.NumberFormat('fr-FR');
+  function updateCount(){
+    const {geometry}=mesh;
+    $('mesh-count').textContent=countText.format(geometry.index.count/3)+' triangles · '+countText.format(geometry.attributes.position.count)+' sommets';
+  }
   const edit=()=>{dirty=true;status('Modifications en cours');requestRender();};
   const joint=()=>Number($('joint').value);
   const clip=()=>data.clips[Number($('clip').value)];
@@ -157,7 +171,7 @@ export function openEntitySculptor({canvas,renderer,onClose}){
     id=model?.id;
     const geometry=sculptGeometry(shape,model?.sculpt.vertices,model?.sculpt.indices);
     mesh=new T.Mesh(geometry,material);scene.add(mesh);
-    adjacency=sculptNeighbors(geometry);adaptiveMesh=Boolean(model?.sculpt.indices);
+    adjacency=sculptNeighbors(geometry);adaptiveMesh=Boolean(model?.sculpt.indices);updateCount();
     data=normalizeSculpt(model?.sculpt??{base:shape,vertices:sculptVertices(geometry)});
     pose=sculptPose();frame=0;undo.length=redo.length=0;dirty=false;
     $('name').value=model?.name??'Ma créature';$('contact').value=data.contact;
@@ -225,7 +239,7 @@ export function openEntitySculptor({canvas,renderer,onClose}){
     const prior=from.pop();
     mesh.geometry.dispose();
     mesh.geometry=sculptGeometry(prior.base,prior.vertices,prior.indices);
-    adaptiveMesh=Boolean(prior.indices);adjacency=sculptNeighbors(mesh.geometry);
+    adaptiveMesh=Boolean(prior.indices);adjacency=sculptNeighbors(mesh.geometry);updateCount();
     edit();
   }
   $('undo').onclick=()=>history(undo,redo);
@@ -261,7 +275,7 @@ export function openEntitySculptor({canvas,renderer,onClose}){
       if(!refineSculpt(mesh.geometry,centers,radius*1.16,radius*.56))break;
       changedTopology=true;
     }
-    if(changedTopology){adaptiveMesh=true;adjacency=sculptNeighbors(mesh.geometry);}
+    if(changedTopology){adaptiveMesh=true;adjacency=sculptNeighbors(mesh.geometry);updateCount();}
     return changedTopology;
   }
   function influence(center,radius,mirror,face){
@@ -280,8 +294,29 @@ export function openEntitySculptor({canvas,renderer,onClose}){
     shapeSculpt(pos,original,normals,adjacency,weights.direct,center,tool,delta,power);
     shapeSculpt(pos,original,normals,adjacency,weights.other,reflected(center),tool,delta,power,true);
   }
+  function remember(prior=snapshot()){
+    undo.push(prior);if(undo.length>16)undo.shift();redo.length=0;
+  }
+  function topologyStamp(point,radius){
+    const centers=stroke.mirror?[point,reflected(point)]:[point];
+    const spacing=Number($('spacing').value)*radius/Number($('radius').value);
+    const geometry=mesh.geometry,refining=stroke.tool==='refine';
+    const changedTopology=refining?refineSculpt(geometry,centers,radius,spacing):
+      simplifySculpt(geometry,centers,radius,spacing*1.4);
+    if(!changedTopology){
+      if(stroke.prior){
+        if(refining&&buffer().count>=maxSculptVertices)status('Limite de sommets atteinte. Simplifie une zone pour continuer.');
+        else status(refining?'Aucune arête à subdiviser ici. Réduis la taille des arêtes.':
+          'Aucune arête à fusionner ici. Augmente la taille des arêtes ou le rayon.');
+      }
+      return;
+    }
+    if(stroke.prior){remember(stroke.prior);stroke.prior=null;}
+    adaptiveMesh=true;adjacency=sculptNeighbors(geometry);updateCount();edit();
+  }
   function stamp(found,event,power){
     const {point}=found,rad=radiusAt(point);
+    if(topologyBrush(stroke.tool)){topologyStamp(point,rad);return;}
     const tool=event.shiftKey?'smooth':stroke.tool;
     if(!stroke.detailAt||stroke.detailAt.distanceToSquared(point)>rad*rad*.30){
       if(addDetail(point,rad,stroke.mirror,2))found=hit()??found;
@@ -313,20 +348,25 @@ export function openEntitySculptor({canvas,renderer,onClose}){
     }else{
       let found=hit();if(!found)return;
       const center=found.point,radius=radiusAt(center),mirror=$('mirror').checked;
-      const tool=event.shiftKey?'smooth':activeBrush;
-      undo.push(snapshot());if(undo.length>16)undo.shift();redo.length=0;
-      if(addDetail(center,radius,mirror,4)){found=hit()??found;edit();}
-      const weights=influence(found.point,radius,mirror,found.face);
-      if(!weights.direct.length){
-        status(buffer().count>=maxSculptVertices?'Limite de polygones atteinte. Agrandis la brosse.':'Agrandis la brosse pour atteindre les sommets de cette zone.');
-        return;
+      if(topologyBrush(activeBrush)&&!event.shiftKey){
+        stroke={id:event.pointerId,tool:activeBrush,mirror,x:event.clientX,y:event.clientY,prior:snapshot()};
+        topologyStamp(center,radius);
+      }else{
+        const tool=event.shiftKey?'smooth':activeBrush;
+        remember();
+        if(addDetail(center,radius,mirror,4)){found=hit()??found;edit();}
+        const weights=influence(found.point,radius,mirror,found.face);
+        if(!weights.direct.length){
+          status(buffer().count>=maxSculptVertices?'Limite de polygones atteinte. Agrandis la brosse.':'Agrandis la brosse pour atteindre les sommets de cette zone.');
+          return;
+        }
+        plane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(new T.Vector3()),found.point);
+        stroke={id:event.pointerId,tool,center:found.point,mirror,radius,weights,
+          anchor:weights.direct.reduce((best,w)=>w[1]>best[1]?w:best)[0],
+          original:tool==='grab'?buffer().array.slice():null,
+          projected:found.point.clone(),x:event.clientX,y:event.clientY,detailAt:found.point.clone()};
+        if(tool!=='hook'&&tool!=='grab')stamp(found,event,1);
       }
-      plane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(new T.Vector3()),found.point);
-      stroke={id:event.pointerId,tool,center:found.point,mirror,radius,weights,
-        anchor:weights.direct.reduce((best,w)=>w[1]>best[1]?w:best)[0],
-        original:tool==='grab'?buffer().array.slice():null,
-        projected:found.point.clone(),x:event.clientX,y:event.clientY,detailAt:found.point.clone()};
-      if(tool!=='hook'&&tool!=='grab')stamp(found,event,1);
       cursor(null);
     }
     canvas.setPointerCapture(event.pointerId);controls.enabled=false;
@@ -369,7 +409,7 @@ export function openEntitySculptor({canvas,renderer,onClose}){
     const distance=Math.hypot(event.clientX-stroke.x,event.clientY-stroke.y);
     const spacing=Math.max(2,Number($('radius').value)*.17);
     if(distance<spacing)return;
-    const steps=Math.min(12,Math.floor(distance/spacing));
+    const steps=Math.min(topologyBrush(stroke.tool)?3:12,Math.floor(distance/spacing));
     for(let i=1;i<=steps;i++){
       setRay(T.MathUtils.lerp(stroke.x,event.clientX,i/steps),T.MathUtils.lerp(stroke.y,event.clientY,i/steps));
       const found=hit();

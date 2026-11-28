@@ -13,6 +13,16 @@ export function sculptNeighbors(geometry){
   return links.map(link=>Array.from(link));
 }
 
+function replaceTopology(geometry,positions,indices){
+  // Release buffers for the old attributes before replacing the topology.
+  geometry.dispose();
+  geometry.setAttribute('position',new T.Float32BufferAttribute(positions,3));
+  geometry.deleteAttribute('normal');
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+}
+
 export function refineSculpt(geometry,centers,radius,spacing){
   const pos=geometry.attributes.position,index=geometry.index.array;
   const midpoint=new Map(),triangle=new T.Triangle(),nearest=new T.Vector3();
@@ -45,13 +55,7 @@ export function refineSculpt(geometry,centers,radius,spacing){
     if(count===1)indices.push(a,ab,c,ab,b,c);
     else indices.push(ab,b,bc,a,ab,c,ab,bc,c);
   }
-  // Release buffers for the old attributes before replacing the topology.
-  geometry.dispose();
-  geometry.setAttribute('position',new T.Float32BufferAttribute(positions,3));
-  geometry.deleteAttribute('normal');
-  geometry.setIndex(indices);
-  geometry.computeVertexNormals();
-  geometry.computeBoundingSphere();
+  replaceTopology(geometry,positions,indices);
   return true;
 }
 
@@ -101,4 +105,70 @@ export function shapeSculpt(pos,original,normals,adjacency,weights,center,tool,t
     }
     point.clampScalar(-3,3).toArray(pos,at);
   }
+}
+
+export function simplifySculpt(geometry,centers,radius,spacing){
+  const position=geometry.attributes.position,index=geometry.index.array,count=position.count;
+  const neighbors=sculptNeighbors(geometry);
+  const points=Array.from({length:count},(_,i)=>new T.Vector3().fromBufferAttribute(position,i));
+  const radius2=radius*radius;
+  const region=points.map(point=>centers.some(center=>center.distanceToSquared(point)<radius2));
+  if(!region.some(Boolean))return false;
+  const incident=Array.from({length:count},()=>[]);
+  const faces=[];
+  for(let i=0;i<index.length;i+=3){
+    const ids=[index[i],index[i+1],index[i+2]];
+    const normal=ids.some(id=>region[id])?T.Triangle.getNormal(...ids.map(id=>points[id]),new T.Vector3()):null;
+    const face={ids,normal};
+    for(const id of ids)incident[id].push(face);
+    faces.push(face);
+  }
+  const sharp=incident.map((ring,id)=>region[id]&&ring.some((face,i)=>
+    ring.slice(i+1).some(other=>face.normal.dot(other.normal)<.82)));
+  const maxLength2=spacing*spacing,candidates=[];
+  for(let a=0;a<count;a++){
+    if(!region[a]||sharp[a])continue;
+    for(const b of neighbors[a]){
+      if(b<=a||!region[b]||sharp[b]||!centers.some(center=>
+        center.distanceToSquared(points[a])<radius2&&center.distanceToSquared(points[b])<radius2))continue;
+      const length2=points[a].distanceToSquared(points[b]);
+      if(length2<maxLength2)candidates.push({a,b,length2});
+    }
+  }
+  candidates.sort((a,b)=>a.length2-b.length2);
+  const locked=new Set(),removed=new Map();
+  const midpoint=new T.Vector3(),normal=new T.Vector3();
+  for(const {a,b} of candidates){
+    if(locked.has(a)||locked.has(b))continue;
+    const common=neighbors[a].filter(id=>neighbors[b].includes(id));
+    if(common.length!==2)continue;
+    const disappearing=incident[a].filter(face=>face.ids.includes(b));
+    if(disappearing.length!==2)continue;
+    const facesA=incident[a].filter(face=>!face.ids.includes(b));
+    const facesB=incident[b].filter(face=>!face.ids.includes(a));
+    if(facesA.some(face=>common.every(id=>face.ids.includes(id)))&&facesB.some(face=>common.every(id=>face.ids.includes(id))))continue;
+    midpoint.copy(points[a]).lerp(points[b],.5);
+    if([...facesA,...facesB].some(face=>{
+      const vertices=face.ids.map(id=>id===a||id===b?midpoint:points[id]);
+      return T.Triangle.getNormal(...vertices,normal).dot(face.normal)<.85;
+    }))continue;
+    points[a].copy(midpoint);
+    removed.set(b,a);
+    locked.add(a);locked.add(b);
+    for(const id of [...neighbors[a],...neighbors[b]])locked.add(id);
+    if(removed.size>=64)break;
+  }
+  if(!removed.size)return false;
+  const positions=[],indices=[],renumber=new Int32Array(count);
+  for(let id=0;id<count;id++){
+    if(removed.has(id))continue;
+    renumber[id]=positions.length/3;
+    positions.push(...points[id]);
+  }
+  for(const {ids} of faces){
+    const [a,b,c]=ids.map(id=>renumber[removed.get(id)??id]);
+    if(a!==b&&b!==c&&c!==a)indices.push(a,b,c);
+  }
+  replaceTopology(geometry,positions,indices);
+  return true;
 }
