@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Atelier Gorilla Lab R57</title>
+<title>Atelier Gorilla Lab R58</title>
 <style>
   :root{color-scheme:dark;--page:#101b22;--panel:#192932;--border:#334b58;--text:#f5efdf;--muted:#b4cbd1;--accent:#ffda90;--field:#12232c}
   *{box-sizing:border-box}
@@ -241,16 +241,17 @@
   .terrain-rules td button{justify-self:end}
   .add-terrain-rule{width:100%;min-height:43px;margin-top:8px;border-style:dashed}
   .add-terrain-rule span{font-size:20px;vertical-align:middle;margin-right:4px}
-  #scene-sidebar #scene-options,#collision-options,#behavior-options,#audio-options,#traffic-options,#publish-options{display:none}
+  #scene-sidebar #scene-options,#collision-options,#behavior-options,#audio-options,#traffic-options,#entity-options,#publish-options{display:none}
   #scene-sidebar[data-tab="collision"] #collision-options,
   #scene-sidebar[data-tab="behavior"] #behavior-options,
   #scene-sidebar[data-tab="audio"] #audio-options,
   #scene-sidebar[data-tab="traffic"] #traffic-options,
+  #scene-sidebar[data-tab="entities"] #entity-options,
   #scene-sidebar[data-tab="publish"] #publish-options{display:block}
-  #scene-sidebar:is([data-tab="collision"],[data-tab="behavior"],[data-tab="audio"],[data-tab="traffic"],[data-tab="publish"]) #object-section{display:none}
+  #scene-sidebar:is([data-tab="collision"],[data-tab="behavior"],[data-tab="audio"],[data-tab="traffic"],[data-tab="entities"],[data-tab="publish"]) #object-section{display:none}
   #audio-options section+section{border-top:1px solid var(--border);margin-top:12px;padding-top:8px}
   #audio-options section>label{margin-bottom:7px}
-  #audio-options p,#traffic-options p{color:var(--muted)}
+  #audio-options p,#traffic-options p,#entity-options p{color:var(--muted)}
   #traffic-options textarea{display:block;width:100%;min-height:95px;font-family:monospace}
   #traffic-options>button,#traffic-options>label{margin-bottom:7px}
   #scene-sidebar[data-tab="scene"] #scene-options{display:block}
@@ -344,7 +345,7 @@
 </head>
 <body>
   <header class="header">
-    <h1>Atelier des cartes <small style="font-size:11px;color:var(--muted)">Gorilla Lab R57</small></h1>
+    <h1>Atelier des cartes <small style="font-size:11px;color:var(--muted)">Gorilla Lab R58</small></h1>
     <a href="./">Retour au jeu</a>
     <a href="./model-editor.html" id="open-model-editor" title="Ouvrir GORILLA / FOUNDRY pour créer et modifier les modèles">✎ Atelier modèles</a>
     <div class="header-actions">
@@ -653,7 +654,7 @@
     <button data-context-action="focus">Cadrer</button>
     <button data-context-action="delete">Supprimer</button>
   </div>
-  <script defer src="./gorilla-editor-r39.js?v=R57"></script>
+  <script defer src="./gorilla-editor-r39.js?v=R58"></script>
 </body>
 </html>
 
