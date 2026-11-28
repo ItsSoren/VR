@@ -2426,7 +2426,7 @@ resizeRenderer();
 resizePlan();
 fitViews();
 applyLayout();
-if(entityDemo)window.setInspectorTab('entities');
+if(entityDemo||new URLSearchParams(location.search).get('tab')==='entities')window.setInspectorTab('entities');
 if(requestedModel){
   const selectedFromFoundry=modelLibrary.find(model=>model.id===requestedModel);
   if(selectedFromFoundry){

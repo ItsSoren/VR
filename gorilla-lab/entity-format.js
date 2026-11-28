@@ -1,3 +1,5 @@
+import {normalizeSculpt} from './sculpt-format.js';
+
 export const maxMapEntities=16, maxPatrolPoints=12;
 export const creatureLooks=['sentinelle','vigie'];
 const palettes={
@@ -20,11 +22,13 @@ export function normalizeEntities(input){
   const entities=[];
   for(const entry of input){
     if(!coordinates(entry))continue;
+    const sculpt=normalizeSculpt(entry.sculpt);
     entities.push({
       id:entities.length+1,name:typeof entry.name==='string'&&entry.name.trim()?entry.name.trim().slice(0,36):'Sentinelle',
       look:creatureLooks.includes(entry.look)?entry.look:creatureLooks[0],...point(entry),
       ...(hex(entry.fur)?{fur:entry.fur.toLowerCase()}:{}),
       ...(hex(entry.face)?{face:entry.face.toLowerCase()}:{}),
+      ...(sculpt?{sculpt,...(typeof entry.sculptId==='string'?{sculptId:entry.sculptId.slice(0,64)}:{})}:{}),
       yaw:finite(entry.yaw,-360,360,0),
       speed:finite(entry.speed,.5,4,1.65), sight:finite(entry.sight,2,20,10),
       route:(Array.isArray(entry.route)?entry.route:[]).slice(0,maxPatrolPoints).filter(coordinates).map(point),

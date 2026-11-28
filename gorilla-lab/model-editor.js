@@ -1,3 +1,4 @@
+import {openEntitySculptor} from './entity-sculptor.js';
 import {actionSounds,normalizePartReaction} from './model-pack.js';
 import * as T from 'three';
 import {effectChannels,normalizeModelEffect,setModelEffectTime} from './model-effect.js';
@@ -1290,6 +1291,10 @@ $('show-all-parts').onclick=()=>{
 $('save').onclick=$('publish-save').onclick=saveNow;
 $('undo-action').onclick=undo;
 $('redo-action').onclick=redo;
+$('entity-sculptor').onclick=()=>{
+  try{openEntitySculptor();}
+  catch(error){status(error.message,true);}
+};
 $('export').onclick=doExport;
 $('import').onclick=()=>$('file').click();
 $('file').onchange=async event=>{
@@ -1710,6 +1715,7 @@ for(const button of menu.querySelectorAll('button')){
   };
 }
 window.addEventListener('keydown',event=>{
+  if(document.querySelector('.entity-sculptor[open]'))return;
   const editing=event.target.closest?.('input,select,textarea,[contenteditable]');
   if(event.key==='Escape'){closeMenu();if(!editing&&!gizmo?.dragging)setTool('select');return;}
   if(gizmo?.dragging)return;
@@ -1754,3 +1760,5 @@ if(requestedAsset)contextModel=importBuiltinAsset(requestedAsset,true)?.id;
 refreshModel();
 if(editorParams.get('tab')==='avatar')setPanel('avatar');
 if(dirty)status('Brouillon récupéré automatiquement');
+
+if(editorParams.get('sculpt')==='1')$('entity-sculptor').click();

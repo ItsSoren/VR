@@ -1,3 +1,4 @@
+import {sculptRig,playSculptClip} from './sculpt-rig.js';
 import * as T from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {boxCollider,palmContact} from './physics.js';
@@ -122,6 +123,11 @@ export function createEntityVisuals(scene){
   let time=0;
   function make(p){
     const definition=looks.get(p.id);
+    if(definition?.sculpt){
+      const root=new T.Group(),rig=sculptRig(definition.sculpt);
+      root.add(rig.mesh);root.position.set(p.x,p.y,p.z);root.rotation.y=p.yaw;scene.add(root);
+      return {root,rig,clips:definition.sculpt.clips,state:null,clock:0};
+    }
     const palette=creaturePalette(definition);
     const key=palette.fur+palette.face;
     let geometry=geometryCache.get(key);
@@ -170,7 +176,8 @@ export function createEntityVisuals(scene){
       }
     }
   }
-  function remove({root}){
+  function remove({root,rig}){
+    if(rig)rig.dispose();
     root.traverse(node=>{if(node.isSkinnedMesh)node.skeleton.dispose();});
     scene.remove(root);
   }
@@ -204,6 +211,18 @@ export function createEntityVisuals(scene){
         root.position.z+=(p.z-root.position.z)*alpha;
       }
       root.rotation.y+=turn(root.rotation.y,p.yaw)*alpha;
+      if(art.rig){
+        const moving=gap*alpha>.002;
+        const clip=p.state===entityState.caught?3:p.state===entityState.chase?2:moving?1:0;
+        if(art.state!==clip){
+          art.state=clip;art.clock=0;
+          for(const bone of art.rig.bones)bone.rotation.set(0,0,0);
+        }
+        art.clock+=dt;
+        const frames=art.clips[clip].length?art.clips[clip]:art.clips[0];
+        if(animate)playSculptClip(art.rig,frames,art.clock,clip!==3);
+        continue;
+      }
       const alert=Number(p.state===entityState.chase||p.state===entityState.caught);
       // Use the displayed travel rather than the incoming snapshot gap. A
       // late packet or a teleport must not make the limbs cycle faster.

@@ -1,3 +1,4 @@
+import {readSculpts,sculptStorage} from './sculpt-format.js';
 import * as T from 'three';
 import {createEntityVisuals} from './creature-visuals.js';
 import {creatureLooks,creaturePalette,maxMapEntities,maxPatrolPoints,normalizeEntities} from './entity-format.js';
@@ -7,7 +8,7 @@ export function createEntityEditor({container,scene,getMap,getPoint,remember,sav
   group.visible=false;scene.add(group);
   const previewGroup=new T.Group();scene.add(previewGroup);
   const preview=createEntityVisuals(previewGroup);
-  let previewKey;
+  let previewKey,library=readSculpts(localStorage);
   const markerGeometry=new T.ConeGeometry(.30,.58,5);
   const nodeMaterial=new T.MeshBasicMaterial({color:'#74dadb',depthTest:false});
   const routeMaterial=new T.LineBasicMaterial({color:'#74dadb',depthTest:false});
@@ -48,6 +49,18 @@ export function createEntityEditor({container,scene,getMap,getPoint,remember,sav
     if(!map.entities.length)delete map.entities;
     void save();refresh();render();
   }
+  const source=make('select'),sourceLabel=make('label','Corps sculpté ');
+  const sculptLink=make('a','Ouvrir l’atelier des entités');
+  sculptLink.href='./model-editor.html?sculpt=1';sculptLink.target='_blank';sculptLink.rel='noopener';
+  sourceLabel.append(source);form.append(sourceLabel,sculptLink);
+  source.onchange=()=>{
+    const model=library.find(item=>item.id===source.value);
+    commit(()=>{
+      const d=current();
+      if(model){d.sculpt=model.sculpt;d.sculptId=model.id;d.name=model.name;}
+      else{delete d.sculpt;delete d.sculptId;}
+    });
+  };
   const fields={};
   function input(key,label,type,min,max,step){
     const row=make('label',label+' '),element=make(type==='look'?'select':'input');
@@ -76,7 +89,7 @@ export function createEntityEditor({container,scene,getMap,getPoint,remember,sav
       group.remove(child);
       if(child.isLine)child.geometry.dispose();
     }
-    const style=d&&visible?JSON.stringify([d.id,d.look,d.fur,d.face]):null;
+    const style=d&&visible?JSON.stringify([d.id,d.look,d.fur,d.face,d.sculpt]):null;
     if(style!==previewKey){
       previewKey=style;
       preview.set(style?[d]:[]);
@@ -109,6 +122,12 @@ export function createEntityEditor({container,scene,getMap,getPoint,remember,sav
     waypoint.setAttribute('aria-pressed',String(placement==='route'));
     form.hidden=!d;route.replaceChildren();
     if(d){
+      source.replaceChildren(new Option('Préréglage Gorilla Lab',''),
+        ...library.map(model=>new Option(model.name,model.id)));
+      if(d.sculpt&&!library.some(model=>model.id===d.sculptId))source.add(new Option('Modèle intégré à la carte',d.sculptId??'embedded'));
+      source.value=d.sculpt?(d.sculptId??'embedded'):'';
+      for(const key of ['look','fur','face'])fields[key].parentElement.hidden=Boolean(d.sculpt);
+      resetColors.hidden=Boolean(d.sculpt);
       const palette=creaturePalette(d);
       for(const [key,element] of Object.entries(fields))element.value=palette[key]??d[key];
       for(const [i,p] of d.route.entries()){
@@ -123,6 +142,7 @@ export function createEntityEditor({container,scene,getMap,getPoint,remember,sav
       d?d.route.length+' / '+maxPatrolPoints+' points':'';
     draw(d);
   }
+  window.addEventListener('storage',event=>{if(event.key===sculptStorage){library=readSculpts(localStorage);refresh();}});
   return {refresh,get placing(){return visible&&Boolean(placement)&&Boolean(current());},
     place(point){
       if(!point)return;

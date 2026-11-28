@@ -650,3 +650,58 @@ test('the hand rig retains thickness at the wrist when the controller rolls and 
     assert.ok(vertices.array.every(Number.isFinite));
   }
 });
+
+test('a sculpted body survives map transfer and deforms as one mesh with animation keys',async()=>{
+  const {sculptGeometry,sculptVertices,sculptRig,playSculptClip}=await import('../gorilla-lab/sculpt-rig.js');
+  const {normalizeSculpt,sculptPose}=await import('../gorilla-lab/sculpt-format.js');
+  const {entityExercise}=await import('../gorilla-lab/entity-format.js');
+  const {encodeRoomMapLink,decodeRoomMapLink}=await import('../gorilla-lab/room-map-link.js');
+  for(const base of ['sphere','cube']){
+    const source=sculptGeometry(base);
+    const pose=sculptPose(),end=sculptPose();
+    end[3][0]=85;
+    source.attributes.position.setX(50,.49);
+    const sculpt=normalizeSculpt({base,vertices:sculptVertices(source),clips:[[],[{duration:1,pose},{duration:1,pose:end}]]});
+    source.dispose();
+    const map=entityExercise();
+    map.entities[0].sculpt=sculpt;
+    const received=parseMap(await decodeRoomMapLink(await encodeRoomMapLink(map)));
+    assert.deepEqual(received.entities[0].sculpt,sculpt);
+    const rig=sculptRig(received.entities[0].sculpt);
+    assert.equal(rig.mesh.geometry.index.count%3,0);
+    const weights=rig.mesh.geometry.attributes.skinWeight;
+    assert.ok(weights.array.every(Number.isFinite));
+    const posedVertex=new Vector3(),rest=new Vector3();
+    let index=0;
+    for(let i=1;i<weights.count;i++){
+      if(rig.mesh.geometry.attributes.position.getX(i)<rig.mesh.geometry.attributes.position.getX(index))index=i;
+    }
+    rig.mesh.getVertexPosition(index,rest);
+    playSculptClip(rig,sculpt.clips[1],.5);
+    rig.mesh.updateMatrixWorld(true);
+    rig.mesh.getVertexPosition(index,posedVertex);
+    assert.ok(posedVertex.distanceTo(rest)>.005);
+    rig.dispose();
+  }
+});
+
+test('custom contact can animate harmlessly or capture after the clip starts',async()=>{
+  const {createEntitySimulation,entityState}=await import('../gorilla-lab/creature-runtime.js');
+  const catches=[];
+  const sim=createEntitySimulation(p=>catches.push(p.id));
+  const player={id:2345678,x:0,y:.8,z:-.3},floor=floorBox();
+  const definition={id:1,x:0,y:0,z:0,yaw:0,route:[],speed:1,sight:8};
+  const run=count=>{for(let i=0;i<count;i++)sim.update(.067,[player],[floor]);};
+  const clips=[[],[],[],[{duration:1}]];
+  sim.set([{...definition,sculpt:{clips,contact:'animate'}}]);
+  run(1);
+  assert.equal(sim.poses[0].state,entityState.caught);
+  run(40);
+  assert.deepEqual(catches,[]);
+  sim.set([{...definition,sculpt:{clips,contact:'kill'}}]);
+  run(1);
+  assert.equal(sim.poses[0].state,entityState.caught);
+  assert.deepEqual(catches,[]);
+  run(10);
+  assert.deepEqual(catches,[player.id]);
+});

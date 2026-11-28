@@ -66,7 +66,7 @@ export function createEntitySimulation(onCapture=()=>{}){
   function set(definitions){
     entities.length=0;protectedPlayers.clear();accumulator=time=0;
     for(const p of definitions)entities.push({id:p.id,definition:p,x:p.x,y:p.y,z:p.z,yaw:p.yaw*Math.PI/180,
-      waypoint:0,state:entityState.patrol,holdUntil:0,searchUntil:0,lookAt:0,seen:null,memory:null,caught:0,captureSeq:0});
+      waypoint:0,state:entityState.patrol,holdUntil:0,searchUntil:0,lookAt:0,seen:null,memory:null,caught:0,captureSeq:0,strike:null});
   }
   function targetVisible(e,p,boxes,radius,peripheral){
     const horizontal=distance(e,p);
@@ -95,6 +95,14 @@ export function createEntitySimulation(onCapture=()=>{}){
   }
   function step(e,players,boxes){
     const {definition:d}=e;
+    if(e.strike&&time>=e.strike.time){
+      const player=players.find(candidate=>candidate.id===e.strike.id);
+      e.strike=null;
+      if(player){
+        e.caught=player.id;e.captureSeq=e.captureSeq%999+1;
+        onCapture(player,e);
+      }
+    }
     if(time<e.holdUntil)return;
     if(e.state===entityState.caught){e.state=entityState.patrol;e.memory=null;e.seen=null;}
     if(time>=e.lookAt){
@@ -114,11 +122,16 @@ export function createEntitySimulation(onCapture=()=>{}){
       e.state=entityState.chase;
       e.memory={x:seen.x,y:seen.y,z:seen.z};
       if(distance(e,seen)<.52&&(protectedPlayers.get(seen.id)??0)<=time&&targetVisible(e,seen,boxes,.55,false)){
-        e.caught=seen.id;e.captureSeq=e.captureSeq%999+1;
+        const kills=d.sculpt?.contact!=='animate';
         e.state=entityState.caught;
-        e.holdUntil=time+1.25;
-        protectedPlayers.set(seen.id,time+3);
-        onCapture(seen,e);
+        const duration=d.sculpt?.clips[3].reduce((sum,frame)=>sum+frame.duration,0)||1.25;
+        e.holdUntil=time+duration;
+        protectedPlayers.set(seen.id,time+duration+1.75);
+        if(kills&&d.sculpt?.clips[3].length)e.strike={id:seen.id,time:time+Math.min(1,duration*.55)};
+        else if(kills){
+          e.caught=seen.id;e.captureSeq=e.captureSeq%999+1;
+          onCapture(seen,e);
+        }
         return;
       }
       move(e,seen,boxes,d.speed*1.65);
