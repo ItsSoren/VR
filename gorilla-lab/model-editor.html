@@ -37,20 +37,23 @@ color:#fff6e8;min-height:36px;font-weight:800;padding:6px 13px;white-space:nowra
 .top-select #example,.top-select #duplicate-model{flex-shrink:0;min-height:30px}
 .top-actions{display:flex;align-items:center;gap:5px;margin-left:auto}
 .top-actions button{flex-shrink:0}
-.entity-sculptor{width:min(1200px,96vw);height:90vh;max-height:90vh;padding:14px;
-  background:#19232d;color:var(--ink);border:1px solid #64778a;border-radius:10px}
-.entity-sculptor[open]{display:flex;flex-direction:column;gap:8px}
-.entity-sculptor::backdrop{background:#0b111abf}
-.entity-sculptor-toolbar{display:flex;gap:8px;flex-wrap:wrap}
-.entity-sculptor-toolbar input,.entity-sculptor-toolbar select{width:min(180px,42%)}
-.entity-sculptor-layout{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,3fr) minmax(190px,1fr);gap:12px}
-.entity-sculptor section{overflow:auto;padding-right:6px}
-.entity-sculptor section label,.entity-sculptor fieldset{margin:6px 0}
-.entity-sculptor section label:has(input[type=checkbox]){display:flex;align-items:center}
-.entity-sculptor output{display:block;margin-top:6px;color:var(--accent)}
-@media(max-width:650px){
-  .entity-sculptor-layout{grid-template-columns:1fr;grid-template-rows:minmax(150px,1fr) minmax(0,1fr)}
-}
+.sculpt-toolbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.sculpt-toolbar input,.sculpt-toolbar select{width:min(160px,42vw)}
+.sculpt-inspector{display:block;padding:12px;background:var(--panel);border:1px solid var(--line);border-radius:5px;overflow:auto}
+.sculpt-inspector label,.sculpt-inspector fieldset{margin:8px 0}
+.sculpt-inspector label:has(input[type=checkbox]){display:flex;align-items:center;gap:7px}
+.sculpt-inspector output{display:block;margin-top:8px;color:var(--accent)}
+.sculpt-inspector h2{font-size:13px;margin:4px 0 10px}
+.sculpt-rail .rail-btn{min-height:45px}
+.sculpt-rail .rail-btn span:first-child{font-size:16px;color:var(--ink)}
+.sculpt-views{display:flex;gap:5px}
+.sculpt-views button{min-height:24px;padding:3px 7px}
+@media(max-width:550px){.sculpt-views button{padding-inline:4px;font-size:10px}}
+body[data-workspace=sculpt] :is(.top-select,.top-actions>:not(#entity-sculptor,.sculpt-toolbar),
+  .layout>.tool-rail:not(.sculpt-rail),.layout>.side:not(.sculpt-inspector),
+  #quick-send-to-map,.viewport-controls,#preview-empty,#preview-tag,#negative-scale-option){display:none!important}
+body[data-workspace=sculpt] .top-actions{flex-wrap:wrap;margin-left:0}
+@media(min-width:1531px){body[data-workspace=sculpt] .top-actions{margin-left:auto}}
 .top-actions .strong{background:#bb8248;border-color:#efae69;color:#fff4e7;font-weight:750}
 .top-actions .strong:hover{background:#ce9354}
 .top-actions .quiet{color:#b7c7cc}

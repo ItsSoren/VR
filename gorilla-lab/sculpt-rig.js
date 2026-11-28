@@ -2,7 +2,15 @@ import * as T from 'three';
 import {mergeVertices} from 'three/addons/utils/BufferGeometryUtils.js';
 import {sculptJoints} from './sculpt-format.js';
 
-export function sculptGeometry(base,vertices){
+export function sculptGeometry(base,vertices,indices){
+  if(indices){
+    const geometry=new T.BufferGeometry();
+    geometry.setAttribute('position',new T.Float32BufferAttribute(vertices.map(n=>n/1000),3));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    geometry.computeBoundingSphere();
+    return geometry;
+  }
   const source=base==='cube'?new T.BoxGeometry(.9,1.25,.67,18,18,18):new T.IcosahedronGeometry(1,15);
   source.deleteAttribute('normal');
   source.deleteAttribute('uv');
@@ -19,7 +27,7 @@ export function sculptVertices(geometry){
   return Array.from(geometry.attributes.position.array,n=>Math.round(n*1000));
 }
 export function sculptRig(data){
-  const geometry=sculptGeometry(data.base,data.vertices);
+  const geometry=sculptGeometry(data.base,data.vertices,data.indices);
   const material=new T.MeshStandardMaterial({color:data.color,roughness:.86,side:T.DoubleSide});
   const mesh=new T.SkinnedMesh(geometry,material);
   mesh.frustumCulled=false;

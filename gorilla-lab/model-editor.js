@@ -42,7 +42,7 @@ try{
   }
 }catch{}
 let renderer=null,orbit=null,gizmo=null,viewMode='select',hitboxEditing=false;
-let transformMoved=false;
+let transformMoved=false,sculptWorkspace=null;
 let pendingDraft=0,gestureStart=null,fieldHistory=null;
 const undoStack=[],redoStack=[],maxUndo=48;
 const previews=new T.Group();
@@ -614,6 +614,7 @@ function previewEffectFrame(now){
 $('hinge-mode').onchange=saveHingeChange;
 $('hinge-direction').onchange=saveHingeChange;
 function render(){
+  if(sculptWorkspace){sculptWorkspace.requestRender();return;}
   const model=currentModel(),parts=model?.parts??[];
   const animate=$('model-inspector').dataset.tab==='animation'&&model?.kind==='structure';
   for(let index=0;index<previews.children.length;index++){
@@ -1012,12 +1013,13 @@ function pick(event){
   return hit?previews.children.indexOf(hit.object):-1;
 }
 canvas.addEventListener('pointerdown',event=>{
+  if(sculptWorkspace)return;
   if(event.button===0)pickStart=viewMode!=='select'&&gizmo?.axis?null:{id:event.pointerId,x:event.clientX,y:event.clientY};
   if(event.button===2)rightStart={x:event.clientX,y:event.clientY};
 });
 canvas.addEventListener('pointercancel',()=>{pickStart=null;rightStart=null;});
 canvas.addEventListener('pointerup',event=>{
-  if(gizmo?.dragging)return;
+  if(sculptWorkspace||gizmo?.dragging)return;
   const from=pickStart;pickStart=null;
   if(event.button!==0||from?.id!==event.pointerId
       ||Math.hypot(event.clientX-from.x,event.clientY-from.y)>5)return;
@@ -1040,7 +1042,7 @@ const menu=$('part-context');
 function closeMenu(){menu.hidden=true;}
 canvas.addEventListener('contextmenu',event=>{
   event.preventDefault();
-  if(!rightStart||Math.hypot(event.clientX-rightStart.x,event.clientY-rightStart.y)>6)return;
+  if(sculptWorkspace||!rightStart||Math.hypot(event.clientX-rightStart.x,event.clientY-rightStart.y)>6)return;
   const index=pick(event);
   if(index<0)return closeMenu();
   if(!selectedIndices().includes(index))selectPart(index);
@@ -1292,8 +1294,19 @@ $('save').onclick=$('publish-save').onclick=saveNow;
 $('undo-action').onclick=undo;
 $('redo-action').onclick=redo;
 $('entity-sculptor').onclick=()=>{
-  try{openEntitySculptor();}
-  catch(error){status(error.message,true);}
+  if(sculptWorkspace){sculptWorkspace.close();return;}
+  if(!renderer){status('WebGL indisponible pour la sculpture.',true);return;}
+  if(gizmo?.dragging)return;
+  closeMenu();pickStart=rightStart=null;
+  orbit.enabled=false;gizmo.enabled=false;
+  try{
+    sculptWorkspace=openEntitySculptor({canvas,renderer,onClose(){
+      sculptWorkspace=null;orbit.enabled=true;gizmo.enabled=true;
+      $('entity-sculptor').textContent='Atelier des entités';
+      refreshModel();
+    }});
+    $('entity-sculptor').textContent='Retour aux modèles';
+  }catch(error){orbit.enabled=true;gizmo.enabled=true;status(error.message,true);}
 };
 $('export').onclick=doExport;
 $('import').onclick=()=>$('file').click();
@@ -1715,7 +1728,7 @@ for(const button of menu.querySelectorAll('button')){
   };
 }
 window.addEventListener('keydown',event=>{
-  if(document.querySelector('.entity-sculptor[open]'))return;
+  if(sculptWorkspace)return;
   const editing=event.target.closest?.('input,select,textarea,[contenteditable]');
   if(event.key==='Escape'){closeMenu();if(!editing&&!gizmo?.dragging)setTool('select');return;}
   if(gizmo?.dragging)return;

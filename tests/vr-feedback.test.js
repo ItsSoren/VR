@@ -705,3 +705,63 @@ test('custom contact can animate harmlessly or capture after the clip starts',as
   run(10);
   assert.deepEqual(catches,[player.id]);
 });
+
+test('a refined cube supports a thin brush and a continuous pull that bends into an elbow',async()=>{
+  const {Mesh,MeshBasicMaterial,Raycaster,DoubleSide}=await import('three');
+  const {sculptGeometry,sculptVertices,sculptRig}=await import('../gorilla-lab/sculpt-rig.js');
+  const {sculptNeighbors,refineSculpt,sculptInfluence,shapeSculpt}=await import('../gorilla-lab/sculpt-brush.js');
+  const {normalizeSculpt}=await import('../gorilla-lab/sculpt-format.js');
+  const geometry=sculptGeometry('cube'),before=geometry.attributes.position.count;
+  const material=new MeshBasicMaterial({side:DoubleSide}),mesh=new Mesh(geometry,material);
+  const ray=new Raycaster(new Vector3(.29,.83,-3),new Vector3(0,0,1));
+  let hit=ray.intersectObject(mesh)[0];
+  const thinRadius=.012;
+  const refine=(point,radius)=>{
+    for(let i=0;i<4;i++)if(!refineSculpt(geometry,[point],radius*1.16,radius*.56))break;
+    return sculptNeighbors(geometry);
+  };
+  let neighbors=refine(hit.point,thinRadius);
+  hit=ray.intersectObject(mesh)[0];
+  let pos=geometry.attributes.position.array;
+  let weights=sculptInfluence(pos,neighbors,hit.point,thinRadius,[hit.face.a,hit.face.b,hit.face.c]);
+  assert.ok(weights.length>0);
+  const cut=weights.reduce((a,b)=>a[1]>b[1]?a:b)[0];
+  const depth=pos[cut*3+2];
+  shapeSculpt(pos,pos.slice(),geometry.attributes.normal.array,neighbors,weights,hit.point,'carve',new Vector3(),-.04);
+  assert.ok(pos[cut*3+2]>depth+.005);
+  geometry.computeVertexNormals();
+
+  ray.set(new Vector3(3,1,.06),new Vector3(-1,0,0));
+  hit=ray.intersectObject(mesh)[0];
+  const radius=.14;
+  neighbors=refine(hit.point,radius);pos=geometry.attributes.position.array;
+  weights=sculptInfluence(pos,neighbors,hit.point,radius);
+  const anchor=weights.reduce((a,b)=>a[1]>b[1]?a:b)[0],tip=new Vector3();
+  for(const delta of [new Vector3(.033,0,0),new Vector3(0,-.033,0)]){
+    for(let i=0;i<12;i++){
+      tip.fromArray(pos,anchor*3);
+      if(i%4===0){neighbors=refine(tip,radius);pos=geometry.attributes.position.array;}
+      weights=sculptInfluence(pos,neighbors,tip,radius);
+      shapeSculpt(pos,pos.slice(),geometry.attributes.normal.array,neighbors,weights,tip,'hook',delta,1);
+    }
+  }
+  tip.fromArray(pos,anchor*3);
+  assert.ok(tip.x>.79&&tip.y<.7);
+  assert.ok(geometry.attributes.position.count>before);
+  const indices=Array.from(geometry.index.array),edges=new Map();
+  for(let i=0;i<indices.length;i+=3){
+    for(let j=0;j<3;j++){
+      const a=indices[i+j],b=indices[i+(j+1)%3];
+      const key=Math.min(a,b)+':'+Math.max(a,b);
+      edges.set(key,(edges.get(key)??0)+1);
+    }
+  }
+  assert.ok([...edges.values()].every(count=>count===2));
+  const sculpt=normalizeSculpt({base:'cube',indices,vertices:sculptVertices(geometry)});
+  assert.ok(sculpt);
+  assert.equal(normalizeSculpt({...sculpt,indices:[...indices.slice(0,-1),100000]}),null);
+  const rig=sculptRig(sculpt);
+  assert.deepEqual(Array.from(rig.mesh.geometry.index.array),indices);
+  assert.ok(rig.mesh.geometry.attributes.skinWeight.array.every(Number.isFinite));
+  rig.dispose();geometry.dispose();material.dispose();
+});
