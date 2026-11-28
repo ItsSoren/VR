@@ -1,4 +1,5 @@
-import {createEntitySimulation,createEntityVisuals} from './creature-runtime.js';
+import {createEntitySimulation} from './creature-runtime.js';
+import {createEntityVisuals} from './creature-visuals.js';
 import {entityExercise} from './entity-format.js';
 import {createPhoneUI} from './phone-ui.js';
 import {createHeldItems,itemScale,itemShape} from './held-items.js';
@@ -2216,7 +2217,6 @@ renderer.setAnimationLoop((time,frame)=>{
   }
   spectator.update({inVR,time,dt:inputDt,position:worldHead,yaw:spectating?yaw:bodyYaw,pitch,camera,rig,keys,actions,flat,avatar:captureNetworkAvatar,
     bodies:settings.objects?objects:noBodies,entities:authority&&activeEntityDefinitions?.length?creatureSimulation.poses:null});
-  if(activeEntityDefinitions?.length)entityVisuals.draw(authority?creatureSimulation.poses:spectator.entityPoses(),inputDt);
   if(spectator.guestActive){
     if(inVR)for(const hand of hands)if(hand.valid)predictRemoteGrip(hand,hand.mesh.position,hand.mesh.quaternion);
     if(desktopActor.remoteHeld){
@@ -2258,6 +2258,7 @@ renderer.setAnimationLoop((time,frame)=>{
     }
   }
   heldItems.update(inputDt,arena.boxes,beamObjectBoxes);
+  if(activeEntityDefinitions?.length)entityVisuals.draw(authority?creatureSimulation.poses:spectator.entityPoses(),inputDt,arena.boxes,beamObjectBoxes);
   actions.clear();
   const debugStart=performance.now();
   debugView.update({settings,boxes:activeBoxes,bodies:remoteWorld?(settings.debugHitboxes?replicaBlockers():noBodies):objects,hands,locomotion,velocity,

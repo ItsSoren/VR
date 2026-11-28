@@ -64,6 +64,35 @@ test('six online players share compact authoritative entities and measure relay 
 });
 import {standingEyeHeight, avatarWidth, vrTorsoStretch} from '../gorilla-lab/player-pose.js';
 
+test('creature gaze follows the head and stops at a thin wall without extra scene lights',async()=>{
+  const {Scene}=await import('three');
+  const {createEntityVisuals}=await import('../gorilla-lab/creature-visuals.js');
+  const scene=new Scene(),visual=createEntityVisuals(scene);
+  const pose={id:1,x:0,y:0,z:0,yaw:0,state:0};
+  const half=new Vector3(.9,.9,.004);
+  const wall={position:new Vector3(0,1.1,-1.3),quaternion:new Quaternion(),half,
+    min:half.clone().negate(),shape:boxCollider(half)};
+  visual.set([{id:1,look:'sentinelle'}]);
+  visual.draw([pose],.05,[wall]);
+  const beams=[],glows=[];
+  scene.traverse(node=>{
+    assert.ok(!node.isLight);
+    if(node.name==='Faisceau du regard')beams.push(node);
+    if(node.name==='Halo du regard')glows.push(node);
+  });
+  assert.equal(beams.length,2);
+  assert.ok(beams.every(beam=>beam.scale.y>.25&&beam.scale.y<.4));
+  assert.ok(glows.every(glow=>glow.visible));
+  pose.yaw=Math.PI;
+  visual.draw([pose],.35,[wall]);
+  assert.ok(beams.every(beam=>beam.scale.y===1));
+  assert.ok(glows.every(glow=>!glow.visible));
+  const source=beams[0].getWorldPosition(new Vector3());
+  assert.ok(beams[0].localToWorld(new Vector3(0,1,0)).z>source.z+.99);
+  visual.draw([],1,[wall]);
+  assert.equal(scene.children.length,0);
+});
+
 test('entity exercise survives map export with a bounded route and stable ids',async()=>{
   const {entityExercise,normalizeEntities}=await import('../gorilla-lab/entity-format.js');
   const exercise=parseMap(JSON.stringify(entityExercise()));
